@@ -244,6 +244,16 @@ impl Execute for JobResumeArgs {
     }
 }
 
+/// The child Runs this run dispatched, as persisted by the dispatch
+/// checkpoint [ORB-10971]. Always an array so a reader never has to
+/// distinguish "no children" from "field absent".
+pub(crate) fn child_dispatches_json(state: Option<&PipelineState>) -> Value {
+    let dispatches = state
+        .map(|state| state.child_dispatches.as_slice())
+        .unwrap_or_default();
+    serde_json::to_value(dispatches).unwrap_or_else(|_| Value::Array(Vec::new()))
+}
+
 // Retained after the dashboard callers moved to orbit-web; the thin
 // wrapper is kept for any external re-exports or future CLI json paths.
 #[allow(dead_code)]
@@ -253,6 +263,11 @@ pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
 
 pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineState>) -> Value {
     let last = run.steps.last();
+    // [ORB-10971] Child lineage is read from the full state, before the
+    // terminal filter below: a cancelled or failed parent must still name the
+    // children it dispatched. Waiting reasons keep the old filter — they are
+    // momentary and mean nothing once the run stopped.
+    let child_dispatches = child_dispatches_json(state);
     let state = (!run.state.is_terminal()).then_some(state).flatten();
     let waiting_on_deps = state
         .and_then(|state| state.waiting_on_deps.as_ref())
@@ -261,6 +276,7 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         .and_then(|state| state.waiting_on_locks.as_ref())
         .filter(|values| !values.is_empty());
     json!({
+        "child_dispatches": child_dispatches,
         "run_id": run.run_id,
         "job_id": run.job_id,
         "attempt": run.attempt,

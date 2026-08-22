@@ -1,3 +1,4 @@
+use orbit_common::OrbitError;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_common::protocol::tool_input::optional_string_list_alias;
 use orbit_engine::DispatchError;
@@ -6,8 +7,10 @@ use orbit_tools::ToolContext;
 use orbit_types::policy::Role;
 use orbit_types::task::TaskStatus;
 use orbit_types::telemetry::AuditEventStatus;
+use orbit_types::workflow::ChildDispatchPhase;
 use serde_json::Value;
 
+use super::child_dispatch;
 use crate::OrbitRuntime;
 use crate::runtime::task::locks::parse_task_ids;
 
@@ -81,91 +84,253 @@ pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, Dis
     }))
 }
 
+/// Submit a child v2 Job, link it durably, then block on its terminal state.
+///
+/// [ORB-10971] Submission and waiting are two observable phases of one
+/// activity. The child's exact run id — the one `orbit.pipeline.invoke`
+/// returned, never one inferred from task status or timestamps — is persisted
+/// into the parent's run state and the audit log *before* the wait begins, so
+/// the dispatch boundary is fail-observable: either a durable child exists and
+/// every reader can name it, or the step fails promptly carrying the concrete
+/// invocation error instead of idling to the wait timeout.
+///
+/// [ORB-10819]'s blocking leaf contract is unchanged past that checkpoint: the
+/// activity still returns the child's terminal wait entry, so a following
+/// `pipeline_success_guard` sees exactly what it saw before.
 pub(super) fn invoke_and_wait(
     runtime: &OrbitRuntime,
     action: &str,
     input: &Value,
     tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
+    let wait_context = tool_context.clone();
+    invoke_and_wait_with(
+        runtime,
+        action,
+        input,
+        |args| {
+            runtime.run_tool_with_context_and_role(
+                "orbit.pipeline.invoke",
+                args,
+                Role::Admin,
+                tool_context,
+            )
+        },
+        |args| {
+            runtime.run_tool_with_context_and_role(
+                "orbit.pipeline.wait",
+                args,
+                Role::Admin,
+                wait_context,
+            )
+        },
+    )
+}
+
+/// Internal seam over the two pipeline tools so tests can drive the phase
+/// ordering — checkpoint before wait, prompt failure without one — without
+/// spawning real detached workers.
+pub(super) fn invoke_and_wait_with<Invoke, Wait>(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+    invoke: Invoke,
+    wait: Wait,
+) -> Result<Value, DispatchError>
+where
+    Invoke: FnOnce(Value) -> Result<Value, OrbitError>,
+    Wait: FnOnce(Value) -> Result<Value, OrbitError>,
+{
     if let Some(noop) = stale_gate_admission_noop(runtime, action, input)? {
         return Ok(noop);
     }
 
-    let job_name = input
-        .get("job_name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: "missing `job_name`".to_string(),
-        })?
-        .to_string();
-    let run_input = input
-        .get("run_input")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Default::default()));
-    let mut invoke_args = serde_json::Map::new();
-    invoke_args.insert("job_name".to_string(), Value::String(job_name));
-    invoke_args.insert("input".to_string(), run_input);
-    if let Some(priority) = input.get("priority").cloned() {
-        invoke_args.insert("priority".to_string(), priority);
-    }
+    let job_name = required_job_name(action, input)?;
+    let parent_run_id = child_dispatch::parent_run_id(input);
+    let parent_step_id = child_dispatch::parent_step_id(input);
 
-    let invoke_output = runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.invoke",
-            Value::Object(invoke_args),
-            Role::Admin,
-            tool_context.clone(),
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.invoke failed: {err}"),
-        })?;
-    let run_id = invoke_output
-        .get("run_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: "pipeline.invoke returned no run_id".to_string(),
-        })?
-        .to_string();
+    // Phase 1 — submit. A failure here never produced a durable child, so it
+    // must terminalize the step now with the concrete reason attached.
+    let invoke_output = invoke(invoke_args(&job_name, input)).map_err(|error| {
+        let message = format!("pipeline.invoke failed: {error}");
+        child_dispatch::record_dispatch_failure(
+            runtime,
+            action,
+            parent_run_id.as_deref(),
+            parent_step_id.as_deref(),
+            &job_name,
+            &message,
+        );
+        action_failed(action, message)
+    })?;
 
-    let mut wait_args = serde_json::Map::new();
-    wait_args.insert(
-        "run_ids".to_string(),
-        Value::Array(vec![Value::String(run_id.clone())]),
+    // Phase 2 — link, durably, before blocking on anything.
+    let dispatch = child_dispatch::dispatch_from_invoke_output(
+        action,
+        &job_name,
+        true,
+        parent_step_id.clone(),
+        &invoke_output,
+    )
+    .inspect_err(|error| {
+        child_dispatch::record_dispatch_failure(
+            runtime,
+            action,
+            parent_run_id.as_deref(),
+            parent_step_id.as_deref(),
+            &job_name,
+            &error.to_string(),
+        );
+    })?;
+    child_dispatch::checkpoint_submitted_child(
+        runtime,
+        action,
+        parent_run_id.as_deref(),
+        &dispatch,
+    )?;
+
+    // Phase 3 — wait. The child is now nameable by every reader for as long
+    // as this blocks.
+    let child_run_id = dispatch.child_run_id.clone();
+    child_dispatch::advance_child_phase(
+        runtime,
+        parent_run_id.as_deref(),
+        &child_run_id,
+        ChildDispatchPhase::Waiting,
+        None,
+        None,
     );
-    if let Some(timeout) = input.get("timeout_seconds").cloned() {
-        wait_args.insert("timeout_seconds".to_string(), timeout);
-    }
-    if let Some(poll) = input.get("poll_interval_seconds").cloned() {
-        wait_args.insert("poll_interval_seconds".to_string(), poll);
-    }
+    let wait_result = wait(wait_args(&child_run_id, input));
 
-    let wait_output = runtime
-        .run_tool_with_context_and_role(
-            "orbit.pipeline.wait",
-            Value::Object(wait_args),
-            Role::Admin,
-            tool_context,
-        )
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("pipeline.wait failed: {err}"),
-        })?;
+    // Phase 4 — close the record whichever way the wait went.
+    close_child_wait(
+        runtime,
+        action,
+        parent_run_id.as_deref(),
+        &child_run_id,
+        wait_result,
+    )
+}
 
-    let first = wait_output
+/// Terminalize the dispatch record from the wait's outcome and hand the child's
+/// wait entry back to the caller.
+///
+/// A wait that errored outright is not a failed child: the parent simply stopped
+/// being able to observe one it did durably submit. That is recorded as
+/// `unobserved` rather than as a child status the parent never saw, so a reader
+/// is never told the child failed on this evidence.
+fn close_child_wait(
+    runtime: &OrbitRuntime,
+    action: &str,
+    parent_run_id: Option<&str>,
+    child_run_id: &str,
+    wait_result: Result<Value, OrbitError>,
+) -> Result<Value, DispatchError> {
+    let wait_output = match wait_result {
+        Ok(output) => output,
+        Err(error) => {
+            let message = format!("pipeline.wait failed: {error}");
+            child_dispatch::advance_child_phase(
+                runtime,
+                parent_run_id,
+                child_run_id,
+                ChildDispatchPhase::Terminal,
+                None,
+                Some(message.clone()),
+            );
+            child_dispatch::record_child_wait_outcome(
+                runtime,
+                action,
+                parent_run_id,
+                child_run_id,
+                "unobserved",
+                Some(&message),
+            )?;
+            return Err(action_failed(action, message));
+        }
+    };
+
+    let entry = wait_output
         .get("results")
         .and_then(Value::as_array)
         .and_then(|arr| arr.first())
         .cloned()
         .unwrap_or_else(|| {
             serde_json::json!({
-                "run_id": run_id,
+                "run_id": child_run_id,
                 "status": "pending",
             })
         });
-    Ok(first)
+    let status = entry
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let error_message = entry
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned);
+
+    child_dispatch::advance_child_phase(
+        runtime,
+        parent_run_id,
+        child_run_id,
+        ChildDispatchPhase::Terminal,
+        Some(status.clone()),
+        error_message.clone(),
+    );
+    child_dispatch::record_child_wait_outcome(
+        runtime,
+        action,
+        parent_run_id,
+        child_run_id,
+        &status,
+        error_message.as_deref(),
+    )?;
+
+    Ok(entry)
+}
+
+fn required_job_name(action: &str, input: &Value) -> Result<String, DispatchError> {
+    input
+        .get("job_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| action_failed(action, "missing `job_name`".to_string()))
+        .map(ToOwned::to_owned)
+}
+
+fn invoke_args(job_name: &str, input: &Value) -> Value {
+    let mut args = serde_json::Map::new();
+    args.insert("job_name".to_string(), Value::String(job_name.to_string()));
+    args.insert(
+        "input".to_string(),
+        input
+            .get("run_input")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default())),
+    );
+    if let Some(priority) = input.get("priority").cloned() {
+        args.insert("priority".to_string(), priority);
+    }
+    Value::Object(args)
+}
+
+fn wait_args(child_run_id: &str, input: &Value) -> Value {
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "run_ids".to_string(),
+        Value::Array(vec![Value::String(child_run_id.to_string())]),
+    );
+    if let Some(timeout) = input.get("timeout_seconds").cloned() {
+        args.insert("timeout_seconds".to_string(), timeout);
+    }
+    if let Some(poll) = input.get("poll_interval_seconds").cloned() {
+        args.insert("poll_interval_seconds".to_string(), poll);
+    }
+    Value::Object(args)
 }
 
 /// Submit a child v2 Job and return as soon as its Run is durable [ORB-10819].
@@ -185,46 +350,52 @@ pub(super) fn invoke_detached(
     input: &Value,
     tool_context: ToolContext,
 ) -> Result<Value, DispatchError> {
-    let job_name = input
-        .get("job_name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| action_failed(action, "missing `job_name`".to_string()))?
-        .to_string();
-    let run_input = input
-        .get("run_input")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Default::default()));
-
-    let mut invoke_args = serde_json::Map::new();
-    invoke_args.insert("job_name".to_string(), Value::String(job_name.clone()));
-    invoke_args.insert("input".to_string(), run_input);
-    if let Some(priority) = input.get("priority").cloned() {
-        invoke_args.insert("priority".to_string(), priority);
-    }
+    let job_name = required_job_name(action, input)?;
+    let parent_run_id = child_dispatch::parent_run_id(input);
+    let parent_step_id = child_dispatch::parent_step_id(input);
 
     let invoke_output = runtime
         .run_tool_with_context_and_role(
             "orbit.pipeline.invoke",
-            Value::Object(invoke_args),
+            invoke_args(&job_name, input),
             Role::Admin,
             tool_context,
         )
-        .map_err(|err| action_failed(action, format!("pipeline.invoke failed: {err}")))?;
-    let run_id = invoke_output
-        .get("run_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| action_failed(action, "pipeline.invoke returned no run_id".to_string()))?
-        .to_string();
+        .map_err(|err| {
+            let message = format!("pipeline.invoke failed: {err}");
+            child_dispatch::record_dispatch_failure(
+                runtime,
+                action,
+                parent_run_id.as_deref(),
+                parent_step_id.as_deref(),
+                &job_name,
+                &message,
+            );
+            action_failed(action, message)
+        })?;
+
+    // [ORB-10971] A detached child is linked on the same durable checkpoint as
+    // a blocked-on one. The caller re-observes it later, so the linkage is the
+    // only handle anyone has on it in the meantime — and it is what tells
+    // cancellation to leave this child alone.
+    let dispatch = child_dispatch::dispatch_from_invoke_output(
+        action,
+        &job_name,
+        false,
+        parent_step_id,
+        &invoke_output,
+    )?;
+    child_dispatch::checkpoint_submitted_child(
+        runtime,
+        action,
+        parent_run_id.as_deref(),
+        &dispatch,
+    )?;
 
     Ok(serde_json::json!({
-        "run_id": run_id,
-        "job_name": job_name,
-        "queued": invoke_output
-            .get("queued")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        "run_id": dispatch.child_run_id,
+        "job_name": dispatch.job_name,
+        "queued": dispatch.queued,
         "submitted_at": invoke_output.get("submitted_at").cloned(),
     }))
 }

@@ -333,3 +333,89 @@ fn operator_can_observe_runs_and_agent_denial_is_audited() {
             && event.target_id.as_deref() == Some("orbit.workflow.run.show")
     }));
 }
+
+/// [ORB-10971] CLI, MCP, dashboard API, and audit must agree on lineage. This
+/// covers the MCP half: `run.show` and `run.list` project the same durable
+/// dispatch checkpoint the other readers do, for a parent that is still
+/// blocked on its child.
+#[test]
+fn mcp_run_observation_names_the_child_a_blocked_parent_dispatched() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let parent = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("workspace_auto_pipeline", 1, Utc::now(), None, None)
+        .expect("insert parent run");
+
+    let mut state = orbit_types::workflow::PipelineState::new(
+        parent.run_id.clone(),
+        "workspace_auto_pipeline".to_string(),
+        json!({}),
+    );
+    state.record_child_dispatch(
+        orbit_types::workflow::ChildDispatch::submitted(
+            "jrun-child-leaves".to_string(),
+            "task_auto_pipeline".to_string(),
+            "invoke_and_wait".to_string(),
+            true,
+            false,
+            Utc::now(),
+        )
+        .with_parent_step_id(Some("ship_leaves".to_string())),
+    );
+    state.advance_child_dispatch(
+        "jrun-child-leaves",
+        orbit_types::workflow::ChildDispatchPhase::Waiting,
+        None,
+        None,
+    );
+    runtime
+        .write_run_state(&parent.run_id, &state)
+        .expect("seed parent dispatch state");
+
+    let shown = run_tool_as_operator(
+        &runtime,
+        "orbit.workflow.run.show",
+        json!({"id": parent.run_id}),
+    )
+    .expect("operator run show");
+    assert_eq!(
+        shown["child_dispatches"][0]["child_run_id"],
+        json!("jrun-child-leaves")
+    );
+    assert_eq!(
+        shown["child_dispatches"][0]["job_name"],
+        json!("task_auto_pipeline")
+    );
+    assert_eq!(
+        shown["child_dispatches"][0]["parent_step_id"],
+        json!("ship_leaves")
+    );
+    assert_eq!(shown["child_dispatches"][0]["phase"], json!("waiting"));
+
+    let listed = run_tool_as_operator(&runtime, "orbit.workflow.run.list", json!({}))
+        .expect("operator run list");
+    assert_eq!(
+        listed["items"][0]["child_dispatches"][0]["child_run_id"],
+        json!("jrun-child-leaves")
+    );
+}
+
+#[test]
+fn mcp_run_observation_carries_an_empty_lineage_for_a_run_without_children() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run("task_auto_pipeline", 1, Utc::now(), None, None)
+        .expect("insert run");
+
+    let shown = run_tool_as_operator(
+        &runtime,
+        "orbit.workflow.run.show",
+        json!({"id": run.run_id}),
+    )
+    .expect("operator run show");
+
+    assert_eq!(shown["child_dispatches"], json!([]));
+}

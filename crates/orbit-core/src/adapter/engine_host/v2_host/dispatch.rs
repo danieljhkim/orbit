@@ -520,14 +520,12 @@ fn update_run_waiting_reasons(
         return Ok(());
     };
     state.set_waiting_reasons(waiting_on_deps, waiting_on_locks);
-    runtime
-        .stores()
-        .jobs()
-        .write_run_state(run_id, &state)
-        .map_err(|err| DispatchError::DeterministicActionFailed {
+    runtime.write_run_state(run_id, &state).map_err(|err| {
+        DispatchError::DeterministicActionFailed {
             action: action.to_string(),
             message: format!("{err}"),
-        })
+        }
+    })
 }
 
 fn non_empty(values: Vec<String>) -> Option<Vec<String>> {

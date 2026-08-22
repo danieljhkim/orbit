@@ -145,6 +145,16 @@ pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
 
 pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineState>) -> Value {
     let last = run.steps.last();
+    // [ORB-10971] Read child lineage from the full state, before the terminal
+    // filter below: a cancelled or failed parent must still name the children
+    // it dispatched. Waiting reasons keep the filter — they are momentary and
+    // mean nothing once the run stopped.
+    let child_dispatches = serde_json::to_value(
+        state
+            .map(|state| state.child_dispatches.as_slice())
+            .unwrap_or_default(),
+    )
+    .unwrap_or_else(|_| Value::Array(Vec::new()));
     let state = (!run.state.is_terminal()).then_some(state).flatten();
     let waiting_on_deps = state
         .and_then(|state| state.waiting_on_deps.as_ref())
@@ -153,6 +163,7 @@ pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineSt
         .and_then(|state| state.waiting_on_locks.as_ref())
         .filter(|values| !values.is_empty());
     json!({
+        "child_dispatches": child_dispatches,
         "run_id": run.run_id,
         "job_id": run.job_id,
         "attempt": run.attempt,

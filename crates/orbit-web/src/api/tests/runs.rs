@@ -785,3 +785,125 @@ async fn ship_endpoint_rejects_duplicate_task_ids() {
             .is_some_and(|message| message.contains("duplicate task id"))
     );
 }
+
+// ─── child-dispatch lineage in run detail [ORB-10971] ─────────────────────
+
+use orbit_types::workflow::{ChildDispatch, ChildDispatchPhase, PipelineState};
+
+/// A parent run whose `ship_leaves` step is blocked on a durably linked child.
+fn seed_parent_blocked_on_child(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    run_state: JobRunState,
+    phase: ChildDispatchPhase,
+) {
+    let run = seed_run(runtime, run_id, "workspace_auto_pipeline", run_state);
+    write_seeded_run(runtime, &run);
+    let mut state = PipelineState::new(
+        run_id.to_string(),
+        "workspace_auto_pipeline".to_string(),
+        json!({}),
+    );
+    state.record_child_dispatch(
+        ChildDispatch::submitted(
+            "jrun-child-leaves".to_string(),
+            "task_auto_pipeline".to_string(),
+            "invoke_and_wait".to_string(),
+            true,
+            false,
+            Utc::now(),
+        )
+        .with_parent_step_id(Some("ship_leaves".to_string())),
+    );
+    state.advance_child_dispatch("jrun-child-leaves", phase, None, None);
+    runtime
+        .write_run_state(run_id, &state)
+        .expect("seed parent run state");
+}
+
+#[test]
+fn run_detail_names_the_child_a_running_parent_is_blocked_on() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-web-child-waiting";
+    seed_parent_blocked_on_child(
+        &runtime,
+        run_id,
+        JobRunState::Running,
+        ChildDispatchPhase::Waiting,
+    );
+    let run = runtime.show_job_run(run_id).expect("show run");
+
+    let detail = job_run_detail_to_json(&runtime, &run);
+    let dispatches = detail["run"]["child_dispatches"]
+        .as_array()
+        .expect("child_dispatches array");
+
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0]["child_run_id"], "jrun-child-leaves");
+    assert_eq!(dispatches[0]["job_name"], "task_auto_pipeline");
+    assert_eq!(dispatches[0]["parent_step_id"], "ship_leaves");
+    assert_eq!(dispatches[0]["phase"], "waiting");
+    assert_eq!(dispatches[0]["queued"], false);
+}
+
+#[test]
+fn run_detail_keeps_the_child_link_after_the_parent_terminalizes() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-web-child-cancelled";
+    seed_parent_blocked_on_child(
+        &runtime,
+        run_id,
+        JobRunState::Cancelled,
+        ChildDispatchPhase::Terminal,
+    );
+    let run = runtime.show_job_run(run_id).expect("show run");
+
+    let detail = job_run_detail_to_json(&runtime, &run);
+    let dispatches = detail["run"]["child_dispatches"]
+        .as_array()
+        .expect("child_dispatches array");
+
+    assert_eq!(
+        dispatches.len(),
+        1,
+        "a cancelled parent must still name the child it left behind"
+    );
+    assert_eq!(dispatches[0]["child_run_id"], "jrun-child-leaves");
+}
+
+#[test]
+fn a_terminal_run_never_projects_an_unfinished_step_as_still_running() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let run_id = "jrun-web-cancelled-midstep";
+    // A parent killed inside its dispatch wait: `step_started` was audited,
+    // `step_finished` never was.
+    seed_v2_audit_events(
+        &runtime,
+        run_id,
+        vec![json!({
+            "event_type": "step.started",
+            "event_id": "evt-ship-leaves-started",
+            "ts": "2026-08-22T19:55:00Z",
+            "body_kind": "step_started",
+            "step_id": "ship_leaves"
+        })],
+    );
+    let run = seed_run(
+        &runtime,
+        run_id,
+        "workspace_auto_pipeline",
+        JobRunState::Cancelled,
+    );
+    write_seeded_run(&runtime, &run);
+
+    let detail = job_run_detail_to_json(&runtime, &run);
+    let steps = detail["steps"].as_array().expect("steps array");
+
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0]["target_id"], "ship_leaves");
+    assert_eq!(
+        steps[0]["state"], "cancelled",
+        "a step cannot outlive its own run"
+    );
+    assert_eq!(steps[0]["outcome"], "interrupted");
+}

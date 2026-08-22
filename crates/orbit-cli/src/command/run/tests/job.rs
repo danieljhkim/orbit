@@ -238,3 +238,71 @@ fn wait_output_exposes_the_terminal_state_and_diagnostic() {
         "{lines}"
     );
 }
+
+/// A parent state carrying one blocking child dispatch [ORB-10971].
+fn state_with_child_dispatch(
+    run: &orbit_types::workflow::JobRun,
+    phase: orbit_types::workflow::ChildDispatchPhase,
+) -> PipelineState {
+    let mut state = PipelineState::new(run.run_id.clone(), run.job_id.clone(), json!({}));
+    state.record_child_dispatch(
+        orbit_types::workflow::ChildDispatch::submitted(
+            "jrun-child-leaves".to_string(),
+            "task_auto_pipeline".to_string(),
+            "invoke_and_wait".to_string(),
+            true,
+            false,
+            chrono::Utc::now(),
+        )
+        .with_parent_step_id(Some("ship_leaves".to_string())),
+    );
+    state.advance_child_dispatch("jrun-child-leaves", phase, None, None);
+    state
+}
+
+#[test]
+fn job_run_json_names_the_child_a_running_parent_dispatched() {
+    let run = test_run(JobRunState::Running);
+    let state = state_with_child_dispatch(&run, orbit_types::workflow::ChildDispatchPhase::Waiting);
+
+    let value = job_run_to_json_with_state(&run, Some(&state));
+
+    let dispatches = value["child_dispatches"]
+        .as_array()
+        .expect("child_dispatches array");
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0]["child_run_id"], json!("jrun-child-leaves"));
+    assert_eq!(dispatches[0]["job_name"], json!("task_auto_pipeline"));
+    assert_eq!(dispatches[0]["parent_step_id"], json!("ship_leaves"));
+    assert_eq!(dispatches[0]["phase"], json!("waiting"));
+}
+
+#[test]
+fn job_run_json_keeps_child_lineage_for_a_terminal_run() {
+    // Unlike the waiting reasons above, lineage is not stale once the parent
+    // stops: it is the only handle on the child the parent left behind.
+    let run = test_run(JobRunState::Success);
+    let state =
+        state_with_child_dispatch(&run, orbit_types::workflow::ChildDispatchPhase::Terminal);
+
+    let value = job_run_to_json_with_state(&run, Some(&state));
+
+    assert_eq!(value["waiting_on_deps"], Value::Null);
+    assert_eq!(
+        value["child_dispatches"][0]["child_run_id"],
+        json!("jrun-child-leaves")
+    );
+}
+
+#[test]
+fn job_run_json_always_carries_a_child_dispatch_array() {
+    let run = test_run(JobRunState::Running);
+
+    let value = job_run_to_json_with_state(&run, None);
+
+    assert_eq!(
+        value["child_dispatches"],
+        json!([]),
+        "readers must not have to distinguish 'no children' from 'field absent'"
+    );
+}

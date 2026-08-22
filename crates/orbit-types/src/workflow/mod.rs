@@ -2,6 +2,7 @@
 
 pub mod activity_job;
 mod auto_task;
+mod child_dispatch;
 mod error;
 mod executor_def;
 mod job;
@@ -33,6 +34,9 @@ pub use activity_job::{
 pub use auto_task::{
     AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
     AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name,
+};
+pub use child_dispatch::{
+    ChildCancellation, ChildCancellationPolicy, ChildDispatch, ChildDispatchPhase,
 };
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
