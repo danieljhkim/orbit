@@ -43,24 +43,71 @@ fn global_search_task_hybrid_falls_back_to_lexical_on_semantic_error() {
     let runtime = OrbitRuntime::in_memory().expect("runtime");
     let id = add_task_with_status(&runtime, "task fallback needle", TaskStatus::Backlog);
 
-    let response = with_task_semantic_override(Err("companion missing".to_string()), || {
-        runtime
-            .global_search(GlobalSearchParams {
-                query: Some("task fallback needle".to_string()),
-                hybrid: true,
-                kind: GlobalSearchKind::Task,
-                limit: 3,
-                ..Default::default()
-            })
-            .expect("task lexical fallback")
-    });
+    let response = with_task_semantic_override(
+        Err(OrbitError::Execution(
+            "companion startup failed".to_string(),
+        )),
+        || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("task fallback needle".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Task,
+                    limit: 3,
+                    ..Default::default()
+                })
+                .expect("task lexical fallback")
+        },
+    );
 
     assert_eq!(response.mode, GlobalSearchMode::Lexical);
     assert!(response.notes.iter().any(|note| {
-        note.contains("falling back to lexical task search") && note.contains("companion missing")
+        note.contains("falling back to lexical task search")
+            && note.contains("companion startup failed")
     }));
     assert_eq!(response.results[0].source, "lexical");
     assert_eq!(response.results[0].id.as_deref(), Some(id.as_str()));
+}
+
+#[test]
+fn global_search_task_hybrid_falls_back_without_install_remediation() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    let id = add_task_with_status(
+        &runtime,
+        "task absent companion needle",
+        TaskStatus::Backlog,
+    );
+
+    let response = with_task_semantic_override(
+        Err(OrbitError::CompanionNotInstalled(
+            orbit_search::INSTALL_REMEDIATION.to_string(),
+        )),
+        || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("task absent companion needle".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Task,
+                    limit: 1,
+                    ..Default::default()
+                })
+                .expect("missing companion should use lexical search")
+        },
+    );
+
+    assert_eq!(response.mode, GlobalSearchMode::Lexical);
+    assert_eq!(response.results[0].source, "lexical");
+    assert_eq!(response.results[0].id.as_deref(), Some(id.as_str()));
+    assert!(response.notes.iter().any(|note| {
+        note.contains("falling back to lexical task search")
+            && note.contains("optional inference companion unavailable")
+    }));
+    assert!(
+        response
+            .notes
+            .iter()
+            .all(|note| !note.contains("orbit semantic install"))
+    );
 }
 
 #[test]
@@ -114,17 +161,22 @@ fn global_search_doc_hybrid_falls_back_to_lexical_on_semantic_error() {
         &["fallbackneedle"],
     );
 
-    let response = with_doc_semantic_override(Err("companion missing".to_string()), || {
-        runtime
-            .global_search(GlobalSearchParams {
-                query: Some("fallbackneedle".to_string()),
-                hybrid: true,
-                kind: GlobalSearchKind::Doc,
-                limit: 3,
-                ..Default::default()
-            })
-            .expect("fallback search")
-    });
+    let response = with_doc_semantic_override(
+        Err(OrbitError::Execution(
+            "companion startup failed".to_string(),
+        )),
+        || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    query: Some("fallbackneedle".to_string()),
+                    hybrid: true,
+                    kind: GlobalSearchKind::Doc,
+                    limit: 3,
+                    ..Default::default()
+                })
+                .expect("fallback search")
+        },
+    );
 
     assert!(
         response
@@ -136,6 +188,69 @@ fn global_search_doc_hybrid_falls_back_to_lexical_on_semantic_error() {
     assert_eq!(
         response.results[0].path.as_deref(),
         Some("docs/fallback-z-lexical.md")
+    );
+}
+
+#[test]
+fn doc_hybrid_fallback_preserves_lexical_filtering_and_order() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    add_doc_with_tags(
+        &runtime,
+        "docs/parity-a.md",
+        "parity needle first",
+        &["keep"],
+    );
+    add_doc_with_tags(
+        &runtime,
+        "docs/parity-b.md",
+        "parity needle second",
+        &["keep"],
+    );
+    add_doc_with_tags(
+        &runtime,
+        "docs/parity-c.md",
+        "parity needle filtered",
+        &["drop"],
+    );
+
+    let params = GlobalSearchParams {
+        query: Some("parity needle".to_string()),
+        kind: GlobalSearchKind::Doc,
+        tags: vec!["keep".to_string()],
+        limit: 2,
+        ..Default::default()
+    };
+    let lexical = runtime
+        .global_search(params.clone())
+        .expect("lexical search");
+    let fallback = with_doc_semantic_override(
+        Err(OrbitError::Execution(
+            "companion startup failed".to_string(),
+        )),
+        || {
+            runtime
+                .global_search(GlobalSearchParams {
+                    hybrid: true,
+                    ..params
+                })
+                .expect("lexical fallback")
+        },
+    );
+
+    let paths = |response: &GlobalSearchResponse| {
+        response
+            .results
+            .iter()
+            .map(|hit| hit.path.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(paths(&fallback), paths(&lexical));
+    assert_eq!(fallback.results.len(), 2);
+    assert!(
+        fallback
+            .results
+            .iter()
+            .all(|hit| hit.path.as_deref() != Some("docs/parity-c.md"))
     );
 }
 

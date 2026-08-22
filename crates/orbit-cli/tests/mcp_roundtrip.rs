@@ -947,6 +947,57 @@ fn mcp_serve_error_paths_return_tool_errors_and_keep_serving() {
 }
 
 #[test]
+fn mcp_hybrid_search_without_companion_returns_lexical_results() {
+    let workspace = McpWorkspace::init();
+    let companion_state = workspace.home.join(".orbit").join("embed");
+    assert!(
+        !companion_state.exists(),
+        "test must start without companion state"
+    );
+    let mut client = workspace.serve();
+
+    let task = client.call_tool_ok(
+        "orbit_task_add",
+        json!({
+            "title": "MCP lexical fallback regression",
+            "description": "The optional companion is absent.",
+            "tags": ["fallback"],
+            "complexity": "low",
+            "model": "codex"
+        }),
+    );
+    let task_id = task["id"].as_str().expect("task id");
+    let response = client.call_tool_ok(
+        "orbit_search",
+        json!({
+            "query": "MCP lexical fallback regression",
+            "hybrid": true,
+            "kind": "task",
+            "tag": ["fallback"],
+            "limit": 1,
+            "model": "codex"
+        }),
+    );
+
+    assert_eq!(response["mode"], "lexical");
+    assert_eq!(response["results"][0]["id"], task_id);
+    assert_eq!(response["results"][0]["source"], "lexical");
+    let notes = response["notes"].as_array().expect("fallback notes");
+    assert!(notes.iter().any(|note| {
+        note.as_str()
+            .is_some_and(|note| note.contains("falling back to lexical task search"))
+    }));
+    assert!(notes.iter().all(|note| {
+        note.as_str()
+            .is_some_and(|note| !note.contains("orbit semantic install"))
+    }));
+    assert!(
+        !companion_state.exists(),
+        "MCP fallback must not install companion state"
+    );
+}
+
+#[test]
 fn mcp_calls_are_audited_once_including_unknown_raw_names() {
     let workspace = McpWorkspace::init();
     let mut client = workspace.serve();

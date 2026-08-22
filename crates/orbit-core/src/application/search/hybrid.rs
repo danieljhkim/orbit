@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use orbit_common::OrbitError;
 use orbit_search::DocSemanticHit;
 
 use super::convert::doc_result_to_global;
@@ -24,11 +25,11 @@ pub(super) struct DocHybridCandidate {
 }
 
 pub(super) fn lexical_doc_hits(
-    lexical_docs: BTreeMap<String, orbit_search::DocSearchResult>,
+    lexical_docs: Vec<orbit_search::DocSearchResult>,
     limit: usize,
 ) -> Vec<GlobalSearchHit> {
     let mut out = lexical_docs
-        .into_values()
+        .into_iter()
         .map(|result| doc_result_to_global(result.clone(), "lexical", Some(result.score as f32)))
         .collect::<Vec<_>>();
     out.truncate(limit);
@@ -142,6 +143,19 @@ pub(super) fn warn_task_hybrid_fallback(notes: &mut Vec<String>, reason: &str) {
         "task hybrid vector",
         &format!("{TASK_HYBRID_FALLBACK_NOTE}: {reason}"),
     );
+}
+
+/// The companion's install remediation is appropriate for an explicit
+/// semantic command, but hybrid search is intentionally best-effort. Keep
+/// the fallback note useful without turning an optional dependency into an
+/// unattended action item.
+pub(super) fn fallback_reason(error: &OrbitError) -> String {
+    match error {
+        OrbitError::CompanionNotInstalled(_) => {
+            "optional inference companion unavailable".to_string()
+        }
+        _ => error.to_string(),
+    }
 }
 
 pub(super) fn push_skip_note(notes: &mut Vec<String>, branch: &str, reason: &str) {
