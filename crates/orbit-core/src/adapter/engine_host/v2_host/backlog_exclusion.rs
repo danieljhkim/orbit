@@ -103,6 +103,7 @@ pub(super) fn list_backlog_tasks(
         })
         .unwrap_or_default();
     let (mut tasks, excluded_entries) = if explicit_task_ids.is_empty() {
+        // FIXME: perf issue iterating over all tasks
         let all_tasks = runtime.stores().tasks().list_tasks().map_err(|err| {
             DispatchError::DeterministicActionFailed {
                 action: action.to_string(),
