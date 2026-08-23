@@ -168,8 +168,8 @@ mod tests {
             assert!(!definition.enabled);
         }
 
-        // Cadence: hourly — deliberately sparser than the ~20-minute ship
-        // sweep, and parseable by the scheduler.
+        // Cadence: every 40 minutes — deliberately sparser than the
+        // ~20-minute ship sweep, and parseable by the scheduler.
         let triage = std::fs::read_to_string(routines_dir.join("task_triage.yaml"))
             .expect("read triage routine");
         let triage = parse_routine_yaml(&triage).expect("triage routine parses");
@@ -182,7 +182,7 @@ mod tests {
         let pilot = std::fs::read_to_string(routines_dir.join("task_pilot.yaml"))
             .expect("read task-pilot routine");
         let pilot = parse_routine_yaml(&pilot).expect("task-pilot routine parses");
-        assert_eq!(pilot.trigger.cron, "45 */4 * * *");
+        assert_eq!(pilot.trigger.cron, "*/40 * * * *");
         assert_eq!(
             pilot.trigger.missed_run,
             orbit_types::workflow::MissedRunPolicy::Skip

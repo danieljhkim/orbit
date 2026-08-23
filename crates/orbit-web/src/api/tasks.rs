@@ -838,7 +838,7 @@ pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>)
     .await
     {
         Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 

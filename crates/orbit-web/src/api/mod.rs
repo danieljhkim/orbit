@@ -354,16 +354,16 @@ pub(super) fn server_error(e: orbit_core::OrbitError) -> Response {
 /// the whole wait, so a burst of concurrent writes parks every worker and the
 /// server stops answering — the `ReadTimeout`-then-`ConnectError` shape of
 /// F2026-07-119. `label` names the operation in the panic-propagation error.
-pub(super) async fn blocking<T, F>(label: &str, op: F) -> Result<T, Response>
+pub(super) async fn blocking<T, F>(label: &str, op: F) -> Result<T, Box<Response>>
 where
     F: FnOnce() -> Result<T, orbit_core::OrbitError> + Send + 'static,
     T: Send + 'static,
 {
     match tokio::task::spawn_blocking(op).await {
         Ok(Ok(value)) => Ok(value),
-        Ok(Err(e)) => Err(map_runtime_error(e)),
-        Err(join_err) => Err(server_error(orbit_core::OrbitError::Execution(format!(
-            "{label} panicked: {join_err}"
+        Ok(Err(e)) => Err(Box::new(map_runtime_error(e))),
+        Err(join_err) => Err(Box::new(server_error(orbit_core::OrbitError::Execution(
+            format!("{label} panicked: {join_err}"),
         )))),
     }
 }
