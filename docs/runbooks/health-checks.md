@@ -4,8 +4,8 @@ summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and rout
 tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/application/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558]
-last_validated: 2026-08-22
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558, ORB-10986]
+last_validated: 2026-08-23
 ---
 
 # Check Orbit Health
@@ -145,11 +145,15 @@ orbit routine list
 orbit sweep --json
 ```
 
-On Linux, a healthy enabled status includes a finite next systemd trigger and an effective
-cadence. `clock: unhealthy` with an inactive effective cadence means the timer is enabled but
-elapsed, unscheduled, or could not be probed; follow the printed diagnostic and reinstall the
-generated units with `orbit routine init --install-clock`. The generated timer schedules its
-first sweep from each systemd user-manager startup and then recurs from service activation.
+On Linux, a healthy enabled status includes an active timer, a finite next systemd trigger,
+and an effective cadence. `clock: unhealthy` with an inactive effective cadence means the
+timer is enabled but elapsed, unscheduled, inactive, or could not be probed. Inspect the
+printed diagnostic, then run `orbit routine clock enable`: it restarts the timer even when it
+is already enabled and returns success only after verifying a finite next trigger. If that
+verification fails, inspect the `systemctl --user status` and `journalctl --user` commands in
+the error before retrying. The generated timer schedules its first sweep from every timer
+activation and then recurs from service activation; installation and cadence changes perform
+the same post-activation verification.
 It does not replay every tick missed during host or manager downtime: on the next sweep,
 routine `missed_run: catch_up_once` fires once for a gap while `skip` waits for the next natural
 cron slot.

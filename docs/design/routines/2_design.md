@@ -1,8 +1,8 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-08-15
-last_validated: 2026-08-16
+last_updated: 2026-08-23
+last_validated: 2026-08-23
 status: Accepted
 feature: routines
 doc_role: design
@@ -11,7 +11,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800, ORB-10986]
 ---
 
 # Routines — Design
@@ -30,15 +30,17 @@ routine definition. Its durable configuration is `~/.orbit/clock.toml`, defaults
 60-second cadence, and accepts only whole-minute values from 60 through 3600 seconds.
 
 `orbit routine clock status` reports configured cadence, native-manager enabled state,
-and whether an enabled Linux timer has a finite next trigger. An enabled timer with no
-future trigger is `unhealthy`, has no effective cadence, and reports the reinstall command
-that restores the generated unit. `orbit routine clock pause` disables only launchd/systemd
+and whether an enabled Linux timer is active with a finite next trigger. An enabled timer
+without that scheduling state is `unhealthy`, has no effective cadence, and reports
+`orbit routine clock enable`, which restarts the timer and verifies the resulting deadline.
+`orbit routine clock pause` disables only launchd/systemd
 scheduled invocations (surviving logout/reboot through the native per-user manager);
 it preserves routine cursors, fire history, and per-routine pauses, and a deliberate
 `orbit sweep` is still available. `enable` resumes with the configured cadence, while
 `set --cadence-seconds N` atomically rewrites the host setting and reloads the existing
-unit identity. On an activation failure Orbit reports the concrete native recovery
-command rather than claiming the clock is active. launchd and systemd user managers are
+unit identity. Linux installation, cadence changes, and enablement verify an active timer
+with a finite next trigger after native commands complete. A failed verification is an
+actionable error rather than a claim that the clock is active. launchd and systemd user managers are
 the supported platforms; there is no resident Orbit daemon ([Host-local sweep clock configuration](./4_decisions.md#host-local-sweep-clock-configuration)).
 
 The dashboard Operations view projects the same typed status and control functions
@@ -271,10 +273,12 @@ renders and installs the platform unit:
 
 - **macOS** — a launchd agent (`com.orbit.sweep`) with `StartInterval` 60s. launchd also
   fires on wake, which pairs with `missed_run: catch_up_once` for laptop sleep gaps.
-- **Linux** — `orbit-sweep.timer` combines `OnStartupSec=<cadence>` with
-  `OnUnitActiveSec=<cadence>` plus a oneshot service. A fresh user manager therefore arms a
-  finite first sweep; a reinstall after the startup deadline fires immediately; successful
-  service activations schedule subsequent sweeps at the configured cadence. These monotonic
+- **Linux** — `orbit-sweep.timer` combines `OnActiveSec=<cadence>` with
+  `OnUnitActiveSec=<cadence>` plus a oneshot service. Every timer activation (fresh install,
+  late reinstall, cadence change, or re-enable) therefore arms a finite first sweep relative
+  to that activation; successful service activations schedule subsequent sweeps at the
+  configured cadence. `AccuracySec=5s` bounds manager coalescing after each deadline
+  [ORB-10986]. These monotonic
   triggers deliberately do not replay timer events missed while the manager or host was
   down. The first sweep after restart evaluates each routine's cursor, so `catch_up_once`
   collapses missed cron slots to one fire and `skip` waits for the next natural slot.

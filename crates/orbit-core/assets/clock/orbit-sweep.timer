@@ -1,14 +1,14 @@
 # Configured timer for `orbit sweep` [ORB-10720].
-# OnStartupSec arms the first sweep in every fresh user-manager session (and
-# fires immediately when a re-install happens after that deadline). Subsequent
-# sweeps are measured from the last service activation. Monotonic timers do not
-# replay missed timer events; each routine's `missed_run` policy decides what a
-# sweep after downtime does with missed cron slots.
+# OnActiveSec arms the first sweep relative to every timer activation, including
+# a late install, reinstall, cadence change, or re-enable. Subsequent sweeps are
+# measured from the last service activation. Monotonic timers do not replay
+# missed timer events; each routine's `missed_run` policy decides what a sweep
+# after downtime does with missed cron slots.
 [Unit]
 Description=Run orbit sweep every {{CADENCE_SECONDS}} seconds
 
 [Timer]
-OnStartupSec={{CADENCE_SECONDS}}s
+OnActiveSec={{CADENCE_SECONDS}}s
 OnUnitActiveSec={{CADENCE_SECONDS}}s
 AccuracySec=5s
 
