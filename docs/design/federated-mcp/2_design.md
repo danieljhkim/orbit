@@ -11,7 +11,7 @@ summary: Proposed (not shipped) federated MCP mux, selector, capability split, l
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11009, ORB-11008]
+related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Design
@@ -26,17 +26,18 @@ The gateway is a mux in front of destinations the operator already configured (M
 
 - grow host-registry into a fleet inventory;
 - auto-discover the owner checkout of a repository;
-- place work, elect a leader, or pick a healthy substitute.
+- place work, elect a leader, or pick a healthy substitute;
+- detect or reject competing control-plane authorities (see §7).
 
 Direct SSH stdio to one chosen host remains the v1 remote path and is unchanged by this proposal. A caller that does not use the federated namespace never hits the mux.
 
 ## 2. Host-qualified selector
 
-Every workspace-scoped federated call carries an opaque host-qualified selector. The token is addressing data. Callers treat it as opaque. The gateway must not reinterpret it against its own local catalog.
+Every workspace-scoped federated call carries a **structured, caller-uninterpreted** host-qualified selector. Encoding `hm_<id>/ws_*` is normative. The token is addressing data. Callers copy the `selector` field from federated `orbit_workspace_list`; they must not parse it, construct it from `host_id`, or concatenate remembered identifiers. The gateway must not reinterpret it against its own local catalog.
 
 The stable key is `machine_id` (`hm_…`), not renameable `host_id`. Example form: `hm_<id>/ws_orbit`. A display host name such as `orbit-linux/ws_orbit` is not a valid selector.
 
-The destination is ambiguous when two configured destinations share a `machine_id`, or when the token is not uniquely host-qualified (a bare `ws_*` is not enough). Ambiguous tokens fail; they are not disambiguated by local catalog, cwd, or session default.
+A token that is not uniquely host-qualified (a bare `ws_*`) is `unknown_selector`. Duplicate `machine_id` across configured destinations is config-load `ambiguous_destination`, not a per-call routing outcome.
 
 ## 3. Capabilities mapped onto owner and replica
 
@@ -45,16 +46,24 @@ This feature does not invent a second ownership model. Host-registry already dis
 - **owner checkout** — local checkout whose logical `owner_machine_id` equals this machine;
 - **replica checkout** — local checkout that names another machine as the logical owner.
 
-Those roles map onto capability classes:
+**The destination's local catalog role determines capability class.** List advertisement is a hint and may lag destination Core. Destination Core refusal is the correctness boundary; the gateway is not a second authorization layer.
 
-| Catalog role | Capability class | Meaning |
+| Catalog role | Classes held | Meaning |
 |---|---|---|
-| Owner checkout | `control_plane` (and typically also `execute`) | Control-plane authority for that workspace's coordination; the canonical checkout can also run |
+| Owner checkout | `control_plane`. May also hold `execute` when that checkout runs locally; that second class is independent of the owner role and is not a refusal input. | Control-plane authority for that workspace's coordination |
 | Replica checkout | `execute` | Execution binding only |
+
+A workspace with absent `owner_machine_id` cannot advertise `control_plane`.
 
 A destination Core that does not hold a class **refuses** tools of that class with a named error (`capability_refused`). The gateway may advertise the destination's capabilities; it does not enforce by rewriting the destination or failing over to the owner.
 
-If a caller routes `orbit_task_add` to an execution-binding host, that destination refuses. The gateway must not silently send the call to the owner.
+Tool class is assigned by what the tool does, not by a per-tool registry field:
+
+- task issuance and coordination-store writes (`orbit_task_add`, `orbit.task.update`, `orbit.task.start`, …) → `control_plane`
+- anything touching runs, logs, or scheduler state → `execute`
+- discovery / list tools (`orbit_workspace_list`, …) → unclassified, not subject to `capability_refused`
+
+If a caller routes a `control_plane` tool to an execution-binding host, that destination refuses. The gateway must not silently send the call to the owner.
 
 ## 4. Split authority — "mutations" is not one blob
 
@@ -69,47 +78,61 @@ Do not lump those as one "mutations" blob. A replica can accept execute-class wo
 
 ## 5. Federated workspace list
 
-Federated `orbit_workspace_list` is **session-unbound**: it must not require a workspace selector. The result is **additive** on today's v1 list fields (`id`, `name`, `ship_mode`, `owner_machine_id`, `git_remote`, `base_branch`, `status`, timestamps) plus:
+Federated `orbit_workspace_list` is **session-unbound**: it must not require a workspace selector. It is a **new response shape**, not a compatible extension of v1 `orbit.workspace.list`.
 
-- `selector` — opaque host-qualified route token;
+v1 puts `machine_id` on the envelope (`{"machine_id", "workspaces":[…]}`) and filters to Active workspaces that are locally checked out. Federated list puts `machine_id` on **each descriptor** and does **not** inherit that filter. Configured workspaces on unreachable or inactive destinations are included, not omitted.
+
+Each descriptor keeps today's v1 workspace fields (`id`, `name`, `ship_mode`, `owner_machine_id`, `git_remote`, `base_branch`, `status`, timestamps) plus:
+
+- `selector` — structured, caller-uninterpreted host-qualified route token (`hm_<id>/ws_*`);
 - `host` — destination display identity (`host_id`, renameable, display only);
 - `machine_id` — destination stable identity;
 - host-reachability — SSH/MCP reachability of the configured destination;
 - workspace checkout-health — repo-root presence at that destination, the same narrow rule as host-registry;
-- `capabilities` — classes the destination currently advertises for that workspace.
+- `capabilities` — classes the destination currently advertises for that workspace (a hint).
 
 Do not overload one `health` field with both SSH reachability and repo-root presence. A down or unreachable host is **included** with an explicit unreachable/unhealthy projection, not omitted. Omission makes every later call a stale-route surprise.
 
 ## 6. Fail-closed routing
 
-The gateway delivers a workspace-scoped call to the destination encoded in the selector. It fails explicitly for:
+The gateway delivers a workspace-scoped call to the destination encoded in the selector. Routing decides on **live delivery**, not cached list health.
 
-- unknown selector;
-- unreachable destination;
-- unhealthy checkout;
-- ambiguous destination;
-- stale route (destination no longer advertises that workspace).
+Caller-facing precedence when more than one class could apply:
+
+`unknown_selector` → `ambiguous_destination` (config load) → `unreachable_destination` → `stale_route` → `unhealthy_checkout` → `tool_not_on_this_host` → `capability_refused`
+
+- `unknown_selector` — token never valid, including a bare `ws_*`.
+- `ambiguous_destination` — duplicate configured `machine_id`, raised at config load, not per call.
+- `unreachable_destination` — configured destination does not answer. Unreachable wins over capability and stale because those are undecidable without the host.
+- `stale_route` — destination configured; a live probe shows the workspace is absent.
+- `unhealthy_checkout` — destination answers but the checkout is not usable.
+- `tool_not_on_this_host` — destination identified; the tool is not advertised there.
+- `capability_refused` — destination holds the workspace but refuses the tool's class. Unclassified discovery/list tools are not subject to this error.
 
 It must not fall back to a local workspace, another host with a matching `ws_*`, a default workspace, or a cached host-local runtime.
 
-`tool_not_on_this_host` is a distinct error from `unknown_selector`: the destination is identified, but the tool is not advertised there.
+## 7. Operator-configured control-plane uniqueness
 
-## 7. Relationship to v1 MCP
+A single control-plane per repository is an operator configuration responsibility, not a mux invariant. The mux does not check it. The would-be signal is matching `git_remote` across destinations with differing `owner_machine_id`. Independently inited checkouts have different `ws_*`, so the mux cannot observe the collision without fleet discovery. A violation surfaces as two independent control planes, not an error.
+
+## 8. Relationship to v1 MCP
 
 v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mcp-bridge. The mux is an explicit exception to v1 "byte-transparent / no Orbit process relays onward", **for the federated namespace only**. Automatic owner discovery, replication, relays-as-product, and fleet placement stay out. See [mcp-bridge 3_vision.md §5](../mcp-bridge/3_vision.md).
 
-## 8. Concerns & Honest Limitations
+## 9. Concerns & Honest Limitations
 
 - This design is not shipped. No runtime, tool schema, or conformance YAML in this change implements it.
 - Availability is bounded by the chosen destination. Callers must handle visible routing failures; there is no transparent substitute result.
 - Including unreachable hosts makes the list honest and larger; clients must read reachability rather than treating presence as liveness.
 - Capability advertisement can lag destination Core. The destination refuse is the correctness boundary; the gateway is not a second authorization layer.
-- Transport authentication, selector expiry, health freshness, and cloud coordination-store details are deliberately unresolved. See [3_vision.md](./3_vision.md).
+- Transport authentication, selector expiry, health freshness, and cloud coordination-store details are deliberately unresolved. See [3_vision.md](./3_vision.md). Probe cadence stays a vision open question; it does not change live-delivery error precedence.
 - Mixed Orbit versions across destinations can advertise different surfaces; `tool_not_on_this_host` and `capability_refused` must remain distinguishable from "the mux is confused."
+- Two destinations that each declare Owner for the same `git_remote` are a configuration mistake the mux will serve as two control planes.
 
 ## Task References
 
 - [ORB-11008] — recorded the federated multi-host MCP policy
-- [ORB-11009] — specified this proposed mechanism as the implementable contract
+- [ORB-11009] — specified this proposed mechanism as the implementable contract (PR #1139)
+- [ORB-11010] — closed the PR #1139 review contract holes in this folder
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
