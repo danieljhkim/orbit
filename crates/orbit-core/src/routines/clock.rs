@@ -139,7 +139,24 @@ pub(super) fn set_clock_cadence_with(
         }
         Err(error) => {
             save_clock_settings(global_root, previous)?;
-            Err(error)
+            match install_clock_with(global_root, orbit_bin, previous, platform, runner, home) {
+                Ok(rollback) => Err(OrbitError::Execution(format!(
+                    "clock update failed: {error}; restored the previous configured cadence and {} the previous unit{}",
+                    if rollback.activated {
+                        "reactivated"
+                    } else {
+                        "could not reactivate"
+                    },
+                    if rollback.manual_steps.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; recovery: {}", rollback.manual_steps.join("; "))
+                    }
+                ))),
+                Err(rollback_error) => Err(OrbitError::Execution(format!(
+                    "clock update failed: {error}; restored the previous configured cadence but could not restore its native unit: {rollback_error}"
+                ))),
+            }
         }
     }
 }
@@ -249,7 +266,8 @@ pub fn sweep_log_path(global_root: &Path) -> PathBuf {
 pub struct ClockInstallReport {
     /// Unit files written.
     pub files_written: Vec<PathBuf>,
-    /// True when the unit was activated (loaded/enabled) successfully.
+    /// True when the unit was activated successfully. On systemd this also
+    /// means the manager reported it active with a finite future trigger.
     pub activated: bool,
     /// Follow-up commands to run manually when activation failed or was
     /// unavailable (e.g. no user systemd session).
@@ -371,28 +389,23 @@ fn install_systemd(
         program: "systemctl",
         args: vec!["--user".into(), "daemon-reload".into()],
     };
-    let enable = ManagerCommand {
-        program: "systemctl",
-        args: vec![
-            "--user".into(),
-            "enable".into(),
-            format!("{SYSTEMD_UNIT}.timer"),
-        ],
-    };
-    let restart = ManagerCommand {
-        program: "systemctl",
-        args: vec![
-            "--user".into(),
-            "restart".into(),
-            format!("{SYSTEMD_UNIT}.timer"),
-        ],
-    };
+    let enable = systemd_enable_command();
+    let restart = systemd_restart_command();
     let reloaded = runner.run(&reload).unwrap_or(false);
     let enabled = reloaded && runner.run(&enable).unwrap_or(false);
     // `enable --now` is a no-op for an already-active timer, including the
     // broken `active (elapsed)` state this installer must repair. An explicit
     // restart re-arms the rendered timer on both fresh installs and upgrades.
-    let activated = enabled && runner.run(&restart).unwrap_or(false);
+    let restarted = enabled && runner.run(&restart).unwrap_or(false);
+    let activated = if restarted {
+        let details = query_systemd_clock_details(runner)?;
+        if !details.is_schedulable() {
+            return Err(systemd_unschedulable_error("restart completed"));
+        }
+        true
+    } else {
+        false
+    };
 
     let manual_steps = if activated {
         Vec::new()
@@ -425,7 +438,17 @@ fn systemd_enable_command() -> ManagerCommand {
         args: vec![
             "--user".into(),
             "enable".into(),
-            "--now".into(),
+            format!("{SYSTEMD_UNIT}.timer"),
+        ],
+    }
+}
+
+fn systemd_restart_command() -> ManagerCommand {
+    ManagerCommand {
+        program: "systemctl",
+        args: vec![
+            "--user".into(),
+            "restart".into(),
             format!("{SYSTEMD_UNIT}.timer"),
         ],
     }
@@ -526,6 +549,30 @@ pub(super) fn set_clock_enabled_with(
     let current = runner
         .run(&manager_status_command(platform))
         .unwrap_or(false);
+    if platform == ClockPlatform::Systemd && enabled {
+        let enable = systemd_enable_command();
+        if !runner.run(&enable)? {
+            return Err(manager_command_error(&enable));
+        }
+        // Starting an already-active elapsed timer is a no-op. Restarting
+        // makes `enable` a repair operation as well as a paused-clock resume.
+        let restart = systemd_restart_command();
+        if !runner.run(&restart)? {
+            return Err(manager_command_error(&restart));
+        }
+        let details = query_systemd_clock_details(runner)?;
+        if !details.is_schedulable() {
+            return Err(systemd_unschedulable_error("enable completed"));
+        }
+        return Ok(clock_status_from(
+            settings,
+            true,
+            true,
+            platform,
+            None,
+            Some(details),
+        ));
+    }
     if current == enabled {
         return Ok(clock_status_from(
             settings, enabled, enabled, platform, None, None,
@@ -534,11 +581,7 @@ pub(super) fn set_clock_enabled_with(
     let command = manager_set_enabled_command(platform, enabled, home);
     let succeeded = runner.run(&command)?;
     if !succeeded {
-        return Err(OrbitError::Execution(format!(
-            "{} failed; recovery: {}",
-            command.display(),
-            command.display()
-        )));
+        return Err(manager_command_error(&command));
     }
     Ok(clock_status_from(
         settings, enabled, enabled, platform, None, None,
@@ -564,10 +607,9 @@ pub(super) fn clock_status_with(
         .unwrap_or(false);
     let mut manager_details = None;
     let (schedulable, health_issue) = if platform == ClockPlatform::Systemd {
-        match runner.stdout(&systemd_next_trigger_command()) {
-            Ok(Some(output)) => {
-                let details = SystemdClockDetails::parse(&output);
-                let schedulable = enabled && details.next_tick_at.is_some();
+        match query_systemd_clock_details(runner) {
+            Ok(details) => {
+                let schedulable = enabled && details.is_schedulable();
                 manager_details = Some(details);
                 if !enabled {
                     (false, None)
@@ -577,20 +619,20 @@ pub(super) fn clock_status_with(
                     (
                         false,
                         Some(
-                            "systemd timer is enabled but has no future trigger; recovery: `orbit routine init --install-clock`"
+                            "systemd timer is enabled but is not active with a finite future trigger; recovery: `orbit routine clock enable` re-arms the timer and verifies the result"
                                 .to_string(),
                         ),
                     )
                 }
             }
-            Ok(None) | Err(_) if enabled => (
+            Err(_) if enabled => (
                 false,
                 Some(
-                    "systemd timer is enabled but its next trigger could not be verified; recovery: `systemctl --user status orbit-sweep.timer`, then `orbit routine init --install-clock`"
+                    "systemd timer is enabled but its next trigger could not be verified; recovery: inspect `systemctl --user status orbit-sweep.timer`, then run `orbit routine clock enable` to re-arm and verify it"
                         .to_string(),
                 ),
             ),
-            Ok(None) | Err(_) => (false, None),
+            Err(_) => (false, None),
         }
     } else {
         (enabled, None)
@@ -629,6 +671,37 @@ impl SystemdClockDetails {
                 .or_else(|| property("NextElapseUSecMonotonic")),
         }
     }
+
+    fn is_schedulable(&self) -> bool {
+        self.loaded == Some(true) && self.running == Some(true) && self.next_tick_at.is_some()
+    }
+}
+
+fn query_systemd_clock_details(
+    runner: &dyn ClockCommandRunner,
+) -> Result<SystemdClockDetails, OrbitError> {
+    let command = systemd_next_trigger_command();
+    let output = runner.stdout(&command)?.ok_or_else(|| {
+        OrbitError::Execution(format!(
+            "{} failed; inspect `systemctl --user status {SYSTEMD_UNIT}.timer`",
+            command.display()
+        ))
+    })?;
+    Ok(SystemdClockDetails::parse(&output))
+}
+
+fn manager_command_error(command: &ManagerCommand) -> OrbitError {
+    OrbitError::Execution(format!(
+        "{} failed; recovery: {}",
+        command.display(),
+        command.display()
+    ))
+}
+
+fn systemd_unschedulable_error(action: &str) -> OrbitError {
+    OrbitError::Execution(format!(
+        "systemd timer {action}, but the manager did not report it active with a finite future trigger; inspect `systemctl --user status {SYSTEMD_UNIT}.timer` and `journalctl --user -u {SYSTEMD_UNIT}.timer -u {SYSTEMD_UNIT}.service`; after correcting the reported failure, `orbit routine clock enable` re-arms the timer and verifies the result"
+    ))
 }
 
 fn useful_manager_value(raw: &str) -> Option<String> {

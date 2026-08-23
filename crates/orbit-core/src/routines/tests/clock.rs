@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tempfile::tempdir;
@@ -69,6 +69,161 @@ impl ClockCommandRunner for MockRunner {
     }
 }
 
+#[derive(Debug)]
+struct FakeSystemdState {
+    now_seconds: u64,
+    enabled: bool,
+    active: bool,
+    last_service_activation: Option<u64>,
+    next_trigger: Option<u64>,
+}
+
+/// A temporal systemd fake: startup-relative deadlines are based on the
+/// already-running manager, timer-relative deadlines are based on every
+/// restart, and service-relative deadlines are recomputed after a sweep.
+struct SystemdManagerFake {
+    home: PathBuf,
+    state: Mutex<FakeSystemdState>,
+    commands: Mutex<Vec<String>>,
+}
+
+impl SystemdManagerFake {
+    fn new(home: &Path, now_seconds: u64) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            state: Mutex::new(FakeSystemdState {
+                now_seconds,
+                enabled: false,
+                active: false,
+                last_service_activation: None,
+                next_trigger: None,
+            }),
+            commands: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn late_elapsed(home: &Path, now_seconds: u64, last_service_activation: u64) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            state: Mutex::new(FakeSystemdState {
+                now_seconds,
+                enabled: true,
+                active: true,
+                last_service_activation: Some(last_service_activation),
+                next_trigger: None,
+            }),
+            commands: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn next_trigger(&self) -> Option<u64> {
+        self.state
+            .lock()
+            .expect("fake systemd state lock")
+            .next_trigger
+    }
+
+    fn set_now(&self, now_seconds: u64) {
+        self.state
+            .lock()
+            .expect("fake systemd state lock")
+            .now_seconds = now_seconds;
+    }
+
+    fn elapse_and_complete_service(&self) {
+        let cadence = self
+            .timer_value("OnUnitActiveSec")
+            .expect("recurring timer directive");
+        let mut state = self.state.lock().expect("fake systemd state lock");
+        let triggered_at = state.next_trigger.expect("timer has a next trigger");
+        state.now_seconds = triggered_at;
+        state.last_service_activation = Some(triggered_at);
+        state.next_trigger = Some(triggered_at + cadence);
+    }
+
+    fn timer_value(&self, directive: &str) -> Option<u64> {
+        let timer = fs::read_to_string(self.home.join(".config/systemd/user/orbit-sweep.timer"))
+            .expect("fake manager reads installed timer");
+        timer.lines().find_map(|line| {
+            line.strip_prefix(&format!("{directive}="))
+                .and_then(|value| value.strip_suffix('s'))
+                .and_then(|value| value.parse().ok())
+        })
+    }
+
+    fn activate_timer(&self) {
+        let on_active = self.timer_value("OnActiveSec");
+        let on_startup = self.timer_value("OnStartupSec");
+        let on_unit_active = self.timer_value("OnUnitActiveSec");
+        let mut state = self.state.lock().expect("fake systemd state lock");
+        let now = state.now_seconds;
+        let activation_deadline = on_active.map(|cadence| now + cadence);
+        // This models the late `active (elapsed)` regression: startup and
+        // previous-service deadlines that elapsed before restart do not
+        // establish a new future trigger.
+        let startup_deadline = on_startup.filter(|deadline| *deadline > now);
+        let recurring_deadline = on_unit_active
+            .zip(state.last_service_activation)
+            .map(|(cadence, activated)| activated + cadence)
+            .filter(|deadline| *deadline > now);
+        state.active = true;
+        state.next_trigger = [activation_deadline, startup_deadline, recurring_deadline]
+            .into_iter()
+            .flatten()
+            .min();
+    }
+}
+
+impl ClockCommandRunner for SystemdManagerFake {
+    fn run(&self, command: &ManagerCommand) -> Result<bool, OrbitError> {
+        let display = command.display();
+        self.commands
+            .lock()
+            .expect("fake command log lock")
+            .push(display.clone());
+        match display.as_str() {
+            "systemctl --user daemon-reload" => Ok(true),
+            "systemctl --user is-enabled orbit-sweep.timer" => {
+                Ok(self.state.lock().expect("fake systemd state lock").enabled)
+            }
+            "systemctl --user enable orbit-sweep.timer" => {
+                self.state.lock().expect("fake systemd state lock").enabled = true;
+                Ok(true)
+            }
+            "systemctl --user restart orbit-sweep.timer" => {
+                self.activate_timer();
+                Ok(true)
+            }
+            "systemctl --user disable --now orbit-sweep.timer" => {
+                let mut state = self.state.lock().expect("fake systemd state lock");
+                state.enabled = false;
+                state.active = false;
+                state.next_trigger = None;
+                Ok(true)
+            }
+            unexpected => panic!("unexpected fake systemd command: {unexpected}"),
+        }
+    }
+
+    fn stdout(&self, command: &ManagerCommand) -> Result<Option<String>, OrbitError> {
+        self.commands
+            .lock()
+            .expect("fake command log lock")
+            .push(command.display());
+        let state = self.state.lock().expect("fake systemd state lock");
+        let next = state
+            .next_trigger
+            .map_or_else(|| "infinity".to_string(), |value| format!("{value}s"));
+        let last = state
+            .last_service_activation
+            .map_or_else(String::new, |value| format!("{value}s"));
+        Ok(Some(format!(
+            "LoadState=loaded\nActiveState={}\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic={next}\nLastTriggerUSec={last}",
+            if state.active { "active" } else { "inactive" }
+        )))
+    }
+}
+
 fn service_path(rendered: &str) -> &str {
     rendered
         .lines()
@@ -125,22 +280,52 @@ fn rendered_systemd_service_discovers_local_provider_launchers() {
 #[test]
 fn systemd_timer_renders_default_and_configured_cadence() {
     let default_timer = render_systemd_timer(ClockSettings::default());
-    assert!(default_timer.contains("OnStartupSec=60s"));
+    assert!(default_timer.contains("OnActiveSec=60s"));
     assert!(default_timer.contains("OnUnitActiveSec=60s"));
+    assert!(!default_timer.contains("OnStartupSec="));
     assert!(!default_timer.contains("Persistent=true"));
 
     let configured_timer = render_systemd_timer(ClockSettings {
         cadence_seconds: 300,
     });
-    assert!(configured_timer.contains("OnStartupSec=300s"));
+    assert!(configured_timer.contains("OnActiveSec=300s"));
     assert!(configured_timer.contains("OnUnitActiveSec=300s"));
 }
 
 #[test]
-fn systemd_install_arms_a_fresh_manager_and_recurs_at_configured_cadence() {
+fn systemd_install_arms_and_recurs_at_default_and_configured_cadence() {
+    for cadence_seconds in [60, 300] {
+        let root = tempdir().expect("create global root");
+        let home = tempdir().expect("create home");
+        let runner = SystemdManagerFake::new(home.path(), 10);
+
+        let report = install_clock_with(
+            root.path(),
+            "/opt/orbit/bin/orbit",
+            ClockSettings { cadence_seconds },
+            ClockPlatform::Systemd,
+            &runner,
+            home.path(),
+        )
+        .expect("install systemd clock");
+
+        assert!(report.activated);
+        assert_eq!(runner.next_trigger(), Some(10 + cadence_seconds));
+        runner.elapse_and_complete_service();
+        assert_eq!(
+            runner.next_trigger(),
+            Some(10 + cadence_seconds * 2),
+            "service activation establishes the recurring deadline"
+        );
+    }
+}
+
+#[test]
+fn late_reinstall_rearms_an_active_elapsed_timer_from_timer_activation() {
     let root = tempdir().expect("create global root");
     let home = tempdir().expect("create home");
-    let runner = MockRunner::new(vec![Ok(true), Ok(true), Ok(true)]);
+    let week = 7 * 24 * 60 * 60;
+    let runner = SystemdManagerFake::late_elapsed(home.path(), week, 60);
 
     let report = install_clock_with(
         root.path(),
@@ -152,21 +337,13 @@ fn systemd_install_arms_a_fresh_manager_and_recurs_at_configured_cadence() {
         &runner,
         home.path(),
     )
-    .expect("install systemd clock");
+    .expect("late reinstall re-arms timer");
 
     assert!(report.activated);
-    assert_eq!(
-        runner.commands(),
-        vec![
-            "systemctl --user daemon-reload",
-            "systemctl --user enable orbit-sweep.timer",
-            "systemctl --user restart orbit-sweep.timer",
-        ]
-    );
-    let timer = fs::read_to_string(home.path().join(".config/systemd/user/orbit-sweep.timer"))
-        .expect("read installed timer");
-    assert!(timer.contains("OnStartupSec=300s"));
-    assert!(timer.contains("OnUnitActiveSec=300s"));
+    let next = runner
+        .next_trigger()
+        .expect("finite trigger after reinstall");
+    assert!((week + 300..=week + 305).contains(&next));
 }
 
 #[test]
@@ -237,7 +414,8 @@ fn enabled_systemd_timer_without_a_future_trigger_is_unhealthy() {
     let runner = MockRunner::with_outputs(
         vec![Ok(true)],
         vec![Ok(Some(
-            "NextElapseUSecRealtime=\nNextElapseUSecMonotonic=0".to_string(),
+            "LoadState=loaded\nActiveState=active\nNextElapseUSecRealtime=\nNextElapseUSecMonotonic=0"
+                .to_string(),
         ))],
     );
 
@@ -248,7 +426,7 @@ fn enabled_systemd_timer_without_a_future_trigger_is_unhealthy() {
     assert!(!status.schedulable);
     assert_eq!(status.effective_cadence_seconds, None);
     assert!(status.health_issue.as_deref().is_some_and(|issue| {
-        issue.contains("no future trigger") && issue.contains("orbit routine init --install-clock")
+        issue.contains("finite future trigger") && issue.contains("orbit routine clock enable")
     }));
     assert_eq!(
         runner.commands(),
@@ -282,54 +460,113 @@ fn disabled_systemd_timer_reports_loaded_state_without_becoming_schedulable() {
 }
 
 #[test]
-fn pause_and_enable_are_idempotent_for_launchd_and_systemd() {
+fn pause_and_enable_are_idempotent_for_launchd() {
     let root = tempdir().expect("create global root");
     let home = tempdir().expect("create home");
-    for (platform, pause, enable) in [
-        (ClockPlatform::Launchd, "launchctl unload", "launchctl load"),
-        (
-            ClockPlatform::Systemd,
-            "systemctl --user disable --now orbit-sweep.timer",
-            "systemctl --user enable --now orbit-sweep.timer",
-        ),
-    ] {
-        let runner = MockRunner::new(vec![
-            Ok(true),
-            Ok(true),
-            Ok(false),
-            Ok(false),
-            Ok(true),
-            Ok(true),
-        ]);
-        assert!(
-            !set_clock_enabled_with(root.path(), false, platform, &runner, home.path())
-                .expect("pause")
-                .enabled
-        );
-        assert!(
-            !set_clock_enabled_with(root.path(), false, platform, &runner, home.path())
-                .expect("repeat pause")
-                .enabled
-        );
-        assert!(
-            set_clock_enabled_with(root.path(), true, platform, &runner, home.path())
-                .expect("enable")
-                .enabled
-        );
-        assert!(
-            set_clock_enabled_with(root.path(), true, platform, &runner, home.path())
-                .expect("repeat enable")
-                .enabled
-        );
-        let commands = runner.commands();
-        assert_eq!(
-            commands.len(),
-            6,
-            "only state-changing calls run manager commands"
-        );
-        assert!(commands[1].starts_with(pause));
-        assert!(commands[4].starts_with(enable));
-    }
+    let runner = MockRunner::new(vec![
+        Ok(true),
+        Ok(true),
+        Ok(false),
+        Ok(false),
+        Ok(true),
+        Ok(true),
+    ]);
+    assert!(
+        !set_clock_enabled_with(
+            root.path(),
+            false,
+            ClockPlatform::Launchd,
+            &runner,
+            home.path()
+        )
+        .expect("pause")
+        .enabled
+    );
+    assert!(
+        !set_clock_enabled_with(
+            root.path(),
+            false,
+            ClockPlatform::Launchd,
+            &runner,
+            home.path()
+        )
+        .expect("repeat pause")
+        .enabled
+    );
+    assert!(
+        set_clock_enabled_with(
+            root.path(),
+            true,
+            ClockPlatform::Launchd,
+            &runner,
+            home.path()
+        )
+        .expect("enable")
+        .enabled
+    );
+    assert!(
+        set_clock_enabled_with(
+            root.path(),
+            true,
+            ClockPlatform::Launchd,
+            &runner,
+            home.path()
+        )
+        .expect("repeat enable")
+        .enabled
+    );
+    assert_eq!(runner.commands().len(), 6);
+}
+
+#[test]
+fn systemd_cadence_change_and_reenable_establish_new_deadlines() {
+    let root = tempdir().expect("create global root");
+    let home = tempdir().expect("create home");
+    let runner = SystemdManagerFake::new(home.path(), 100);
+    install_clock_with(
+        root.path(),
+        "/opt/orbit/bin/orbit",
+        ClockSettings::default(),
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("initial install");
+
+    runner.set_now(1_000);
+    set_clock_cadence_with(
+        root.path(),
+        300,
+        "/opt/orbit/bin/orbit",
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("cadence change re-arms timer");
+    assert!((1_300..=1_305).contains(&runner.next_trigger().expect("cadence deadline")));
+
+    let paused = set_clock_enabled_with(
+        root.path(),
+        false,
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("pause systemd timer");
+    assert!(!paused.enabled);
+    assert!(runner.next_trigger().is_none());
+
+    runner.set_now(2_000);
+    let enabled = set_clock_enabled_with(
+        root.path(),
+        true,
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("re-enable and verify systemd timer");
+    assert!(enabled.schedulable);
+    assert!((2_300..=2_305).contains(&runner.next_trigger().expect("re-enable deadline")));
 }
 
 #[test]
@@ -348,7 +585,7 @@ fn manager_failures_include_exact_recovery_command() {
     assert!(
         error
             .to_string()
-            .contains("systemctl --user enable --now orbit-sweep.timer")
+            .contains("systemctl --user enable orbit-sweep.timer")
     );
     assert!(error.to_string().contains("recovery:"));
 }
@@ -357,14 +594,12 @@ fn manager_failures_include_exact_recovery_command() {
 fn cadence_reload_failure_restores_config_and_reactivates_previous_systemd_unit() {
     let root = tempdir().expect("create global root");
     let home = tempdir().expect("create home");
-    let runner = MockRunner::new(vec![
-        Ok(true),
-        Ok(true),
-        Ok(false),
-        Ok(true),
-        Ok(true),
-        Ok(true),
-    ]);
+    let runner = MockRunner::with_outputs(
+        vec![Ok(true), Ok(true), Ok(false), Ok(true), Ok(true), Ok(true)],
+        vec![Ok(Some(
+            "LoadState=loaded\nActiveState=active\nNextElapseUSecMonotonic=60s".to_string(),
+        ))],
+    );
     let error = set_clock_cadence_with(
         root.path(),
         300,
@@ -397,8 +632,35 @@ fn cadence_reload_failure_restores_config_and_reactivates_previous_systemd_unit(
             "systemctl --user daemon-reload",
             "systemctl --user enable orbit-sweep.timer",
             "systemctl --user restart orbit-sweep.timer",
+            "systemctl --user show orbit-sweep.timer --property=LoadState --property=ActiveState --property=NextElapseUSecRealtime --property=NextElapseUSecMonotonic --property=LastTriggerUSec",
         ]
     );
+}
+
+#[test]
+fn systemd_install_rejects_successful_commands_without_a_finite_trigger() {
+    let root = tempdir().expect("create global root");
+    let home = tempdir().expect("create home");
+    let runner = MockRunner::with_outputs(
+        vec![Ok(true), Ok(true), Ok(true)],
+        vec![Ok(Some(
+            "LoadState=loaded\nActiveState=active\nNextElapseUSecMonotonic=infinity".to_string(),
+        ))],
+    );
+
+    let error = install_clock_with(
+        root.path(),
+        "/opt/orbit/bin/orbit",
+        ClockSettings::default(),
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect_err("unschedulable activation is not reported as active");
+
+    assert!(error.to_string().contains("finite future trigger"));
+    assert!(error.to_string().contains("systemctl --user status"));
+    assert!(error.to_string().contains("journalctl --user"));
 }
 
 #[test]
