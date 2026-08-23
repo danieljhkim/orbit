@@ -65,6 +65,10 @@ fn stub_first_path(bin: &Path) -> std::ffi::OsString {
 
 impl McpWorkspace {
     fn init() -> Self {
+        Self::init_with_workspace_name("mcp-roundtrip")
+    }
+
+    fn init_with_workspace_name(workspace_name: &str) -> Self {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
@@ -104,7 +108,7 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let workspace_init_args = vec!["workspace", "init", "--name", "mcp-roundtrip"];
+        let workspace_init_args = vec!["workspace", "init", "--name", workspace_name];
         let output = Self::orbit_command(&work, &home)
             .args(workspace_init_args)
             .output()
@@ -1482,7 +1486,7 @@ fn managed_mcp_config_updates_a_task_without_a_workspace_argument() {
 /// partition the checkout-local surfaces use.
 #[test]
 fn managed_mcp_config_routes_a_linked_worktree_by_its_logical_workspace_id() {
-    let workspace = McpWorkspace::init();
+    let workspace = McpWorkspace::init_with_workspace_name("orbit-5c61b3");
 
     // Diverge the logical registry ID from the checkout identity that keys the
     // coordination task registry, then generate the integration, so the config
@@ -1491,22 +1495,15 @@ fn managed_mcp_config_routes_a_linked_worktree_by_its_logical_workspace_id() {
     let registry = std::fs::read_to_string(&registry_path).expect("read workspace registry");
     std::fs::write(
         &registry_path,
-        registry.replace("ws_mcp-roundtrip", "ws_legacy-logical"),
+        registry.replace("ws_orbit-5c61b3", "ws_legacy-logical"),
     )
     .expect("write diverged workspace registry");
     let identity = std::fs::read_to_string(workspace.work.join(".orbit").join("config.yaml"))
         .expect("read checkout identity");
     assert!(
-        identity.contains("ws_mcp-roundtrip"),
+        identity.contains("ws_orbit-5c61b3"),
         "checkout identity must keep the pre-divergence ID: {identity}"
     );
-
-    let identity_path = workspace.work.join(".orbit").join("config.yaml");
-    std::fs::write(
-        &identity_path,
-        identity.replace("ws_mcp-roundtrip", "orbit-5c61b3"),
-    )
-    .expect("diverge the runtime partition identity");
 
     let task_id = author_task(&workspace, "Linked worktree routing");
     // `orbit mcp init` is the agent-authority generation path; it resolves the
@@ -1746,28 +1743,21 @@ fn mcp_task_show_follows_the_global_id_and_explicit_workspace_stays_a_filter() {
 
 /// ORB-10961: the ORB-10952 managed-worktree shape.
 ///
-/// A linked worktree whose checkout identity (`orbit-5c61b3`) diverged from
+/// A linked worktree whose checkout identity (`ws_orbit-5c61b3`) diverged from
 /// the logical registry ID must not turn that runtime identity into an
 /// `orbit.task.show` filter. Id-only tool-run and MCP calls follow the task
 /// ID; other workspace-scoped tools still require a registered selector.
 #[test]
 fn task_show_is_global_by_default_across_tool_run_and_mcp() {
-    let workspace = McpWorkspace::init();
+    let workspace = McpWorkspace::init_with_workspace_name("orbit-5c61b3");
 
     let registry_path = workspace.home.join(".orbit").join("workspaces.json");
     let registry = std::fs::read_to_string(&registry_path).expect("read workspace registry");
     std::fs::write(
         &registry_path,
-        registry.replace("ws_mcp-roundtrip", "ws_legacy-logical"),
+        registry.replace("ws_orbit-5c61b3", "ws_legacy-logical"),
     )
     .expect("diverge the logical registry id");
-    let identity_path = workspace.work.join(".orbit").join("config.yaml");
-    let identity = std::fs::read_to_string(&identity_path).expect("read checkout identity");
-    std::fs::write(
-        &identity_path,
-        identity.replace("ws_mcp-roundtrip", "orbit-5c61b3"),
-    )
-    .expect("diverge the runtime partition identity");
 
     let elsewhere = workspace.home.join("elsewhere");
     std::fs::create_dir_all(&elsewhere).expect("create the second checkout");
@@ -1789,7 +1779,7 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     );
 
     let add_input = json!({
-        "title": "Owned despite runtime identity orbit-5c61b3",
+        "title": "Owned despite runtime identity ws_orbit-5c61b3",
         "description": "Addressed by ID from a linked worktree and a foreign cwd",
         "workspace": workspace.work.to_str().expect("utf8 checkout path"),
         "complexity": "low",
@@ -1827,14 +1817,14 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
             String::from_utf8_lossy(&output.stdout)
         );
         assert!(
-            !stderr.contains("orbit-5c61b3"),
+            !stderr.contains("ws_orbit-5c61b3"),
             "tool run must not promote the runtime identity into a selector from {}: {stderr}",
             cwd.display()
         );
         let shown: Value = serde_json::from_slice(&output.stdout).expect("parse tool run show");
         assert_eq!(shown["id"], json!(task_id));
         assert_eq!(shown["workspace"]["id"], "ws_legacy-logical");
-        assert_eq!(shown["workspace"]["name"], "mcp-roundtrip");
+        assert_eq!(shown["workspace"]["name"], "orbit-5c61b3");
     }
 
     let invalid = McpWorkspace::orbit_command(&scratch, &workspace.home)
@@ -1867,7 +1857,7 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
             "--input",
             &json!({
                 "id": task_id,
-                "workspace": "orbit-5c61b3",
+                "workspace": "ws_orbit-5c61b3",
                 "model": "codex"
             })
             .to_string(),
@@ -1877,7 +1867,7 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     assert!(!runtime_identity.status.success());
     let runtime_stderr = String::from_utf8_lossy(&runtime_identity.stderr);
     assert!(
-        runtime_stderr.contains("orbit-5c61b3"),
+        runtime_stderr.contains("ws_orbit-5c61b3"),
         "an explicit runtime identity remains fail-closed: {runtime_stderr}"
     );
 
@@ -1888,7 +1878,7 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
             "protocolVersion": "2025-06-18",
             "capabilities": {},
             "clientInfo": { "name": "managed-executor", "version": "0" },
-            "_meta": { "orbit": { "workspace": "orbit-5c61b3" } },
+            "_meta": { "orbit": { "workspace": "ws_orbit-5c61b3" } },
         }),
     );
     let listed = client.request("tools/list", Value::Null);
@@ -1918,13 +1908,13 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
     assert_eq!(shown["id"], json!(task_id));
     assert_eq!(shown["workspace"]["id"], "ws_legacy-logical");
-    assert_eq!(shown["workspace"]["name"], "mcp-roundtrip");
+    assert_eq!(shown["workspace"]["name"], "orbit-5c61b3");
 
     let listed_err = client.call_tool_err("orbit_task_list", json!({}));
     assert!(
         listed_err["message"]
             .as_str()
-            .is_some_and(|message| message.contains("orbit-5c61b3")),
+            .is_some_and(|message| message.contains("ws_orbit-5c61b3")),
         "task list must still fail-closed on the runtime identity: {listed_err}"
     );
     drop(client);
