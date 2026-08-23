@@ -229,10 +229,7 @@ git push origin agent-main
 git push origin origin/main:refs/heads/agent-main
 cat <<'EOF' | gh api -X PUT repos/danieljhkim/orbit/branches/agent-main/protection --input -
 {
-  "required_status_checks": {
-    "strict": true,
-    "contexts": ["Check / Clippy / Test"]
-  },
+  "required_status_checks": null,
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null,
@@ -247,14 +244,10 @@ cat <<'EOF' | gh api -X PUT repos/danieljhkim/orbit/branches/agent-main/protecti
 EOF
 ```
 
-The applied `agent-main` protection must keep `strict: true` and require the
-primary CI check named exactly `Check / Clippy / Test`; coverage and platform
-diagnostic jobs remain informational. Verify the live setting after applying
-it with:
-
-```sh
-gh api repos/danieljhkim/orbit/branches/agent-main/protection/required_status_checks
-```
+Protection on `agent-main` exists only to prevent branch deletion
+(`allow_deletions: false`); merges are never gated on CI. CI failures are
+consumed asynchronously by the `qa-sweep` and `ci-failure-remediation`
+routines, which append remediation tasks to the queue.
 
 If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
 
