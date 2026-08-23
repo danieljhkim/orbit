@@ -16,7 +16,7 @@ related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 
 # Federated MCP — Decisions
 
-Record non-obvious decisions here by title. These are Door 2 standing rules for future implementation; no code anchors yet because the surface is not shipped. See [CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions).
+Record non-obvious decisions here by title. These are Door 2 standing rules. Code anchors: `crates/orbit-mcp/src/federated/` (`FederatedMcpHost`, destinations file, host-qualified selector, live probe, fail-closed routing). See [CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions).
 
 ## Federated MCP is a mux of operator-configured destinations
 

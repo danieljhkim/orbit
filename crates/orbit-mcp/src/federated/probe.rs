@@ -1,10 +1,10 @@
-//! Live per-call probing of one configured destination.
+//! Live per-call probing and short-lived delivery to one configured destination.
 //!
 //! The mux answers `orbit.workspace.list` from what destinations say *now*, so
-//! there is no health cache here and nothing is remembered between calls. The
-//! probe speaks MCP as a client over the same non-PTY SSH argv the v1 proxy
-//! uses, calls the destination's own v1 discovery tool, and returns that
-//! envelope verbatim for projection.
+//! there is no health cache here and nothing is remembered between calls. A
+//! routed workspace-scoped call opens one short-lived MCP session, confirms
+//! the destination, and delivers that single `tools/call`. The client speaks
+//! MCP over the same non-PTY SSH argv the v1 proxy uses.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
@@ -46,10 +46,28 @@ pub struct DestinationSnapshot {
 /// One destination's live answer.
 ///
 /// A trait rather than a concrete SSH call so the mux's projection, ordering,
-/// and failure handling are testable against fake destinations without a
-/// reachable host.
+/// routing, and failure handling are testable against fake destinations
+/// without a reachable host.
 pub trait DestinationProbe: Send + Sync {
     fn probe(&self, destination: &Destination) -> Result<DestinationSnapshot, OrbitError>;
+
+    /// One short-lived session for a single routed `tools/call`.
+    ///
+    /// List and route never share a session or a health cache: a list that
+    /// showed a workspace does not decide the next call's error.
+    fn open_route(&self, destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError>;
+}
+
+/// The MCP conversation opened for one routed call.
+///
+/// Snapshot, advertised tools, and the tool call share the session so mixed
+/// version and health checks do not pay a second SSH handshake. The mux
+/// classifies live errors *before* `call_tool`; a stale or unreachable
+/// destination must not observe the call.
+pub trait RoutedSession: Send {
+    fn snapshot(&mut self) -> Result<DestinationSnapshot, OrbitError>;
+    fn advertised_tools(&mut self) -> Result<Vec<String>, OrbitError>;
+    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError>;
 }
 
 /// The production probe: one short-lived SSH-hosted MCP session per call.
@@ -69,12 +87,58 @@ impl SshDestinationProbe {
 
 impl DestinationProbe for SshDestinationProbe {
     fn probe(&self, destination: &Destination) -> Result<DestinationSnapshot, OrbitError> {
-        let child = spawn_destination_session(destination, &self.caller_machine_id)?;
-        // The session is one process per probe; the guard ends it on every
-        // path, including the timeout path where the child is still mid-answer.
-        let mut session = DestinationSession::start(destination, child, self.timeout)?;
-        session.handshake()?;
+        let mut session = self.start_session(destination)?;
         session.discover_workspaces()
+    }
+
+    fn open_route(&self, destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError> {
+        Ok(Box::new(SshRoutedSession {
+            session: self.start_session(destination)?,
+            snapshot: None,
+            tools: None,
+        }))
+    }
+}
+
+impl SshDestinationProbe {
+    fn start_session(&self, destination: &Destination) -> Result<DestinationSession, OrbitError> {
+        let child = spawn_destination_session(destination, &self.caller_machine_id)?;
+        // The session is one process; the guard ends it on every path,
+        // including the timeout path where the child is still mid-answer.
+        let mut session = DestinationSession::start(destination.clone(), child, self.timeout)?;
+        session.handshake()?;
+        Ok(session)
+    }
+}
+
+/// Production routed session: one SSH child, several MCP requests, then drop.
+struct SshRoutedSession {
+    session: DestinationSession,
+    snapshot: Option<DestinationSnapshot>,
+    tools: Option<Vec<String>>,
+}
+
+impl RoutedSession for SshRoutedSession {
+    fn snapshot(&mut self) -> Result<DestinationSnapshot, OrbitError> {
+        if let Some(snapshot) = &self.snapshot {
+            return Ok(snapshot.clone());
+        }
+        let snapshot = self.session.discover_workspaces()?;
+        self.snapshot = Some(snapshot.clone());
+        Ok(snapshot)
+    }
+
+    fn advertised_tools(&mut self) -> Result<Vec<String>, OrbitError> {
+        if let Some(tools) = &self.tools {
+            return Ok(tools.clone());
+        }
+        let tools = self.session.list_tools()?;
+        self.tools = Some(tools.clone());
+        Ok(tools)
+    }
+
+    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+        self.session.call_tool(name, arguments)
     }
 }
 
@@ -103,8 +167,8 @@ fn spawn_destination_session(
 }
 
 /// One MCP client session against a destination, bounded by a single deadline.
-struct DestinationSession<'a> {
-    destination: &'a Destination,
+struct DestinationSession {
+    destination: Destination,
     child: Child,
     stdin: std::process::ChildStdin,
     lines: Receiver<String>,
@@ -112,20 +176,20 @@ struct DestinationSession<'a> {
     next_id: i64,
 }
 
-impl<'a> DestinationSession<'a> {
+impl DestinationSession {
     fn start(
-        destination: &'a Destination,
+        destination: Destination,
         mut child: Child,
         timeout: Duration,
     ) -> Result<Self, OrbitError> {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| unreachable(destination, "SSH session has no stdin".to_string()))?;
+            .ok_or_else(|| unreachable(&destination, "SSH session has no stdin".to_string()))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| unreachable(destination, "SSH session has no stdout".to_string()))?;
+            .ok_or_else(|| unreachable(&destination, "SSH session has no stdout".to_string()))?;
         // A reader thread is what makes the deadline real: a blocking read on
         // an unresponsive host cannot otherwise be abandoned, and the thread
         // ends on its own when the killed child closes the pipe.
@@ -163,7 +227,7 @@ impl<'a> DestinationSession<'a> {
         let negotiated = response["result"]["protocolVersion"].as_str();
         if negotiated != Some(PROTOCOL_VERSION) {
             return Err(unreachable(
-                self.destination,
+                &self.destination,
                 format!("destination negotiated MCP protocol {negotiated:?}"),
             ));
         }
@@ -184,13 +248,13 @@ impl<'a> DestinationSession<'a> {
         if result["isError"].as_bool().unwrap_or(false) {
             // The destination's named code survives: wrapping it in a fresh
             // message here would leave the caller matching on prose.
-            return Err(remote_tool_error(self.destination, content));
+            return Err(remote_tool_error(&self.destination, content));
         }
         let machine_id = content["machine_id"]
             .as_str()
             .ok_or_else(|| {
                 unreachable(
-                    self.destination,
+                    &self.destination,
                     "discovery answer carried no machine_id".to_string(),
                 )
             })?
@@ -198,7 +262,7 @@ impl<'a> DestinationSession<'a> {
         let workspaces: Vec<Workspace> = serde_json::from_value(content["workspaces"].clone())
             .map_err(|error| {
                 unreachable(
-                    self.destination,
+                    &self.destination,
                     format!("discovery answer was not a workspace list: {error}"),
                 )
             })?;
@@ -206,6 +270,41 @@ impl<'a> DestinationSession<'a> {
             machine_id,
             workspaces,
         })
+    }
+
+    fn list_tools(&mut self) -> Result<Vec<String>, OrbitError> {
+        let response = self.request("tools/list", json!({}))?;
+        let tools = response["result"]["tools"].as_array().ok_or_else(|| {
+            unreachable(
+                &self.destination,
+                "tools/list answer carried no tools array".to_string(),
+            )
+        })?;
+        Ok(tools
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(ToOwned::to_owned))
+            .collect())
+    }
+
+    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+        let response = self.request(
+            "tools/call",
+            json!({
+                "name": mcp_advertised_tool_name(name),
+                "arguments": arguments,
+            }),
+        )?;
+        let result = &response["result"];
+        let content = &result["structuredContent"];
+        if result["isError"].as_bool().unwrap_or(false) {
+            // Named destination codes such as `capability_refused` must survive
+            // as `RemoteTool`, not be wrapped into `execution_failed`.
+            return Err(remote_tool_error(&self.destination, content));
+        }
+        if content.is_null() {
+            return Ok(json!({}));
+        }
+        Ok(content.clone())
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, OrbitError> {
@@ -232,7 +331,7 @@ impl<'a> DestinationSession<'a> {
         self.stdin
             .write_all(line.as_bytes())
             .and_then(|()| self.stdin.flush())
-            .map_err(|error| unreachable(self.destination, format!("write failed: {error}")))
+            .map_err(|error| unreachable(&self.destination, format!("write failed: {error}")))
     }
 
     /// Read until the response with this id arrives or the deadline passes.
@@ -245,13 +344,13 @@ impl<'a> DestinationSession<'a> {
                 Ok(line) => line,
                 Err(RecvTimeoutError::Timeout) => {
                     return Err(unreachable(
-                        self.destination,
+                        &self.destination,
                         format!("timed out waiting for '{method}'"),
                     ));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(unreachable(
-                        self.destination,
+                        &self.destination,
                         format!("session ended before answering '{method}'"),
                     ));
                 }
@@ -263,7 +362,7 @@ impl<'a> DestinationSession<'a> {
                 Ok(message) => message,
                 Err(error) => {
                     return Err(unreachable(
-                        self.destination,
+                        &self.destination,
                         format!("emitted invalid JSON: {error}"),
                     ));
                 }
@@ -271,7 +370,7 @@ impl<'a> DestinationSession<'a> {
             if message.get("id").and_then(Value::as_i64) == Some(id) {
                 if let Some(error) = message.get("error") {
                     return Err(unreachable(
-                        self.destination,
+                        &self.destination,
                         format!("'{method}' failed: {error}"),
                     ));
                 }
@@ -281,7 +380,7 @@ impl<'a> DestinationSession<'a> {
     }
 }
 
-impl Drop for DestinationSession<'_> {
+impl Drop for DestinationSession {
     fn drop(&mut self) {
         if let Err(error) = self.child.kill() {
             tracing::debug!(

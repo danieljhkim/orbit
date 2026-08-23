@@ -13,7 +13,7 @@ related_artifacts: [ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
 
 # Spec: Federated workspace MCP
 
-The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. The federated list is implemented in [ORB-11014]; routing is not yet.
+The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. The federated list is implemented in [ORB-11014]; fail-closed routing of copied `hm_*/ws_*` selectors is implemented in [ORB-11015].
 
 ## Why This Exists
 
@@ -105,12 +105,13 @@ The would-be signal is matching `git_remote` across destinations with differing 
 Federated `orbit_workspace_list` is a **new session-unbound response shape**, not a compatible extension of v1 `orbit.workspace.list`.
 
 Implemented in [ORB-11014] as `orbit mcp serve --mode federated`
-(`crates/orbit-mcp/src/federated/`). That server advertises this list tool and
-nothing else, because routing has not landed and a half-routed canonical
-surface would promise delivery the mux cannot perform. Membership is loaded
-once at startup from the destinations file; every call then probes each
-destination live over the v1 remote argv and caches nothing. The response
-envelope is `{"workspaces": [...]}` — no envelope `machine_id`.
+(`crates/orbit-mcp/src/federated/`). Membership is loaded once at startup from
+the destinations file; every list call then probes each destination live over
+the v1 remote argv and caches nothing. The response envelope is
+`{"workspaces": [...]}` — no envelope `machine_id`. After [ORB-11015] the mux
+advertises the canonical 23-tool surface: this list stays session-unbound and
+answered by the mux, and every workspace-scoped tool is delivered to the
+destination encoded in the copied selector.
 
 v1 (`crates/orbit-mcp/src/remote/discovery.rs`) returns `{"machine_id": "hm_…", "workspaces": […]}` with `machine_id` on the **envelope**, and filters to `Active` workspaces that are locally checked out on the accepting machine.
 
@@ -194,4 +195,4 @@ A disconnected or failed host therefore removes the affected route from useful s
 
 ## Agent Signature
 
-Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014].
+Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014]; fail-closed routing of host-qualified selectors implemented in [ORB-11015].

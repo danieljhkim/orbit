@@ -7,7 +7,7 @@ status: Draft
 feature: federated-mcp
 doc_role: design
 type: design
-summary: Proposed (not shipped) federated MCP mux, selector, capability split, list schema, and fail-closed routing. V1 current behavior stays in mcp-bridge.
+summary: Federated MCP mux, selector, capability split, list schema, and fail-closed routing. V1 current behavior stays in mcp-bridge.
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
@@ -16,7 +16,7 @@ related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 
 # Federated MCP — Design
 
-This document describes the **proposed** federated MCP surface. It is not implemented. Current v1 behavior — one chosen destination, byte-transparent direct SSH stdio, no Orbit process relaying onward — remains [mcp-bridge 2_design.md](../mcp-bridge/2_design.md). Do not read the sections below as live runtime.
+This document describes the federated MCP surface. Current v1 behavior — one chosen destination, byte-transparent direct SSH stdio, no Orbit process relaying onward — remains [mcp-bridge 2_design.md](../mcp-bridge/2_design.md) and is unchanged by `--mode remote`. The federated mux is a separate `--mode federated` server: list in [ORB-11014], routing in [ORB-11015].
 
 The prescriptive invariants live in [specs/federated-workspace-mcp.md](./specs/federated-workspace-mcp.md). This file explains how those pieces fit.
 
@@ -121,7 +121,7 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 
 ## 9. Concerns & Honest Limitations
 
-- This design is not shipped. No runtime, tool schema, or conformance YAML in this change implements it.
+- v1 `--mode remote` is unchanged. Federated list and routing live only in `--mode federated`.
 - Availability is bounded by the chosen destination. Callers must handle visible routing failures; there is no transparent substitute result.
 - Including unreachable hosts makes the list honest and larger; clients must read reachability rather than treating presence as liveness.
 - Capability advertisement can lag destination Core. The destination refuse is the correctness boundary; the gateway is not a second authorization layer.
@@ -134,5 +134,7 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 - [ORB-11008] — recorded the federated multi-host MCP policy
 - [ORB-11009] — specified this proposed mechanism as the implementable contract (PR #1139)
 - [ORB-11010] — closed the PR #1139 review contract holes in this folder
+- [ORB-11014] — federated `orbit.workspace.list`
+- [ORB-11015] — fail-closed routing of host-qualified selectors
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
