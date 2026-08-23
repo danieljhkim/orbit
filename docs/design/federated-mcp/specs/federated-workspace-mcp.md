@@ -8,16 +8,16 @@ status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, spec]
 related_features: [federated-mcp, host-registry, mcp-bridge]
-related_artifacts: [ORB-11009, ORB-11008]
+related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Federated workspace MCP
 
-The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes an opaque host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. This spec is proposed; it is not implemented.
+The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. This spec is proposed; it is not implemented.
 
 ## Why This Exists
 
-Without this contract, an implementation will key selectors on renameable `host_id`, invent a second ownership model, lump runs and task issuance as one "mutations" blob, omit down hosts from the list, or violate mcp-bridge's no-relay rule (or ship a mux the corpus still forbids). [ORB-11008] recorded the policy; this spec is the implementable mechanism from [ORB-11009].
+Without this contract, an implementation will key selectors on renameable `host_id`, invent a second ownership model, lump runs and task issuance as one "mutations" blob, omit down hosts from the list, or violate mcp-bridge's no-relay rule (or ship a mux the corpus still forbids). [ORB-11008] recorded the policy; [ORB-11009] (PR #1139) opened this spec; [ORB-11010] closes the contract holes that review named.
 
 ## Mux, not fleet registry
 
@@ -28,24 +28,42 @@ Without this contract, an implementation will key selectors on renameable `host_
 
 ## Selector identity
 
-1. The opaque host-qualified selector is keyed by stable `machine_id` (`hm_…`), not renameable `host_id`.
-2. Example form: `hm_<id>/ws_orbit`. Callers treat the token as opaque. Display names such as `orbit-linux/ws_orbit` are not selectors.
-3. The selector is addressing data, not a path, URL, logical-only workspace ID, or authorization credential. Possession of a selector is not authorization.
-4. Every workspace-scoped federated tool accepts the selector. The gateway routes that call to the encoded destination.
-5. **Ambiguous destination** means either (a) two configured destinations share a `machine_id`, or (b) the token is not uniquely host-qualified. Both fail as `ambiguous_destination`.
+1. The host-qualified selector is **structured, caller-uninterpreted**. Encoding `hm_<id>/ws_*` is normative (example: `hm_<id>/ws_orbit`). The stable key is `machine_id` (`hm_…`), not renameable `host_id`.
+2. Callers must not parse the token and must not construct it from `host_id` or by concatenating remembered identifiers. The only caller-facing way to obtain a selector is to copy the `selector` field from federated `orbit_workspace_list`.
+3. Display names such as `orbit-linux/ws_orbit` are not selectors.
+4. The selector is addressing data, not a path, URL, logical-only workspace ID, or authorization credential. Possession of a selector is not authorization.
+5. Every workspace-scoped federated tool accepts the selector. The gateway routes that call to the encoded destination.
+6. A token that is not uniquely host-qualified (a bare `ws_*`, a display host name, or any other form that does not match the normative encoding) is `unknown_selector`, not `ambiguous_destination`.
+7. Duplicate `machine_id` across configured destinations is a **config-load** `ambiguous_destination`. The mux must not treat that collision as a per-call routing outcome.
+
+## Tool classes
+
+Capability class is assigned by **what the tool does**, not by a per-tool registry field and not by naming `orbit_task_add` alone.
+
+| Class | Rule | Examples (not an exhaustive registry) |
+|---|---|---|
+| `control_plane` | Task issuance and coordination-store writes | `orbit_task_add`, `orbit.task.update`, `orbit.task.start` |
+| `execute` | Anything that touches runs, logs, or scheduler state | job-run inspect/cancel, log read, routine/scheduler mutations |
+| unclassified | Discovery and list tools | `orbit_workspace_list` (federated), other list/discovery tools |
+
+Unclassified tools are **not** subject to `capability_refused`. A destination may still fail them for other routing classes (`unknown_selector`, `unreachable_destination`, `tool_not_on_this_host`, and so on).
 
 ## Capabilities vs checkout roles
 
 Capabilities distinguish at least `control_plane` and `execute`. They map onto existing host-registry catalog roles; do not invent a parallel ownership vocabulary.
 
-| Catalog role (v1) | Advertised capabilities | Destination Core |
+**The destination's local catalog role determines capability class.** Federated-list advertisement is a hint and may lag the destination. Destination Core refusal remains the correctness boundary. The gateway does **not** enforce by rewriting the destination, and "typically also `execute`" is not a refusal input.
+
+| Catalog role (v1) | Classes the destination holds | Destination Core |
 |---|---|---|
-| Owner checkout | `control_plane`; typically also `execute` | Control-plane authority for that workspace's coordination. Refuses `execute`-class tools only when it does not advertise `execute` (for example a future control-plane-only store). |
+| Owner checkout | `control_plane`. May also hold `execute` when that checkout runs locally; that second class is independent of the owner role. | Control-plane authority for that workspace's coordination. Refuses `execute`-class tools only when it does not hold `execute` (for example a future control-plane-only store). |
 | Replica checkout | `execute` | Execution binding. Refuses `control_plane` tools. |
 
+A workspace whose logical record has absent `owner_machine_id` (`Option` on `Workspace` in `crates/orbit-types/src/workspace/registry.rs`) **cannot advertise `control_plane`**. Standalone registries that predate host identity may omit the field; they are not a control-plane authority.
+
 1. Destination-host Core **refuses the other class** with named error `capability_refused`.
-2. The gateway may advertise capabilities. It does **not** enforce by rewriting the destination.
-3. If a caller routes `orbit_task_add` (or any other control-plane tool) to an execution-binding host, the destination refuses with `capability_refused`. The gateway **must not** silently send it to the owner. No implicit failover.
+2. The gateway may advertise capabilities. Advertisement is not authorization and is not a second enforcement layer.
+3. If a caller routes a `control_plane` tool (`orbit_task_add`, `orbit.task.update`, or any other coordination-store write) to an execution-binding host, the destination refuses with `capability_refused`. The gateway **must not** silently send it to the owner. No implicit failover.
 
 ## Split authority ("mutations" is not one blob)
 
@@ -60,39 +78,63 @@ Do not specify a single "mutations" permission that covers both columns. A repli
 
 Federated `orbit_workspace_list` is an aggregate of live descriptors, not an aggregate task or store query.
 
+## Single control-plane per repository is operator configuration
+
+A single control-plane per repository is an **operator configuration responsibility**, not a mux invariant. The mux does **not** detect competing owners and does **not** raise an error when two destinations each declare Owner.
+
+The would-be signal is matching `git_remote` across destinations with differing `owner_machine_id`. Independently inited checkouts also have different `ws_*`, so the mux cannot observe the collision without the fleet discovery this design forbids. A violation surfaces as **two independent control planes**, not as a routing or config error.
+
 ## Federated `orbit_workspace_list`
 
+Federated `orbit_workspace_list` is a **new session-unbound response shape**, not a compatible extension of v1 `orbit.workspace.list`.
+
+v1 (`crates/orbit-mcp/src/remote/discovery.rs`) returns `{"machine_id": "hm_…", "workspaces": […]}` with `machine_id` on the **envelope**, and filters to `Active` workspaces that are locally checked out on the accepting machine.
+
+Federated list does **not** inherit that envelope or that filter:
+
 1. **Session-unbound.** The tool must not require a workspace selector. Session/initialize workspace metadata is not an input and not a filter.
-2. **Additive.** Each descriptor keeps today's v1 workspace fields (`id`, `name`, `ship_mode`, `owner_machine_id`, `git_remote`, `base_branch`, `status`, `created_at`, `updated_at`) and adds:
+2. **`machine_id` on each descriptor**, not on the envelope. Each descriptor keeps today's v1 workspace fields (`id`, `name`, `ship_mode`, `owner_machine_id`, `git_remote`, `base_branch`, `status`, `created_at`, `updated_at`) and adds:
 
    | Field | Meaning |
    |---|---|
-   | `selector` | Opaque host-qualified route token (`hm_<id>/ws_*`) |
+   | `selector` | Structured, caller-uninterpreted host-qualified route token (`hm_<id>/ws_*`). Copy this field; do not parse it. |
    | `host` | Destination display identity (renameable `host_id`; display only) |
    | `machine_id` | Destination stable identity (`hm_…`) |
    | host-reachability | Whether the configured destination answers |
    | checkout-health | Repo-root presence at that destination (`active` / `invalid` / `unknown` if the host cannot be probed) |
-   | `capabilities` | Classes the destination currently advertises for that workspace |
+   | `capabilities` | Classes the destination currently **advertises** for that workspace (a hint; see Capabilities vs checkout roles) |
 
 3. **Do not overload one `health` field** with SSH/MCP reachability and repo-root presence.
-4. **Include unreachable hosts.** A down or unreachable configured destination appears with an explicit unreachable (and, if checkout cannot be probed, unknown/unhealthy) projection. **Do not omit it.** Omission makes every later call a stale-route surprise.
-5. v1 `orbit.workspace.list` on a single accepting machine is unchanged: it remains machine-local and is documented in mcp-bridge / host-registry current-behavior docs.
+4. **Include unreachable and inactive destinations.** Configured workspaces on unreachable or inactive destinations are included, not omitted. A down destination appears with an explicit unreachable (and, if checkout cannot be probed, unknown/unhealthy) projection. Omission makes every later call a stale-route surprise.
+5. v1 `orbit.workspace.list` on a single accepting machine is unchanged: it remains machine-local, envelope-keyed, and Active-and-locally-checked-out, and is documented in mcp-bridge / host-registry current-behavior docs.
 
 ## Fail-closed routing
 
 The gateway delivers a workspace-scoped federated call to the destination encoded in the selector. It does not fall back to a local workspace, another host with a matching `ws_*`, a default workspace, or a cached host-local runtime.
 
+Routing decides on **live delivery**, not cached list health. Probe cadence and list freshness remain a vision open question; they do not change which error a live call returns.
+
 | Class | Error identity | When |
 |---|---|---|
-| unknown | `unknown_selector` | Token does not name a configured destination+workspace |
-| unreachable | `unreachable_destination` | Configured destination does not answer |
+| unknown | `unknown_selector` | Token never valid: it does not uniquely name a configured destination+workspace, including a token that is not uniquely host-qualified (bare `ws_*`) |
+| ambiguous | `ambiguous_destination` | Duplicate `machine_id` among configured destinations, raised at **config load**, not per call |
+| unreachable | `unreachable_destination` | Configured destination does not answer a live delivery attempt |
+| stale-route | `stale_route` | Destination is configured; a live probe shows that workspace is absent |
 | unhealthy | `unhealthy_checkout` | Destination answers but the checkout is not usable (repo-root missing / invalid) |
-| ambiguous | `ambiguous_destination` | Shared `machine_id` among destinations, or token not uniquely host-qualified |
-| stale-route | `stale_route` | Encoded destination no longer advertises that workspace |
 | tool not advertised | `tool_not_on_this_host` | Destination is identified; the tool is not on that host's advertised surface |
 | capability refuse | `capability_refused` | Destination Core holds the workspace but refuses the tool's capability class |
 
+`stale_route` vs `unknown_selector`: destination configured but workspace absent after a live probe → `stale_route`; selector never valid → `unknown_selector`.
+
 `tool_not_on_this_host` is distinct from `unknown_selector`. `capability_refused` is distinct from both: the tool may be advertised elsewhere on that host, but this checkout role will not execute it.
+
+### Caller-facing precedence
+
+When more than one class could apply, return the first that matches:
+
+`unknown_selector` → `ambiguous_destination` (config) → `unreachable_destination` → `stale_route` → `unhealthy_checkout` → `tool_not_on_this_host` → `capability_refused`
+
+Unreachable wins over capability and stale because those are undecidable without the host. Cached list health must not reorder this list.
 
 ## mcp-bridge invariant exception
 
@@ -114,7 +156,7 @@ The following remain out of this surface:
 - task or store replication;
 - synchronization;
 - quorum election;
-- competing authorities;
+- detecting or rejecting competing control-plane authorities (operator configuration; see above);
 - implicit failover;
 - silent merging of host-local state.
 
@@ -122,4 +164,4 @@ A disconnected or failed host therefore removes the affected route from useful s
 
 ## Agent Signature
 
-Specified by grok in [ORB-11009], citing prior policy [ORB-11008].
+Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008].

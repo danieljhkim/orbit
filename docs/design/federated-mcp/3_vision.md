@@ -11,7 +11,7 @@ summary: Open questions for the proposed federated MCP mux: transport authentica
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11009, ORB-11008]
+related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Vision
@@ -22,18 +22,18 @@ Forward-looking only. The contract in [specs/federated-workspace-mcp.md](./specs
 
 1. **Transport authentication.** What authenticated principal does a destination Core receive on a mux-forwarded call? Selector possession is not authorization. Existing registry and session fields (`machine_id`, `host_id`, `caller_machine_id`, `caller_ip`, SSH audit labels) must not be promoted into credentials by implication.
 2. **Selector expiry.** Does a host-qualified selector remain valid across destination catalog edits, host re-init, and mux restarts, or does it expire? If it expires, what is the caller-visible error, and how does that differ from `stale_route`?
-3. **Health freshness.** How old may host-reachability and checkout-health be when listed? Is the list a live probe, a cached projection with explicit freshness, or a last-known snapshot for unreachable hosts? The spec requires including unreachable hosts; it does not yet define probe cadence or staleness thresholds.
+3. **Health freshness.** How old may host-reachability and checkout-health be when listed? Is the list a live probe, a cached projection with explicit freshness, or a last-known snapshot for unreachable hosts? The spec requires including unreachable hosts and requires routing to decide on live delivery rather than cached list health; it does not yet define probe cadence or staleness thresholds.
 4. **Cloud coordination-store details.** The declared control-plane authority may later offload the coordination store. What is the persistence contract, how do execution-binding hosts refer to it, and how does destination Core still refuse task issuance locally without implying replication?
 
 ## 2. Prior Work
 
 ### Policy recorded in host-registry / remote-access
 
-[ORB-11008] wrote the five-point federated policy (one namespace, live descriptors, fail-closed routing, destination authority, no replica protocol) into host-registry and remote-access vision. That write-up is superseded as a contract home; those docs now cross-link here.
+[ORB-11008] wrote the federated policy (one namespace, live descriptors, fail-closed routing, destination authority, no replica protocol) into host-registry and remote-access vision. That write-up is superseded as a contract home; those docs now cross-link here as a standing constraint. They no longer hold the five-point policy list.
 
 ### Host-registry catalog roles
 
-Owner vs replica checkouts, `machine_id` vs `host_id`, and checkout-health as repo-root presence are live v1 catalog rules. This feature maps new nouns onto those roles instead of creating a parallel ownership vocabulary. See [host-registry 2_design.md](../host-registry/2_design.md).
+Owner vs replica checkouts, `machine_id` vs `host_id`, and checkout-health as repo-root presence are live v1 catalog rules. This feature maps new nouns onto those roles instead of creating a parallel ownership vocabulary. See [host-registry 2_design.md](../host-registry/2_design.md). A workspace with absent `owner_machine_id` cannot advertise `control_plane`.
 
 ### mcp-bridge v1
 
@@ -66,6 +66,7 @@ Nothing in the mux topology is novel: it is a configured reverse-proxy in front 
 ## Task References
 
 - [ORB-11008] — recorded the federated multi-host MCP policy
-- [ORB-11009] — opened this vision folder as the contract home and left the questions above unresolved
+- [ORB-11009] — opened this vision folder as the contract home and left the questions above unresolved (PR #1139)
+- [ORB-11010] — closed review holes in the spec without resolving these vision questions
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
