@@ -216,20 +216,36 @@ fn build_v2_task_backends(
             .unwrap_or_else(|| UNBOUND_DATA_DIR_WORKSPACE_ID.to_string());
         return Ok(coordination_task_backends(registry, workspace_id));
     }
-    let workspace_id = if let Some(config) = &config {
-        if let Some(hint) = workspace_id_hint
-            && config.workspace_id != hint
-        {
-            return Err(OrbitError::WorkspaceError(format!(
-                "workspace binding id '{}' does not match configured workspace id '{}'",
-                hint, config.workspace_id
-            )));
+    let configured_id = config.as_ref().map(|config| config.workspace_id.as_str());
+    if let (Some(hint), Some(configured)) = (workspace_id_hint, configured_id)
+        && configured != hint
+    {
+        return Err(OrbitError::WorkspaceError(format!(
+            "workspace binding id '{hint}' does not match configured workspace id '{configured}'"
+        )));
+    }
+    // A checkout whose `config.yaml` identity drifted from the registry row for
+    // its orbit dir still keeps its task state under the bound id. Adopt that
+    // row instead of asking `bind_workspace` for the drifted id, which fails
+    // closed and takes every command in the checkout down (ORB-10985). The
+    // config write below reconciles the checkout identity back onto it.
+    let workspace_id = match registry.find_checkout_by_orbit_dir(&paths.orbit_dir)? {
+        Some(bound) => {
+            if configured_id.is_some_and(|configured| configured != bound.workspace_id) {
+                tracing::warn!(
+                    target: "orbit.core.bootstrap",
+                    orbit_dir = %paths.orbit_dir.display(),
+                    bound_workspace_id = %bound.workspace_id,
+                    configured_workspace_id = configured_id,
+                    "checkout identity diverged from its task-registry binding; adopting the bound workspace"
+                );
+            }
+            Some(bound.workspace_id)
         }
-        Some(config.workspace_id.clone())
-    } else if let Some(hint) = workspace_id_hint {
-        Some(hint.to_string())
-    } else {
-        rebind_candidate_workspace_id(&registry, paths)?
+        None => match configured_id.or(workspace_id_hint) {
+            Some(id) => Some(id.to_string()),
+            None => rebind_candidate_workspace_id(&registry, paths)?,
+        },
     };
     let binding = registry.bind_workspace(BindWorkspaceParams {
         workspace_id,
@@ -242,14 +258,26 @@ fn build_v2_task_backends(
     if config
         .as_ref()
         .is_none_or(|config| config.workspace_id != binding.workspace_id)
-    {
-        write_workspace_config(
+        && let Err(error) = write_workspace_config(
             &paths.orbit_dir,
             &WorkspaceConfig {
                 schema_version: 1,
                 workspace_id: binding.workspace_id.clone(),
             },
-        )?;
+        )
+    {
+        // Reads must still work from a read-only mount; the identity file is
+        // reconciled the next time the checkout is writable.
+        if error.is_readonly_or_access_failure() {
+            tracing::warn!(
+                target: "orbit.core.bootstrap",
+                orbit_dir = %paths.orbit_dir.display(),
+                error = %error,
+                "skipped incidental workspace-identity reconciliation"
+            );
+        } else {
+            return Err(error);
+        }
     }
 
     Ok(workspace_task_backends(

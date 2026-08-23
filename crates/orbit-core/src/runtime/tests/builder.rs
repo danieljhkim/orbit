@@ -206,6 +206,48 @@ fn v2_task_backend_rebinds_when_workspace_config_is_missing() {
     );
 }
 
+/// ORB-10985: a checkout whose `config.yaml` identity drifted away from the
+/// registry row for its orbit dir must still open — the bound partition holds
+/// its task state — and the identity file is reconciled onto that partition.
+#[test]
+fn v2_task_backend_adopts_the_bound_workspace_when_the_checkout_identity_drifts() {
+    let (_root, global_root, workspace_root, runtime) = v2_runtime();
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "Drifted identity task".to_string(),
+            description: "Stays reachable after config.yaml is rewritten".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("create task");
+    let bound_workspace_id = read_workspace_config_optional(&workspace_root)
+        .expect("read workspace config")
+        .map(|config| config.workspace_id)
+        .expect("workspace id");
+    drop(runtime);
+
+    orbit_store::maintenance::task_registry::write_workspace_config(
+        &workspace_root,
+        &orbit_store::maintenance::task_registry::WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "orbit-5c61b3".to_string(),
+        },
+    )
+    .expect("diverge the checkout identity");
+
+    let rebuilt = OrbitRuntime::from_roots(&global_root, &workspace_root)
+        .expect("a drifted checkout identity must not refuse the runtime");
+    let fetched = rebuilt.get_task(&task.id).expect("get task after drift");
+    assert_eq!(fetched.title, "Drifted identity task");
+    assert_eq!(
+        read_workspace_config_optional(&workspace_root)
+            .expect("read reconciled workspace config")
+            .map(|config| config.workspace_id),
+        Some(bound_workspace_id),
+        "the checkout identity must be reconciled onto the bound partition"
+    );
+}
+
 #[test]
 fn explicit_data_dir_runtime_does_not_bind_parent_as_a_checkout() {
     let root = tempdir().expect("tempdir");
