@@ -104,10 +104,10 @@ jobs:
 
   # [ORB-10010] Coverage visibility — informational, NOT a merge gate. This
   # job is intentionally excluded from any required-status-check wiring
-  # (agent-main's branch protection sets required_status_checks: null, see
-  # RELEASING.md §10c; keep it that way for this job if checks are ever made
-  # required). Per-crate coverage targets (goals, not gates) are documented in
-  # CONTRIBUTING.md "Testing & Coverage".
+  # (agent-main's branch protection requires the primary "Check / Clippy /
+  # Test" status check; this informational job is intentionally excluded from
+  # that gate, see RELEASING.md §10c). Per-crate coverage targets (goals, not
+  # gates) are documented in CONTRIBUTING.md "Testing & Coverage".
   coverage:
     name: Coverage (informational)
     runs-on: ubuntu-latest
