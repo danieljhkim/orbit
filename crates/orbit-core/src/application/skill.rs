@@ -267,9 +267,7 @@ pub(crate) fn doctor_client_skill_links(
 
 #[cfg(test)]
 mod tests {
-    //! Tests guarding the on-disk assets, seeded registry, router skill, and
-    //! plugin package configuration. Each delivery surface validates its own
-    //! contract without requiring the skill trees to match.
+    //! Tests guarding the on-disk assets, seeded registry, and router skill.
     //!
     //! Plus a portability regression (`embedded_assets_are_repository_agnostic`)
     //! guarding the shipped skill *and* activity trees against leaking
@@ -287,17 +285,6 @@ mod tests {
 
     fn assets_activities_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/activities")
-    }
-
-    fn repo_root() -> PathBuf {
-        // CARGO_MANIFEST_DIR points at <repo>/crates/orbit-core. Walk up two
-        // levels to reach the workspace root.
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("orbit-core has a parent (crates/)")
-            .parent()
-            .expect("crates/ has a parent (repo root)")
-            .to_path_buf()
     }
 
     fn collect_relative_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
@@ -364,212 +351,6 @@ mod tests {
         );
     }
 
-    /// Every shipped file must be byte-identical to its plugin mirror.
-    ///
-    /// The plugin package is a hand-mirrored copy of the embedded tree, so a
-    /// file edited on one side and not the other ships two different documents
-    /// under one name. Asserting the whole set — rather than one representative
-    /// file — is what makes a forgotten mirror a test failure instead of a
-    /// silent release.
-    #[test]
-    fn every_shipped_skill_file_matches_its_plugin_copy() {
-        let plugin_skills = repo_root().join("plugin/skills");
-
-        let mut failures: Vec<String> = Vec::new();
-        for (relative, embedded) in DEFAULT_SKILL_FILES {
-            let mirror = plugin_skills.join(relative);
-            match std::fs::read_to_string(&mirror) {
-                Ok(contents) if contents == embedded => {}
-                Ok(_) => failures.push(format!("  {relative}: differs from the embedded copy")),
-                Err(e) => failures.push(format!(
-                    "  {relative}: unreadable at {}: {e}",
-                    mirror.display()
-                )),
-            }
-        }
-
-        // A file only in the plugin tree is equally broken: it ships to plugin
-        // users and to nobody else.
-        let mirrored = collect_relative_files(&plugin_skills)
-            .unwrap_or_else(|e| panic!("collect_relative_files({}): {e}", plugin_skills.display()));
-        let shipped: BTreeSet<PathBuf> = DEFAULT_SKILL_FILES
-            .iter()
-            .map(|(relative, _)| PathBuf::from(relative))
-            .collect();
-        for extra in mirrored.difference(&shipped) {
-            failures.push(format!(
-                "  {}: present in plugin/skills/ but not shipped",
-                extra.display()
-            ));
-        }
-
-        assert!(
-            failures.is_empty(),
-            "plugin/skills/ is out of sync with the embedded skill tree ({} file(s)) — \
-             re-mirror it so both copies ship the same bytes:\n{}",
-            failures.len(),
-            failures.join("\n"),
-        );
-    }
-
-    #[test]
-    fn plugin_package_configuration_is_valid() {
-        let repo = repo_root();
-        let claude_mcp_path = repo.join("plugin/.mcp.json");
-        let codex_manifest_path = repo.join("plugin/.codex-plugin/plugin.json");
-        let marketplace_path = repo.join(".agents/plugins/marketplace.json");
-
-        let mut failures: Vec<String> = Vec::new();
-
-        // Validate the Codex and Claude package configuration independently.
-        let codex_manifest: serde_json::Value = match std::fs::read_to_string(&codex_manifest_path)
-        {
-            Ok(contents) => match serde_json::from_str(&contents) {
-                Ok(value) => value,
-                Err(e) => {
-                    failures.push(format!(
-                        "  {}: invalid JSON: {e}",
-                        codex_manifest_path.display()
-                    ));
-                    serde_json::Value::Null
-                }
-            },
-            Err(e) => {
-                failures.push(format!(
-                    "  {}: failed to read Codex plugin manifest: {e}",
-                    codex_manifest_path.display()
-                ));
-                serde_json::Value::Null
-            }
-        };
-        if !codex_manifest.is_null() {
-            if codex_manifest
-                .get("skills")
-                .and_then(|value| value.as_str())
-                != Some("./skills/")
-            {
-                failures.push(
-                    "  plugin/.codex-plugin/plugin.json: `skills` must point at ./skills/"
-                        .to_string(),
-                );
-            }
-            if codex_manifest.get("hooks").is_some() {
-                failures.push(
-                    "  plugin/.codex-plugin/plugin.json: must not declare Claude-only hooks"
-                        .to_string(),
-                );
-            }
-            let mcp_servers = codex_manifest.get("mcpServers");
-            if !matches!(mcp_servers, Some(serde_json::Value::Object(map)) if !map.is_empty()) {
-                failures.push(
-                    "  plugin/.codex-plugin/plugin.json: `mcpServers` must be a non-empty object"
-                        .to_string(),
-                );
-            }
-            if mcp_servers
-                .map(|value| value.to_string().contains("CLAUDE_PROJECT_DIR"))
-                .unwrap_or(false)
-            {
-                failures.push(
-                    "  plugin/.codex-plugin/plugin.json: Codex MCP config must not reference CLAUDE_PROJECT_DIR"
-                        .to_string(),
-                );
-            }
-        }
-
-        // MCP workspace selection is per initialize/session context or tool
-        // call. A launch-time --root silently reintroduces the retired cwd
-        // routing model and is rejected by `orbit mcp serve`.
-        let claude_mcp: serde_json::Value = match std::fs::read_to_string(&claude_mcp_path) {
-            Ok(contents) => match serde_json::from_str(&contents) {
-                Ok(value) => value,
-                Err(e) => {
-                    failures.push(format!(
-                        "  {}: invalid JSON: {e}",
-                        claude_mcp_path.display()
-                    ));
-                    serde_json::Value::Null
-                }
-            },
-            Err(e) => {
-                failures.push(format!(
-                    "  {}: failed to read Claude MCP config: {e}",
-                    claude_mcp_path.display()
-                ));
-                serde_json::Value::Null
-            }
-        };
-        if !claude_mcp.is_null() {
-            let command = claude_mcp
-                .pointer("/mcpServers/orbit/command")
-                .and_then(|value| value.as_str());
-            let args = claude_mcp
-                .pointer("/mcpServers/orbit/args")
-                .and_then(|value| value.as_array())
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(|value| value.as_str())
-                        .collect::<Vec<_>>()
-                });
-            if command != Some("npx")
-                || args != Some(vec!["-y", "@orbit-tools/cli@latest", "mcp", "serve"])
-            {
-                failures.push(
-                    "  plugin/.mcp.json: Orbit MCP launch must be `npx -y @orbit-tools/cli@latest mcp serve` with no cwd or --root routing"
-                        .to_string(),
-                );
-            }
-        }
-
-        let marketplace: serde_json::Value = match std::fs::read_to_string(&marketplace_path) {
-            Ok(contents) => match serde_json::from_str(&contents) {
-                Ok(value) => value,
-                Err(e) => {
-                    failures.push(format!(
-                        "  {}: invalid JSON: {e}",
-                        marketplace_path.display()
-                    ));
-                    serde_json::Value::Null
-                }
-            },
-            Err(e) => {
-                failures.push(format!(
-                    "  {}: failed to read Codex marketplace manifest: {e}",
-                    marketplace_path.display()
-                ));
-                serde_json::Value::Null
-            }
-        };
-        if let Some(plugins) = marketplace
-            .get("plugins")
-            .and_then(|value| value.as_array())
-        {
-            let source_path = plugins
-                .iter()
-                .find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some("orbit"))
-                .and_then(|entry| entry.get("source"))
-                .and_then(|source| source.get("path"))
-                .and_then(|value| value.as_str());
-            if source_path != Some("./plugin") {
-                failures.push(
-                    "  .agents/plugins/marketplace.json: orbit entry must point at ./plugin"
-                        .to_string(),
-                );
-            }
-        } else if !marketplace.is_null() {
-            failures
-                .push("  .agents/plugins/marketplace.json: `plugins` must be an array".to_string());
-        }
-
-        assert!(
-            failures.is_empty(),
-            "plugin package configuration failed with {} error(s):\n{}",
-            failures.len(),
-            failures.join("\n"),
-        );
-    }
-
     /// The router must link every shipped reference.
     ///
     /// With one skill, progressive disclosure runs entirely through
@@ -606,8 +387,8 @@ mod tests {
 
     // --- Portability regression -------------------------------------------
     //
-    // The shipped skill tree is embedded into the binary, seeded into arbitrary
-    // consumer workspaces, and mirrored into the public plugin package. It must
+    // The shipped skill tree is embedded into the binary and seeded into
+    // arbitrary consumer workspaces. It must
     // not encode assumptions that only hold in an Orbit source checkout or in
     // Daniel's private Constellation environment. `portability_violations`
     // classifies the leak families the ORB-10208 audit found; the test asserts
@@ -889,8 +670,8 @@ mod tests {
 
     #[test]
     fn embedded_assets_are_repository_agnostic() {
-        // Both trees ship: skills are embedded and mirrored into the public
-        // plugin package, and activities are `include_str!`'d by
+        // Both trees ship: skills are embedded, and activities are
+        // `include_str!`'d by
         // `command::activity` and seeded into every workspace on `orbit init`
         // (with a byte-identical copy under `.orbit/resources/activities/`).
         // Activities were outside this check until a task description's own

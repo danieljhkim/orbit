@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# Verify the release-version invariant for the agent plugin install chain.
+# Verify release-version lockstep across Cargo, the npm proxy, npm, and GitHub.
 #
-# The npm package version, the Claude/Codex/Agent Plugin manifest versions, and
-# the latest GitHub Release tag must all agree. Drift here means `npx -y
-# @orbit-tools/cli@latest mcp serve` downloads a binary tagged at a different
-# release than the installed plugin manifest advertises.
-#
-# Exits 0 when every source agrees, 1 on drift, 2 on missing prerequisites.
-# Documented entry point: `make release-check`.
+# Exits 0 when every reachable source agrees, 1 on drift, and 2 on a missing
+# local prerequisite. Remote registry/release checks remain soft so the target
+# is useful from a fresh checkout without credentials.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
 NPM_PKG="@orbit-tools/cli"
-CLAUDE_PLUGIN_MANIFEST="plugin/.claude-plugin/plugin.json"
-CODEX_PLUGIN_MANIFEST="plugin/.codex-plugin/plugin.json"
-AGENT_PLUGIN_MANIFEST="plugin/plugin.json"
-NPM_PACKAGE_JSON="plugin/npm/package.json"
+CARGO_TOML="Cargo.toml"
+NPM_PACKAGE_JSON="npm/package.json"
 
 require_bin() {
   local bin="$1"
@@ -29,40 +23,30 @@ require_bin() {
 
 require_bin jq
 
-for f in "$CLAUDE_PLUGIN_MANIFEST" "$CODEX_PLUGIN_MANIFEST" "$AGENT_PLUGIN_MANIFEST" "$NPM_PACKAGE_JSON"; do
-  if [[ ! -f "$f" ]]; then
-    echo "release-check: $f not found (run from repo root)" >&2
+for file in "$CARGO_TOML" "$NPM_PACKAGE_JSON"; do
+  if [[ ! -f "$file" ]]; then
+    echo "release-check: $file not found (run from repo root)" >&2
     exit 2
   fi
 done
 
-if [[ ! -x "scripts/validate-codex-plugin.sh" ]]; then
-  echo "release-check: scripts/validate-codex-plugin.sh is missing or not executable" >&2
-  exit 2
-fi
-"$repo_root/scripts/validate-codex-plugin.sh" "$repo_root" >/dev/null
-
-if [[ ! -x "scripts/validate-agent-plugin.sh" ]]; then
-  echo "release-check: scripts/validate-agent-plugin.sh is missing or not executable" >&2
-  exit 2
-fi
-"$repo_root/scripts/validate-agent-plugin.sh" "$repo_root" >/dev/null
-
-claude_plugin_version="$(jq -r .version "$CLAUDE_PLUGIN_MANIFEST")"
-codex_plugin_version="$(jq -r .version "$CODEX_PLUGIN_MANIFEST")"
-agent_plugin_version="$(jq -r .version "$AGENT_PLUGIN_MANIFEST")"
+cargo_package_version="$(
+  awk '
+    /^\[workspace\.package\]$/ { in_workspace_package = 1; next }
+    /^\[/ { in_workspace_package = 0 }
+    in_workspace_package && /^version[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      gsub(/"/, "", value)
+      print value
+      exit
+    }
+  ' "$CARGO_TOML"
+)"
 npm_package_version="$(jq -r .version "$NPM_PACKAGE_JSON")"
 
-if [[ -z "$claude_plugin_version" || "$claude_plugin_version" == "null" ]]; then
-  echo "release-check: $CLAUDE_PLUGIN_MANIFEST has no .version field" >&2
-  exit 2
-fi
-if [[ -z "$codex_plugin_version" || "$codex_plugin_version" == "null" ]]; then
-  echo "release-check: $CODEX_PLUGIN_MANIFEST has no .version field" >&2
-  exit 2
-fi
-if [[ -z "$agent_plugin_version" || "$agent_plugin_version" == "null" ]]; then
-  echo "release-check: $AGENT_PLUGIN_MANIFEST has no .version field" >&2
+if [[ -z "$cargo_package_version" ]]; then
+  echo "release-check: $CARGO_TOML has no [workspace.package] version" >&2
   exit 2
 fi
 if [[ -z "$npm_package_version" || "$npm_package_version" == "null" ]]; then
@@ -72,8 +56,8 @@ fi
 
 npm_registry_version=""
 if command -v npm >/dev/null 2>&1; then
-  if v="$(npm view "$NPM_PKG" version 2>/dev/null)"; then
-    npm_registry_version="$v"
+  if version="$(npm view "$NPM_PKG" version 2>/dev/null)"; then
+    npm_registry_version="$version"
   else
     echo "release-check: npm view $NPM_PKG version failed (registry unreachable?)" >&2
   fi
@@ -92,75 +76,37 @@ else
   echo "release-check: gh not on PATH; skipping GitHub Release check" >&2
 fi
 
-printf '%-32s %s\n' "$CLAUDE_PLUGIN_MANIFEST"    "$claude_plugin_version"
-printf '%-32s %s\n' "$CODEX_PLUGIN_MANIFEST"     "$codex_plugin_version"
-printf '%-32s %s\n' "$AGENT_PLUGIN_MANIFEST"     "$agent_plugin_version"
-printf '%-32s %s\n' "$NPM_PACKAGE_JSON"          "$npm_package_version"
-printf '%-32s %s\n' "npm view $NPM_PKG"          "${npm_registry_version:-<skipped>}"
-printf '%-32s %s\n' "gh release list -L 1"       "${gh_tag_version:-<skipped>}"
+printf '%-32s %s\n' "$CARGO_TOML [workspace.package]" "$cargo_package_version"
+printf '%-32s %s\n' "$NPM_PACKAGE_JSON" "$npm_package_version"
+printf '%-32s %s\n' "npm view $NPM_PKG" "${npm_registry_version:-<skipped>}"
+printf '%-32s %s\n' "gh release list -L 1" "${gh_tag_version:-<skipped>}"
 
 drift=0
-if [[ "$claude_plugin_version" != "$codex_plugin_version" ]]; then
-  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != $CODEX_PLUGIN_MANIFEST ($codex_plugin_version)" >&2
-  drift=1
-fi
-if [[ "$claude_plugin_version" != "$agent_plugin_version" ]]; then
-  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != $AGENT_PLUGIN_MANIFEST ($agent_plugin_version)" >&2
-  drift=1
-fi
-if [[ "$codex_plugin_version" != "$agent_plugin_version" ]]; then
-  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != $AGENT_PLUGIN_MANIFEST ($agent_plugin_version)" >&2
-  drift=1
-fi
-if [[ "$claude_plugin_version" != "$npm_package_version" ]]; then
-  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
-  drift=1
-fi
-if [[ "$codex_plugin_version" != "$npm_package_version" ]]; then
-  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
-  drift=1
-fi
-if [[ "$agent_plugin_version" != "$npm_package_version" ]]; then
-  echo "DRIFT: $AGENT_PLUGIN_MANIFEST ($agent_plugin_version) != $NPM_PACKAGE_JSON ($npm_package_version)" >&2
-  drift=1
-fi
-if [[ -n "$npm_registry_version" && "$claude_plugin_version" != "$npm_registry_version" ]]; then
-  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
-  drift=1
-fi
-if [[ -n "$npm_registry_version" && "$codex_plugin_version" != "$npm_registry_version" ]]; then
-  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
-  drift=1
-fi
-if [[ -n "$npm_registry_version" && "$agent_plugin_version" != "$npm_registry_version" ]]; then
-  echo "DRIFT: $AGENT_PLUGIN_MANIFEST ($agent_plugin_version) != npm view $NPM_PKG ($npm_registry_version)" >&2
-  drift=1
-fi
-if [[ -n "$gh_tag_version" && "$claude_plugin_version" != "$gh_tag_version" ]]; then
-  echo "DRIFT: $CLAUDE_PLUGIN_MANIFEST ($claude_plugin_version) != latest gh release tag ($gh_tag_version)" >&2
-  drift=1
-fi
-if [[ -n "$gh_tag_version" && "$codex_plugin_version" != "$gh_tag_version" ]]; then
-  echo "DRIFT: $CODEX_PLUGIN_MANIFEST ($codex_plugin_version) != latest gh release tag ($gh_tag_version)" >&2
-  drift=1
-fi
-if [[ -n "$gh_tag_version" && "$agent_plugin_version" != "$gh_tag_version" ]]; then
-  echo "DRIFT: $AGENT_PLUGIN_MANIFEST ($agent_plugin_version) != latest gh release tag ($gh_tag_version)" >&2
-  drift=1
-fi
+compare_version() {
+  local source="$1"
+  local version="$2"
+  if [[ -n "$version" && "$cargo_package_version" != "$version" ]]; then
+    echo "DRIFT: $CARGO_TOML ($cargo_package_version) != $source ($version)" >&2
+    drift=1
+  fi
+}
+
+compare_version "$NPM_PACKAGE_JSON" "$npm_package_version"
+compare_version "npm view $NPM_PKG" "$npm_registry_version"
+compare_version "latest gh release tag" "$gh_tag_version"
 
 if [[ "$drift" -ne 0 ]]; then
   cat >&2 <<EOF
 
 release-check failed. See docs/runbooks/release.md for the procedure.
-The agent plugin install chain assumes all manifest, npm, and release sources agree.
+Cargo, npm package, npm registry, and GitHub Release versions must agree.
 EOF
   exit 1
 fi
 
 if [[ -z "$npm_registry_version" || -z "$gh_tag_version" ]]; then
-  echo "release-check: local sources agree on $claude_plugin_version; remote checks were skipped." >&2
+  echo "release-check: local sources agree on $cargo_package_version; remote checks were skipped." >&2
   exit 0
 fi
 
-echo "release-check: all sources agree on $claude_plugin_version"
+echo "release-check: all sources agree on $cargo_package_version"

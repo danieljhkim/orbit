@@ -112,9 +112,8 @@ pub(super) fn claude_permission_name(tool_name: &str) -> String {
     // .mcp.json. The CLI registers under ORBIT_MCP_SERVER_ID = "orbit", so
     // permission entries written here must be shaped `mcp__orbit__<tool>`.
     // The plugin-scoped shape `mcp__plugin_<plugin>_<server>__<tool>` is
-    // what Claude itself synthesizes when Orbit is installed as a Claude
-    // Code plugin (see plugin/.claude-plugin/plugin.json) — that install
-    // path does not run this code, so the plugin-scoped prefix is
+    // what Claude synthesized for Orbit's retired extension distribution.
+    // That path did not run this code, so the plugin-scoped prefix is
     // intentionally not emitted from the CLI registration path.
     // See `claude_legacy_safe_permissions` for the one-shot cleanup of
     // stale plugin-prefixed entries left by pre-ORB-00286 CLI runs.
