@@ -10,7 +10,7 @@ type: design
 summary: One authoritative Orbit MCP server, reached by local stdio, a byte-transparent direct SSH stdio proxy, or a loopback-default TCP listener.
 tags: [mcp, ssh, remote-access, registry, audit]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**", "crates/orbit-cli/src/command/mcp/**"]
-related_features: [host-registry, mcp-session-context, remote-access]
+related_features: [host-registry, mcp-session-context, remote-access, federated-mcp]
 ---
 
 # Orbit MCP — Overview

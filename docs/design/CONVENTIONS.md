@@ -1,7 +1,7 @@
 ---
 title: Design Doc Conventions
 owner: daniel
-last_updated: 2026-08-15
+last_updated: 2026-08-23
 last_validated: 2026-08-15
 status: Accepted
 ---
@@ -213,6 +213,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Agent Families | [docs/design/agent-families/](./agent-families/) | grok |
 | Auditability | [docs/design/auditability/](./auditability/) | codex |
 | Executors | [docs/design/executors/](./executors/) | claude |
+| Federated MCP | [docs/design/federated-mcp/](./federated-mcp/) | grok |
 | Global Store Consolidation | [docs/design/_archive/global-store-consolidation/](./_archive/global-store-consolidation/) | codex |
 | Host Registry | [docs/design/host-registry/](./host-registry/) | claude |
 | Knowledge graph | [docs/design/_archive/knowledge-graph/](./_archive/knowledge-graph/) | claude |
