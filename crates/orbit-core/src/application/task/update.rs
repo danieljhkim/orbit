@@ -64,7 +64,49 @@ impl OrbitRuntime {
         )
     }
 
+    /// Apply an update, holding the task's write lock across the whole
+    /// read-modify-write.
+    ///
+    /// ORB-10988: the body below reads the task, derives history entries and
+    /// status-transition validity from that snapshot, and only then writes. The
+    /// store locks each write, but not the read that decided it — so two
+    /// concurrent updates to the same task each validated against the same
+    /// pre-state and the later write silently discarded the earlier one. The
+    /// lock is re-entrant per thread, so the store's own per-write locking
+    /// still holds underneath this one.
     fn update_task_with_status_note_and_identity(
+        &self,
+        id: &str,
+        params: TaskUpdateParams,
+        status_note: Option<String>,
+        agent: Option<String>,
+        model: Option<String>,
+    ) -> Result<Task, OrbitError> {
+        // The lock hook takes `FnMut` because it is a trait object, but the
+        // body must run exactly once and consumes its inputs; `take()` makes
+        // both facts explicit rather than forcing the params to be cloneable.
+        let mut inputs = Some((params, status_note, agent, model));
+        let mut updated: Option<Task> = None;
+        self.stores().tasks().with_task_write_lock(id, &mut || {
+            let (params, status_note, agent, model) = inputs.take().ok_or_else(|| {
+                OrbitError::Execution("task update body was invoked more than once".to_string())
+            })?;
+            updated = Some(self.update_task_locked(id, params, status_note, agent, model)?);
+            Ok(())
+        })?;
+        let updated = updated.ok_or_else(|| {
+            OrbitError::Execution("task update body did not run under the task lock".to_string())
+        })?;
+
+        // Cascading friction/task resolution touches *other* records, so it
+        // stays outside this task's lock.
+        if updated.status == TaskStatus::Done {
+            self.record_resolves_side_effects(&updated)?;
+        }
+        Ok(updated)
+    }
+
+    fn update_task_locked(
         &self,
         id: &str,
         mut params: TaskUpdateParams,
@@ -239,9 +281,6 @@ impl OrbitRuntime {
             };
             Ok((task.clone(), event))
         })?;
-        if updated.status == TaskStatus::Done {
-            self.record_resolves_side_effects(&updated)?;
-        }
 
         Ok(updated)
     }

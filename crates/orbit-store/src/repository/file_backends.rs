@@ -70,6 +70,14 @@ impl TaskStoreBackend for TaskV2Store {
         self.delete_task(id)
     }
 
+    fn with_task_write_lock(
+        &self,
+        id: &str,
+        op: &mut dyn FnMut() -> Result<(), OrbitError>,
+    ) -> Result<(), OrbitError> {
+        self.with_task_lock(id, op)
+    }
+
     fn task_completion_by_complexity(
         &self,
     ) -> Result<Vec<crate::contracts::TaskCompletionByComplexity>, OrbitError> {

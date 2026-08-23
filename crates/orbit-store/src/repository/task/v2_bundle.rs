@@ -16,7 +16,8 @@ use orbit_types::task::{
 
 pub(crate) use crate::driver::file::task_bundle::{TaskBundleV2, TaskDocumentV2};
 use crate::driver::file::task_bundle::{
-    append_jsonl_row, cleanup_partial_bundle_best_effort, read_bundle_at, write_bundle_at,
+    append_jsonl_row, cleanup_partial_bundle_best_effort, read_bundle_at, read_envelope_at,
+    write_bundle_at,
 };
 use crate::driver::file::task_bundle::{
     remove_task_bundle_lock_sentinel, task_bundle_lock_sentinel_path,
@@ -211,14 +212,44 @@ impl TaskBundleStoreV2 {
 
     /// List bundles registered to this workspace.
     ///
-    /// This is intentionally fail-fast for now: one corrupt registered bundle
-    /// makes the list fail so early wiring does not silently hide store damage.
+    /// Corruption is still fail-fast — one damaged bundle fails the list so
+    /// store damage is never silently hidden. What is *not* fail-fast is a
+    /// bundle caught mid-publication or mid-removal by a concurrent writer
+    /// (ORB-10988 / F2026-07-119): the binding list is a snapshot, so a create
+    /// or delete of one task would otherwise fail every read of every other
+    /// task. Those bundles are skipped, exactly as they would be had the
+    /// snapshot been taken a moment earlier or later.
     pub(crate) fn list_bundles(&self) -> Result<Vec<TaskBundleV2>, OrbitError> {
         let bindings = self.registry.tasks_for_workspace(&self.workspace_id)?;
-        bindings
-            .iter()
-            .map(|binding| read_bundle_at(&binding.canonical_path))
-            .collect()
+        let mut bundles = Vec::with_capacity(bindings.len());
+        for binding in &bindings {
+            if let Some(bundle) = read_bundle_tolerating_in_flight(&binding.canonical_path)? {
+                bundles.push(bundle);
+            }
+        }
+        Ok(bundles)
+    }
+
+    /// Read one registered bundle, skipping it when a concurrent writer has it
+    /// in flight. See [`Self::list_bundles`] for the tolerance rule.
+    pub(crate) fn read_bundle_if_settled(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<TaskBundleV2>, OrbitError> {
+        read_bundle_tolerating_in_flight(&self.bundle_path(task_id)?)
+    }
+
+    /// Read one registered bundle's envelope, skipping it when a concurrent
+    /// writer has it in flight. See [`Self::list_bundles`] for the rule.
+    pub(crate) fn read_envelope_if_settled(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<TaskEnvelopeV2>, OrbitError> {
+        let bundle_dir = self.bundle_path(task_id)?;
+        match read_envelope_at(&bundle_dir) {
+            Ok(envelope) => Ok(Some(envelope)),
+            Err(err) => skip_if_in_flight(&bundle_dir, err),
+        }
     }
 
     pub(crate) fn rewrite_document(
@@ -289,4 +320,42 @@ impl TaskBundleStoreV2 {
             comment,
         )
     }
+}
+
+fn read_bundle_tolerating_in_flight(bundle_dir: &Path) -> Result<Option<TaskBundleV2>, OrbitError> {
+    match read_bundle_at(bundle_dir) {
+        Ok(bundle) => Ok(Some(bundle)),
+        Err(err) => skip_if_in_flight(bundle_dir, err),
+    }
+}
+
+/// Convert a failed bundle read into `Ok(None)` when the bundle is provably
+/// mid-flight rather than damaged, and re-raise it otherwise.
+///
+/// Both discriminators are re-checked *after* the read failed, so a bundle
+/// that read cleanly is never suppressed:
+///
+/// - the create/delete lock sentinel is present, meaning another writer holds
+///   the bundle directory right now (or left the sentinel behind by deleting
+///   the task, in which case there is no bundle to read anyway); or
+/// - the bundle directory is gone, meaning the delete completed between the
+///   registry snapshot and the read.
+fn skip_if_in_flight<T>(bundle_dir: &Path, err: OrbitError) -> Result<Option<T>, OrbitError> {
+    if !bundle_read_failure_is_in_flight(bundle_dir) {
+        return Err(err);
+    }
+    orbit_common::tracing::debug!(
+        target: "orbit.store.task_bundle_v2",
+        bundle_dir = %bundle_dir.display(),
+        error = %err,
+        "skipped a task bundle held by a concurrent writer",
+    );
+    Ok(None)
+}
+
+fn bundle_read_failure_is_in_flight(bundle_dir: &Path) -> bool {
+    if task_bundle_lock_sentinel_path(bundle_dir).is_ok_and(|path| path.exists()) {
+        return true;
+    }
+    !bundle_dir.is_dir()
 }
