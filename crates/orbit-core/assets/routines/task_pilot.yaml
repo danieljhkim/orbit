@@ -22,7 +22,7 @@ enabled: false
 hosts:
   - __ORBIT_HOST_ID__
 trigger:
-  cron: "45 */4 * * *"
+  cron: "*/40 * * * *"
   missed_run: skip
 target: job:task_pilot_pipeline
 policy:
