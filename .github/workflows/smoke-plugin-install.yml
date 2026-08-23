@@ -11,6 +11,11 @@ on:
     # release ever leaves the chain in a broken state.
     - cron: "0 12 * * 1"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release tag to verify (for example, v0.14.0)"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -31,6 +36,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -42,4 +49,6 @@ jobs:
 
       - name: Run plugin install smoke
         shell: bash
+        env:
+          SMOKE_PLUGIN_INSTALL_TAG: ${{ inputs.tag || '' }}
         run: ./scripts/smoke-plugin-install.sh

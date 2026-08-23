@@ -19,6 +19,36 @@
 # Pass: exit 0. Fail: non-zero with the relevant stderr captured.
 # Supported: macOS arm64 / x86_64, Linux x86_64 / arm64. Not Windows.
 set -euo pipefail
+NPM_PKG="@orbit-tools/cli"
+
+assert_version_matches_tag() {
+  local installed_version="$1"
+  local expected_version="$2"
+
+  if [[ "$installed_version" != "$expected_version" ]]; then
+    echo "FAIL: installed $NPM_PKG version '$installed_version' does not match tag version '$expected_version'" >&2
+    return 1
+  fi
+  echo "versioned smoke => $NPM_PKG@$installed_version matches tag"
+}
+
+run_version_assertion_test() {
+  assert_version_matches_tag "0.14.0" "0.14.0"
+  if assert_version_matches_tag "0.13.0" "0.14.0"; then
+    echo "FAIL: version assertion accepted a mismatched version" >&2
+    return 1
+  fi
+  echo "PASS: version assertion rejects a mismatched tag version"
+}
+
+if [[ "${1:-}" == "--dry-run-version-assertion" ]]; then
+  run_version_assertion_test
+  exit 0
+fi
+if [[ "$#" -ne 0 ]]; then
+  echo "usage: $0 [--dry-run-version-assertion]" >&2
+  exit 2
+fi
 
 require_bin() {
   local bin="$1"
@@ -42,10 +72,24 @@ case "$(uname -s)" in
     ;;
 esac
 
-NPM_PKG="@orbit-tools/cli"
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
+
+# A tag-triggered run must prove that npm has the package built from that tag.
+# workflow_dispatch supplies SMOKE_PLUGIN_INSTALL_TAG when a releaser reruns
+# this workflow from the default branch against a published release tag.
+tag_name="${SMOKE_PLUGIN_INSTALL_TAG:-}"
+if [[ -z "$tag_name" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+  tag_name="${GITHUB_REF_NAME:-}"
+fi
+if [[ -z "$tag_name" && "${GITHUB_REF:-}" == refs/tags/* ]]; then
+  tag_name="${GITHUB_REF#refs/tags/}"
+fi
+expected_tag_version=""
+if [[ -n "$tag_name" ]]; then
+  expected_tag_version="${tag_name#v}"
+fi
 
 # Cache npx installs inside the temp dir so we exercise a clean download.
 export npm_config_cache="$TMPDIR_ROOT/npm-cache"
@@ -133,6 +177,9 @@ if [[ -z "$binary_version" ]]; then
   exit 1
 fi
 echo "orbit --version => $binary_version"
+if [[ -n "$expected_tag_version" ]]; then
+  assert_version_matches_tag "$binary_version" "$expected_tag_version"
+fi
 
 # Also confirm the npm-registry version, for the smoke report.
 npm_version="$(npm view "$NPM_PKG" version 2>/dev/null || echo '<unknown>')"

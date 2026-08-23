@@ -128,6 +128,18 @@ Must finish clean. `cargo update --workspace` should report only Orbit workspace
 
 If this cycle changed any CLI the plugin-install smoke drives (`orbit init`, `workspace init`, `mcp serve`, plugin layout), update [`scripts/smoke-plugin-install.sh`](scripts/smoke-plugin-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and then runs `@orbit-tools/cli@latest` from npm — a post-tag script fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts).
 
+The tag-triggered plugin-install smoke must be treated as a versioned check: it
+fails when the installed `@orbit-tools/cli` version does not equal the tag
+version. Publish the matching npm package, then re-run the workflow from
+Actions → `smoke-plugin-install` → **Run workflow**, entering the release tag
+(for example, `v0.14.0`) in the `tag` input. Confirm that this post-publish,
+versioned run is green before considering the install chain verified. The
+script's assertion can be checked without network access with:
+
+```sh
+./scripts/smoke-plugin-install.sh --dry-run-version-assertion
+```
+
 ### 6. Create the Orbit task
 
 ```
@@ -223,14 +235,31 @@ git push origin agent-main
 git push origin origin/main:refs/heads/agent-main
 cat <<'EOF' | gh api -X PUT repos/danieljhkim/orbit/branches/agent-main/protection --input -
 {
-  "required_status_checks": null,
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["Check / Clippy / Test"]
+  },
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": true,
   "allow_deletions": false,
-  "allow_force_pushes": true
+  "block_creations": false,
+  "required_conversation_resolution": false,
+  "lock_branch": false,
+  "allow_fork_syncing": false
 }
 EOF
+```
+
+The applied `agent-main` protection must keep `strict: true` and require the
+primary CI check named exactly `Check / Clippy / Test`; coverage and platform
+diagnostic jobs remain informational. Verify the live setting after applying
+it with:
+
+```sh
+gh api repos/danieljhkim/orbit/branches/agent-main/protection/required_status_checks
 ```
 
 If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
@@ -259,7 +288,7 @@ Watch the Actions tab after pushing the tag. Real failure modes seen historicall
 - **`cargo build --locked` fails**: `Cargo.lock` was not refreshed after the version bump (step 4) — fix forward in the next patch.
 - **Homebrew tap step**: `secrets.TAP_GITHUB_TOKEN` expired, or the tap repo branch protection rejected the push.
 - **Smoke install** (`release.yml`): a regression in `install.sh` itself, since that smoke pulls it from the tagged ref. Verify locally before tagging if `install.sh` changed in this release.
-- **Plugin-install smoke** (separate workflow, `smoke-plugin-install.yml`): fails on the tag until npm is published (expected). After publish, a red run is either the tagged script speaking an old CLI contract, or a bad published artifact. Triage in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts) — do not cut a patch for a script-only fix, and do not re-dispatch the old tag after the script has moved on.
+- **Plugin-install smoke** (separate workflow, `smoke-plugin-install.yml`): a tag run is expected to fail when npm does not yet contain the tag version. After publishing npm, manually dispatch the workflow with that tag in its `tag` input and require the versioned run to go green. A post-publish red run is either the tagged script speaking an old CLI contract, or a bad published artifact. Triage in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts) — do not cut a patch for a script-only fix, and do not re-dispatch the old tag after the script has moved on.
 
 ## When something goes wrong
 
