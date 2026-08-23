@@ -3,7 +3,7 @@ summary: "Host Registry — Decisions"
 type: design
 title: "Host Registry — Decisions"
 owner: codex
-last_updated: 2026-08-15
+last_updated: 2026-08-23
 last_validated: 2026-08-15
 status: Accepted
 feature: host-registry
@@ -11,12 +11,13 @@ doc_role: decisions
 tags: [host-registry, machine-identity, workspace-catalog, runtime-composition]
 paths: ["crates/orbit-common/src/types/host.rs", "crates/orbit-common/src/types/workspace.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-cli/src/command/host/**", "crates/orbit-cli/src/command/workspace/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-web/src/**"]
 related_features: [host-registry, mcp-session-context, remote-access]
-related_artifacts: []
+related_artifacts: [ORB-11008]
 ---
 
 # Host Registry — Decisions
 
-These choices describe current code.
+These choices describe current code and a separately marked forward-looking
+federated-routing constraint.
 
 ## Shared primitives, owned persistence, separate composition
 
@@ -97,3 +98,33 @@ These choices describe current code.
 **Decision.** Carry raw MCP over direct SSH stdio. The remote CLI server loads its own registry and uses RegisteredRuntimeFactory for each workspace-scoped call.
 
 **Consequences.** The machine holding the data remains authoritative and the proxy stays checkout-free. Cost: checkoutless or cross-machine routing behavior must be added explicitly on the server if it is ever required.
+
+## Federated routing is not a replica protocol
+
+**Recorded:** 2026-08-23 · [ORB-11008] proposes the federated multi-host workspace MCP surface.
+
+**Context.** A single MCP namespace can make several reachable hosts look like
+one workspace catalog. Without an authority rule, that presentation could be
+mistaken for a synchronized task store or turn multiple checkouts of one
+repository into competing control planes.
+
+**Decision.** A federated gateway may aggregate live workspace descriptors and
+route an opaque host-qualified selector to its destination, but it never owns
+or merges destination state. Every workspace-scoped call is delivered to the
+encoded host, which remains authoritative for its runs, logs, scheduler state,
+and mutations. For one repository, one declared control-plane authority owns
+coordination; other hosts are execution bindings. Unknown, unreachable,
+unhealthy, ambiguous, and stale routes fail explicitly. This rule applies to
+future federation work as well as the first gateway implementation.
+
+**Consequences.** The design permits one caller-facing MCP namespace without
+introducing task/store replication, synchronization, quorum election,
+competing authorities, implicit failover, or silent host-local merges. Cost:
+availability is bounded by the chosen destination, so callers must handle
+visible routing failures instead of receiving a transparent substitute result.
+
+## Task References
+
+- [ORB-11008] proposes the federated multi-host workspace MCP surface and routing boundary.
+
+Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
