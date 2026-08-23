@@ -22,7 +22,12 @@ fn shipped_defaults_all_parse_and_are_disabled() {
         .iter()
         .map(|(name, _)| *name)
         .collect();
-    for required in ["friction-curation", "qa-sweep", "security-review"] {
+    for required in [
+        "code-review-sweep",
+        "friction-curation",
+        "qa-sweep",
+        "security-review",
+    ] {
         assert!(
             names.contains(&required),
             "missing shipped default {required}"
@@ -256,6 +261,109 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
                     && criterion.contains("production impact")
             }),
         "qa-sweep acceptance criteria must require filing breaking tests"
+    );
+}
+
+/// Code review sweep carries its window cursor in execution summaries rather
+/// than in scheduler state, so the template must keep saying so, and it must
+/// stay generic across workspaces.
+#[test]
+fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
+    let (_, yaml) = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .find(|(name, _)| *name == "code-review-sweep")
+        .expect("code-review-sweep default");
+    let definition = parse_auto_task_yaml(yaml).expect("parse code-review-sweep");
+
+    assert_eq!(definition.name, "code-review-sweep");
+    assert!(!definition.enabled, "definition must ship disabled");
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "40 */6 * * *".to_string()
+        },
+        "code-review-sweep must use a documented six-hourly schedule"
+    );
+    assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
+    assert_eq!(
+        definition.template.status,
+        orbit_types::task::TaskStatus::Backlog
+    );
+    for required_tag in ["code-review-sweep", "no-diff-expected"] {
+        assert!(
+            definition
+                .template
+                .tags
+                .iter()
+                .any(|tag| tag == required_tag),
+            "missing required tag {required_tag}"
+        );
+    }
+    assert!(
+        !yaml.contains("/home/") && !yaml.contains("/Users/"),
+        "default must not contain a machine-specific path"
+    );
+    // The template ships to every workspace, so it must not name this
+    // repository's branches or files.
+    for repo_specific in ["agent-main", "ORB-", "CLAUDE.md", "make ci"] {
+        assert!(
+            !yaml.contains(repo_specific),
+            "template must stay workspace-generic; found '{repo_specific}'"
+        );
+    }
+
+    let body = definition.template.description.to_lowercase();
+    for required in [
+        "last-reviewed commit",
+        "execution summary",
+        "seeds the cursor",
+        "verify every finding",
+        "skip duplicates",
+        "file:line",
+        "no-op",
+        "orbit tool run orbit.task.add",
+        "orbit tool run orbit.task.list",
+        "orbit tool run orbit.task.show",
+        "orbit tool run orbit.search",
+    ] {
+        assert!(
+            body.contains(required),
+            "template should retain '{required}'"
+        );
+    }
+    assert!(!body.contains("orbit task add"));
+    assert!(!body.contains("orbit task list"));
+    assert!(!body.contains("orbit task show"));
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("reviewed range")
+                    && criterion.contains("last-reviewed commit")
+                    && criterion.contains("execution summary")
+            }),
+        "code-review-sweep must require recording the window cursor"
+    );
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("verified against live code")
+                    && criterion.contains("non-duplicate")
+                    && criterion.contains("file:line")
+            }),
+        "code-review-sweep must require verified, evidenced, non-duplicate findings"
     );
 }
 
