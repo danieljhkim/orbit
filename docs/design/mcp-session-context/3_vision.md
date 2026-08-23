@@ -3,15 +3,15 @@ summary: "MCP Session Context — Vision"
 type: design
 title: "MCP Session Context — Vision"
 owner: codex
-last_updated: 2026-08-15
+last_updated: 2026-08-23
 last_validated: 2026-08-15
 status: Accepted
 feature: mcp-session-context
 doc_role: vision
 tags: ["mcp-session-context", "mcp", "workspace", "audit"]
 paths: ["crates/orbit-common/src/types/tool.rs", "crates/orbit-mcp/src/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-core/src/command/tool/**"]
-related_features: ["mcp-session-context"]
-related_artifacts: []
+related_features: ["mcp-session-context", "federated-mcp"]
+related_artifacts: [ORB-11009]
 ---
 
 # MCP Session Context — Vision
@@ -39,8 +39,17 @@ Add a field only when all three are true:
 ## Stable principles
 
 - External workspace values address server state; they do not prove identity.
+  Addressing may later become host-qualified (`hm_…/ws_*`) under the proposed
+  federated MCP surface; v1 still resolves a local selector on the accepting
+  machine. See [federated-mcp](../federated-mcp/specs/federated-workspace-mcp.md).
 - The accepting machine describes itself.
 - Caller machine and network labels are useful for audit correlation but remain fallible.
 - The MCP adapter owns call correlation.
 - Every tools/call, including an unknown raw name, crosses one Core audit boundary.
 - Core remains the execution, audit, and future authorization authority.
+
+## Task References
+
+- [ORB-11009] noted that addressing may become host-qualified under federated MCP without changing v1 overview claims
+
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

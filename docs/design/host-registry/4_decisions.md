@@ -10,14 +10,15 @@ feature: host-registry
 doc_role: decisions
 tags: [host-registry, machine-identity, workspace-catalog, runtime-composition]
 paths: ["crates/orbit-common/src/types/host.rs", "crates/orbit-common/src/types/workspace.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-cli/src/command/host/**", "crates/orbit-cli/src/command/workspace/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-web/src/**"]
-related_features: [host-registry, mcp-session-context, remote-access]
-related_artifacts: [ORB-11008]
+related_features: [host-registry, mcp-session-context, remote-access, federated-mcp]
+related_artifacts: [ORB-11008, ORB-11009]
 ---
 
 # Host Registry — Decisions
 
-These choices describe current code and a separately marked forward-looking
-federated-routing constraint.
+These choices describe current code and a standing constraint that federation
+must not become a replica protocol. The federated MCP contract itself lives in
+[federated-mcp](../federated-mcp/1_overview.md).
 
 ## Shared primitives, owned persistence, separate composition
 
@@ -101,30 +102,27 @@ federated-routing constraint.
 
 ## Federated routing is not a replica protocol
 
-**Recorded:** 2026-08-23 · [ORB-11008] proposes the federated multi-host workspace MCP surface.
+**Recorded:** 2026-08-23 · [ORB-11008] proposed the policy; [ORB-11009] moved the contract to federated-mcp.
 
 **Context.** A single MCP namespace can make several reachable hosts look like
 one workspace catalog. Without an authority rule, that presentation could be
 mistaken for a synchronized task store or turn multiple checkouts of one
 repository into competing control planes.
 
-**Decision.** A federated gateway may aggregate live workspace descriptors and
-route an opaque host-qualified selector to its destination, but it never owns
-or merges destination state. Every workspace-scoped call is delivered to the
-encoded host, which remains authoritative for its runs, logs, scheduler state,
-and mutations. For one repository, one declared control-plane authority owns
-coordination; other hosts are execution bindings. Unknown, unreachable,
-unhealthy, ambiguous, and stale routes fail explicitly. This rule applies to
-future federation work as well as the first gateway implementation.
+**Decision.** Host-registry catalog roles stay owner and replica; this registry
+is not a routing authority. A federated MCP namespace must not become a replica
+protocol or merged store. The implementable mux, selector, capability, list, and
+fail-closed contract lives in [federated-mcp](../federated-mcp/specs/federated-workspace-mcp.md).
+This rule continues to apply to future federation work that touches catalog
+roles.
 
-**Consequences.** The design permits one caller-facing MCP namespace without
-introducing task/store replication, synchronization, quorum election,
-competing authorities, implicit failover, or silent host-local merges. Cost:
-availability is bounded by the chosen destination, so callers must handle
-visible routing failures instead of receiving a transparent substitute result.
+**Consequences.** Owner/replica remain the only ownership vocabulary in this
+folder. Cost: readers of this file no longer find the full routing contract
+here and must follow the federated-mcp link.
 
 ## Task References
 
-- [ORB-11008] proposes the federated multi-host workspace MCP surface and routing boundary.
+- [ORB-11008] recorded the federated multi-host MCP policy
+- [ORB-11009] moved the implementable contract to federated-mcp and left this entry as the host-registry standing constraint
 
-Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
