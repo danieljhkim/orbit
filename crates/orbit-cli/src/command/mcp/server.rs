@@ -16,6 +16,7 @@ use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_core::adapter::command::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
+use orbit_mcp::federated;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener, McpSessionAuthority};
 use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};
 use serde_json::Value;
@@ -32,6 +33,41 @@ pub(super) fn serve_mcp_stdio(
     let (host, session_context) =
         compose_server(remote_caller_machine_id, authority, bound_workspace)?;
     block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
+}
+
+/// Serve the federated mux: one stdio surface over the operator's configured
+/// destinations.
+///
+/// The mux serves no workspace of its own, so it composes no `ServerMcpHost`
+/// and never opens this machine's workspace registry — the list is built only
+/// from what destinations answer. Membership comes from the machine-global
+/// destinations file, whose duplicate-`machine_id` check runs here, before any
+/// tool is advertised.
+pub(super) fn serve_mcp_federated_stdio() -> Result<(), OrbitError> {
+    let global_root = resolve_global_root()?;
+    let destinations =
+        federated::load_destinations(&federated::destinations_path(&global_root))?.destinations;
+    // The mux is a client to each destination, and identifies itself with the
+    // same audit label the v1 proxy forwards.
+    let identity = orbit_mcp::mcp_server_identity(&global_root, None, McpSessionAuthority::Agent)?;
+    let probe = federated::SshDestinationProbe::new(
+        identity.process_machine_id.clone(),
+        federated::DEFAULT_PROBE_TIMEOUT,
+    );
+    let host: Arc<dyn McpHost> = Arc::new(federated::FederatedMcpHost::new(
+        destinations,
+        Arc::new(probe),
+    ));
+    tracing::info!(
+        machine_id = %identity.process_machine_id,
+        "serving the federated MCP mux"
+    );
+    // Session-unbound by construction: the federated list takes no workspace,
+    // and the mux has no local catalog to resolve one against.
+    block_on_server(orbit_mcp::serve_stdio_with_context(
+        host,
+        identity.session_context,
+    ))
 }
 
 pub(super) fn serve_mcp_listener(
