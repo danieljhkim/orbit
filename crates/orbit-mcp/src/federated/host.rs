@@ -1,20 +1,23 @@
 //! The federated mux host: one MCP surface over many configured destinations.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use orbit_common::OrbitError;
-use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSchema, ToolSessionContext};
-use serde_json::{Value, json};
+use orbit_types::tool::{
+    McpToolDefinition, McpToolScope, ToolSchema, ToolSessionContext, mcp_advertised_tool_name,
+};
+use orbit_types::workspace::WorkspaceStatus;
+use serde_json::{Map, Value, json};
 
-use super::config::Destination;
+use super::config::{Destination, HostQualifiedSelector};
 use super::descriptor::WorkspaceDescriptor;
 use super::probe::{DestinationProbe, DestinationSnapshot};
 
-/// The only tool the mux advertises today.
+/// Federated discovery stays session-unbound and is answered by the mux.
 ///
-/// Routing has not landed, so advertising the rest of the canonical surface
-/// would promise delivery the mux cannot perform. Callers that already chose a
-/// host keep the v1 paths.
+/// Every other advertised tool is delivered to the destination encoded in the
+/// caller's host-qualified selector.
 pub const FEDERATED_WORKSPACE_LIST_TOOL: &str = "orbit.workspace.list";
 
 /// An MCP host that aggregates operator-configured destinations.
@@ -102,26 +105,99 @@ impl FederatedMcpHost {
             .map(|workspace| WorkspaceDescriptor::reachable(destination, workspace))
             .collect()
     }
+
+    /// Deliver a workspace-scoped call to the destination encoded in the selector.
+    ///
+    /// Classification uses a live session, not the last list. Fail-closed
+    /// precedence: unknown selector, then unreachable, stale, unhealthy,
+    /// tool-not-on-this-host, then the destination's own refusal.
+    fn route_workspace_call(
+        &self,
+        name: &str,
+        input: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let token = workspace_selector(&input, &session_context).ok_or_else(|| {
+            OrbitError::InvalidInput(format!(
+                "tool '{name}' requires a workspace selector; pass `workspace` in the tool call \
+                 or MCP initialize metadata"
+            ))
+        })?;
+        let parsed = HostQualifiedSelector::from_str(token)?;
+        let destination = self
+            .destinations
+            .iter()
+            .find(|destination| destination.machine_id == parsed.machine_id())
+            .ok_or_else(|| OrbitError::UnknownSelector(token.to_string()))?;
+
+        let mut session = self
+            .probe
+            .open_route(destination)
+            .map_err(|error| delivery_unreachable(destination, error))?;
+        let snapshot = session
+            .snapshot()
+            .map_err(|error| delivery_unreachable(destination, error))?;
+        if let Err(error) = confirm_pinned_identity(destination, &snapshot) {
+            tracing::warn!(
+                machine_id = %destination.machine_id,
+                %error,
+                "federated destination answered under a different machine_id",
+            );
+            return Err(error);
+        }
+        let Some(workspace) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == parsed.workspace_id())
+        else {
+            return Err(OrbitError::StaleRoute(token.to_string()));
+        };
+        if workspace.status == WorkspaceStatus::Invalid {
+            return Err(OrbitError::UnhealthyCheckout(token.to_string()));
+        }
+
+        let advertised = session
+            .advertised_tools()
+            .map_err(|error| delivery_unreachable(destination, error))?;
+        if !tool_on_surface(&advertised, name) {
+            return Err(OrbitError::ToolNotOnThisHost(format!(
+                "'{name}' is not advertised on '{}'",
+                destination.machine_id
+            )));
+        }
+
+        tracing::info!(
+            machine_id = %destination.machine_id,
+            workspace_id = %parsed.workspace_id(),
+            tool = name,
+            "federated mux delivering tool call"
+        );
+        session.call_tool(name, destination_arguments(input, parsed.workspace_id()))
+    }
 }
 
 impl crate::McpHost for FederatedMcpHost {
     fn list_mcp_tool_definitions(&self) -> Result<Vec<McpToolDefinition>, OrbitError> {
-        Ok(vec![federated_workspace_list_definition()])
+        let mut definitions = crate::canonical_mcp_tool_definitions()
+            .map_err(|error| OrbitError::InvalidInput(error.to_string()))?;
+        for definition in &mut definitions {
+            if definition.schema.name == FEDERATED_WORKSPACE_LIST_TOOL {
+                *definition = federated_workspace_list_definition();
+            }
+        }
+        Ok(definitions)
     }
 
     fn call_tool(
         &self,
         name: &str,
-        _input: Value,
-        _session_context: ToolSessionContext,
+        input: Value,
+        session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
         if name == FEDERATED_WORKSPACE_LIST_TOOL {
             return Ok(self.list_workspaces());
         }
-        Err(OrbitError::ToolNotOnThisHost(format!(
-            "'{name}' is not on the federated surface; only '{FEDERATED_WORKSPACE_LIST_TOOL}' is \
-             routed today"
-        )))
+        self.route_workspace_call(name, input, session_context)
     }
 }
 
@@ -159,4 +235,43 @@ fn confirm_pinned_identity(
         "'{}' is configured as machine '{}' but answered as '{}'",
         destination.ssh, destination.machine_id, snapshot.machine_id
     )))
+}
+
+/// The selector the call itself passed, else the session's announced one.
+fn workspace_selector<'a>(input: &'a Value, context: &'a ToolSessionContext) -> Option<&'a str> {
+    input
+        .get("workspace")
+        .and_then(Value::as_str)
+        .or(context.workspace.as_deref())
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+}
+
+/// v1 destinations address a local `ws_*`, not the host-qualified token.
+fn destination_arguments(input: Value, workspace_id: &str) -> Value {
+    let mut object = match input {
+        Value::Object(object) => object,
+        _ => Map::new(),
+    };
+    object.insert(
+        "workspace".to_string(),
+        Value::String(workspace_id.to_string()),
+    );
+    Value::Object(object)
+}
+
+fn tool_on_surface(advertised: &[String], name: &str) -> bool {
+    let wire = mcp_advertised_tool_name(name);
+    advertised
+        .iter()
+        .any(|tool| tool == name || *tool == wire || mcp_advertised_tool_name(tool) == wire)
+}
+
+/// Connect, snapshot, and tools/list failures are delivery misses: capability
+/// and stale are undecidable without the host.
+fn delivery_unreachable(destination: &Destination, error: OrbitError) -> OrbitError {
+    match error {
+        OrbitError::UnreachableDestination(_) => error,
+        other => OrbitError::UnreachableDestination(format!("{}: {other}", destination.machine_id)),
+    }
 }

@@ -7,7 +7,7 @@ status: Draft
 feature: federated-mcp
 doc_role: overview
 type: design
-summary: Proposed mux that presents one MCP namespace over operator-configured destinations, keyed by machine_id, without becoming a fleet registry.
+summary: Mux that presents one MCP namespace over operator-configured destinations, keyed by machine_id, without becoming a fleet registry.
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
@@ -16,7 +16,7 @@ related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
 
 # Federated MCP — Overview
 
-Federated MCP is a proposed caller-facing mux: one Orbit MCP namespace in front of operator-configured destinations (MCP or SSH remotes already chosen by the operator). It is not current v1 behavior, not a host-registry evolution, and not a fleet inventory. Direct SSH stdio to one chosen host remains the implemented remote path. [ORB-11008] recorded the policy; this folder is the implementable contract from [ORB-11009] (PR #1139), with review holes closed in [ORB-11010].
+Federated MCP is a caller-facing mux: one Orbit MCP namespace in front of operator-configured destinations (MCP or SSH remotes already chosen by the operator). It is not v1 local/remote MCP, not a host-registry evolution, and not a fleet inventory. Direct SSH stdio to one chosen host remains the v1 remote path (`--mode remote`). The mux is `orbit mcp serve --mode federated` ([ORB-11014] list, [ORB-11015] routing). [ORB-11008] recorded the policy; this folder is the implementable contract from [ORB-11009] (PR #1139), with review holes closed in [ORB-11010].
 
 ## 1. Motivation
 

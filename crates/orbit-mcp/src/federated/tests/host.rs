@@ -63,19 +63,28 @@ fn list(host: &FederatedMcpHost) -> Vec<Value> {
 }
 
 #[test]
-fn the_mux_advertises_only_the_federated_list() {
+fn the_mux_advertises_the_canonical_surface() {
     let host = three_destination_mux();
     let definitions = host.list_mcp_tool_definitions().expect("definitions");
+    let names = definitions
+        .iter()
+        .map(|definition| definition.schema.name.as_str())
+        .collect::<Vec<_>>();
+    let canonical = crate::canonical_mcp_tool_definitions()
+        .expect("canonical definitions")
+        .into_iter()
+        .map(|definition| definition.schema.name)
+        .collect::<Vec<_>>();
 
     assert_eq!(
-        definitions
-            .iter()
-            .map(|definition| definition.schema.name.as_str())
-            .collect::<Vec<_>>(),
-        [FEDERATED_WORKSPACE_LIST_TOOL],
-        "routing has not landed, so no other tool may be advertised",
+        names,
+        canonical.iter().map(String::as_str).collect::<Vec<_>>()
     );
-    let listing = &definitions[0];
+    assert_eq!(names.len(), 23, "the frozen production surface changed");
+    let listing = definitions
+        .iter()
+        .find(|definition| definition.schema.name == FEDERATED_WORKSPACE_LIST_TOOL)
+        .expect("federated list");
     // Session-unbound: no workspace parameter, and global scope so the kernel
     // never demands a selector for it.
     assert!(listing.schema.parameters.is_empty());
@@ -85,16 +94,6 @@ fn the_mux_advertises_only_the_federated_list() {
         "List active workspaces with a checkout registered on this machine.",
         "the federated list is a new shape, not v1's machine-local list",
     );
-}
-
-#[test]
-fn an_unadvertised_tool_is_not_on_this_host() {
-    let host = three_destination_mux();
-
-    let error = host
-        .call_tool("orbit.task.add", Value::Null, ToolSessionContext::default())
-        .expect_err("unrouted tools must be refused by name");
-    assert!(matches!(error, OrbitError::ToolNotOnThisHost(_)), "{error}");
 }
 
 #[test]
