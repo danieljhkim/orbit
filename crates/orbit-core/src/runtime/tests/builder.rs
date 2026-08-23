@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use orbit_store::maintenance::task_registry::read_workspace_config_optional;
+use orbit_store::maintenance::task_registry::{
+    TaskRegistryStore, read_workspace_config_optional, task_registry_path,
+};
 
 use crate::OrbitError;
 
@@ -201,5 +203,32 @@ fn v2_task_backend_rebinds_when_workspace_config_is_missing() {
             .expect("read rewritten workspace config")
             .map(|config| config.workspace_id),
         original_config.map(|config| config.workspace_id)
+    );
+}
+
+#[test]
+fn explicit_data_dir_runtime_does_not_bind_parent_as_a_checkout() {
+    let root = tempdir().expect("tempdir");
+    let data_dir = root.path().join("data");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+
+    let runtime = OrbitRuntime::from_roots(&data_dir, &data_dir).expect("build data-dir runtime");
+    drop(runtime);
+
+    assert!(
+        read_workspace_config_optional(&data_dir)
+            .expect("read workspace config")
+            .is_none(),
+        "an unbound data-dir open must not write a synthetic workspace identity"
+    );
+    let registry =
+        TaskRegistryStore::open(&task_registry_path(&data_dir)).expect("open task registry");
+    let parent = data_dir.parent().expect("data dir parent");
+    let candidates = registry
+        .find_rebind_candidates(parent, parent, &data_dir)
+        .expect("lookup checkout bindings");
+    assert!(
+        candidates.is_empty(),
+        "executor-list-style data-dir open must not insert a checkout for parent(data-dir); got {candidates:?}"
     );
 }

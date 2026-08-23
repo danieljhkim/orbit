@@ -5,14 +5,14 @@ use orbit_policy::PolicyEngine;
 use orbit_search::{EmbedWorker, VectorStore};
 use orbit_store::Store;
 use orbit_store::compose::{
-    WorkspaceTaskBackends, audit_event_store_sqlite, global_executor_def_store,
-    global_policy_def_store, layered_policy_def_store, task_reservation_store_sqlite,
-    tool_store_sqlite, workspace_job_run_store, workspace_policy_def_store,
-    workspace_task_backends,
+    WorkspaceTaskBackends, audit_event_store_sqlite, coordination_task_backends,
+    global_executor_def_store, global_policy_def_store, layered_policy_def_store,
+    task_reservation_store_sqlite, tool_store_sqlite, workspace_job_run_store,
+    workspace_policy_def_store, workspace_task_backends,
 };
 use orbit_store::maintenance::task_registry::{
     BindWorkspaceParams, TaskRegistryStore, WorkspaceConfig, read_workspace_config_optional,
-    task_registry_path, workspace_id_for_orbit_dir, write_workspace_config,
+    task_registry_path, write_workspace_config,
 };
 
 use orbit_common::OrbitError;
@@ -29,6 +29,11 @@ use crate::context::{
 };
 use crate::runtime::WorkspaceRuntimeBinding;
 use crate::skill_catalog::SkillCatalog;
+
+/// Job-run partition used when an explicit `--root` data directory is opened
+/// without a selected checkout. Never written to `config.yaml` and never
+/// inserted as a `workspace_checkout_bindings` row.
+const UNBOUND_DATA_DIR_WORKSPACE_ID: &str = "ws_unbound-data-dir";
 
 /// Runtime builder. Global root provides activities, jobs, executors, policies,
 /// config, global skills, and SQLite. Shared root provides existing workspace
@@ -66,23 +71,31 @@ pub(crate) fn build_context_from_roots(
         &paths,
         binding.map(|binding| binding.workspace_id.as_str()),
     )?;
-    let workspace_id = workspace_id_for_orbit_dir(&paths.orbit_dir)?;
-    let import_report = match orbit_store::workflow::legacy_state::import_legacy_v2_state(
-        &store,
-        &paths.orbit_dir,
-        &workspace_id,
-    ) {
-        Ok(report) => report,
-        Err(error) if error.is_readonly_or_access_failure() => {
-            tracing::warn!(
-                target: "orbit.core.bootstrap",
-                root = %paths.orbit_dir.display(),
-                error = %error,
-                "skipped incidental legacy-state import persistence"
-            );
-            orbit_store::workflow::legacy_state::ImportReport::skipped()
+    let configured = read_workspace_config_optional(&paths.orbit_dir)?;
+    let workspace_id = configured
+        .as_ref()
+        .map(|config| config.workspace_id.clone())
+        .unwrap_or_else(|| UNBOUND_DATA_DIR_WORKSPACE_ID.to_string());
+    let import_report = if configured.is_none() {
+        orbit_store::workflow::legacy_state::ImportReport::skipped()
+    } else {
+        match orbit_store::workflow::legacy_state::import_legacy_v2_state(
+            &store,
+            &paths.orbit_dir,
+            &workspace_id,
+        ) {
+            Ok(report) => report,
+            Err(error) if error.is_readonly_or_access_failure() => {
+                tracing::warn!(
+                    target: "orbit.core.bootstrap",
+                    root = %paths.orbit_dir.display(),
+                    error = %error,
+                    "skipped incidental legacy-state import persistence"
+                );
+                orbit_store::workflow::legacy_state::ImportReport::skipped()
+            }
+            Err(error) => return Err(error),
         }
-        Err(error) => return Err(error),
     };
     if import_report.skipped_records() {
         tracing::warn!(
@@ -192,6 +205,17 @@ fn build_v2_task_backends(
 ) -> Result<WorkspaceTaskBackends, OrbitError> {
     let registry = TaskRegistryStore::open(&task_registry_path(global_root))?;
     let config = read_workspace_config_optional(&paths.orbit_dir)?;
+    // An explicit `--root` data directory is not a checkout. Binding
+    // `parent(data-dir)` as `repo_root` mints a synthetic workspace (e.g.
+    // `tmp-XXXXXX` for `/tmp`) that later `workspace init --force` cannot
+    // reclaim. Skip that mint unless a selected checkout supplied a hint.
+    if workspace_id_hint.is_none() && is_explicit_data_dir(global_root, &paths.orbit_dir) {
+        let workspace_id = config
+            .as_ref()
+            .map(|config| config.workspace_id.clone())
+            .unwrap_or_else(|| UNBOUND_DATA_DIR_WORKSPACE_ID.to_string());
+        return Ok(coordination_task_backends(registry, workspace_id));
+    }
     let workspace_id = if let Some(config) = &config {
         if let Some(hint) = workspace_id_hint
             && config.workspace_id != hint
@@ -250,6 +274,19 @@ fn rebind_candidate_workspace_id(
             "workspace config is missing and multiple task artifact bindings match '{}'; restore .orbit/config.yaml or choose a workspace binding",
             paths.orbit_dir.display()
         ))),
+    }
+}
+
+fn is_explicit_data_dir(global_root: &Path, orbit_dir: &Path) -> bool {
+    if global_root == orbit_dir {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(global_root),
+        std::fs::canonicalize(orbit_dir),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 

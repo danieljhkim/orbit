@@ -140,16 +140,24 @@ impl OrbitRuntime {
         runtime_config: &orbit_config::ResolvedConfig,
         temp_dir: builder::TempDir,
     ) -> Result<Self, OrbitError> {
+        // Flattened in-memory roots look like an explicit `--root` data dir.
+        // Supply a checkout binding so task APIs still have a partition;
+        // without it the data-dir skip would refuse to mint parent(tempdir).
+        let binding = WorkspaceRuntimeBinding {
+            workspace_id: "ws_memory".to_string(),
+            repo_root: data_root.to_path_buf(),
+            ship_mode: ShipMode::Local,
+        };
         let context = builder::build_context_from_roots(
             data_root,
             data_root,
             data_root,
-            None,
+            Some(&binding),
             runtime_config,
         )?;
         Ok(Self {
             context,
-            workspace_binding: None,
+            workspace_binding: Some(Arc::new(binding)),
             coordination_write_owner: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::workflow::layout::LayoutUpgradeReport::default()),
