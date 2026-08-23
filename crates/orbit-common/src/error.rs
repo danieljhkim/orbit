@@ -105,6 +105,20 @@ pub enum OrbitError {
     /// `denied` audit status so refusals stay separable from failures.
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
+    #[error("unknown federated workspace selector: {0}")]
+    UnknownSelector(String),
+    #[error("ambiguous federated destination: {0}")]
+    AmbiguousDestination(String),
+    #[error("federated destination unreachable: {0}")]
+    UnreachableDestination(String),
+    #[error("stale federated route: {0}")]
+    StaleRoute(String),
+    #[error("unhealthy federated checkout: {0}")]
+    UnhealthyCheckout(String),
+    #[error("tool is not available on this host: {0}")]
+    ToolNotOnThisHost(String),
+    #[error("destination capability refused: {0}")]
+    CapabilityRefused(String),
     #[error("Invalid ADR status transition: {0}")]
     AdrInvalidTransition(String),
     #[error("{kind} artifact unavailable for {id}")]

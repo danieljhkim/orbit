@@ -93,6 +93,25 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::CapabilityDenied(m) => {
             OrbitError::CapabilityDenied(redact_sensitive_env_text(&m))
         }
+        OrbitError::UnknownSelector(m) => {
+            OrbitError::UnknownSelector(redact_sensitive_env_text(&m))
+        }
+        OrbitError::AmbiguousDestination(m) => {
+            OrbitError::AmbiguousDestination(redact_sensitive_env_text(&m))
+        }
+        OrbitError::UnreachableDestination(m) => {
+            OrbitError::UnreachableDestination(redact_sensitive_env_text(&m))
+        }
+        OrbitError::StaleRoute(m) => OrbitError::StaleRoute(redact_sensitive_env_text(&m)),
+        OrbitError::UnhealthyCheckout(m) => {
+            OrbitError::UnhealthyCheckout(redact_sensitive_env_text(&m))
+        }
+        OrbitError::ToolNotOnThisHost(m) => {
+            OrbitError::ToolNotOnThisHost(redact_sensitive_env_text(&m))
+        }
+        OrbitError::CapabilityRefused(m) => {
+            OrbitError::CapabilityRefused(redact_sensitive_env_text(&m))
+        }
         OrbitError::AdrInvalidTransition(m) => {
             OrbitError::AdrInvalidTransition(redact_sensitive_env_text(&m))
         }
@@ -230,6 +249,13 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
             id: redact_all(&id),
         },
         OrbitError::CapabilityDenied(m) => OrbitError::CapabilityDenied(redact_all(&m)),
+        OrbitError::UnknownSelector(m) => OrbitError::UnknownSelector(redact_all(&m)),
+        OrbitError::AmbiguousDestination(m) => OrbitError::AmbiguousDestination(redact_all(&m)),
+        OrbitError::UnreachableDestination(m) => OrbitError::UnreachableDestination(redact_all(&m)),
+        OrbitError::StaleRoute(m) => OrbitError::StaleRoute(redact_all(&m)),
+        OrbitError::UnhealthyCheckout(m) => OrbitError::UnhealthyCheckout(redact_all(&m)),
+        OrbitError::ToolNotOnThisHost(m) => OrbitError::ToolNotOnThisHost(redact_all(&m)),
+        OrbitError::CapabilityRefused(m) => OrbitError::CapabilityRefused(redact_all(&m)),
         OrbitError::AdrInvalidTransition(m) => OrbitError::AdrInvalidTransition(redact_all(&m)),
         OrbitError::RemoteArtifactUnavailable {
             kind,

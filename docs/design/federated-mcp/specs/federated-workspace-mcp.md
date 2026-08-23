@@ -26,6 +26,22 @@ Without this contract, an implementation will key selectors on renameable `host_
 3. The gateway must not reinterpret a selector against its own local catalog.
 4. A caller that chooses one host and speaks v1 MCP (local stdio, direct SSH stdio, or `orbit mcp listen`) never enters this mux.
 
+## Destination membership file
+
+Federated destination membership is declared only in the machine-global operator file `~/.orbit/mcp-destinations.toml`. It is not part of workspace `config.toml`, `workspaces.json`, or host-registry. The v1 file shape is an array of SSH destinations:
+
+```toml
+[[destinations]]
+ssh = "orbit-linux"
+machine_id = "hm_alpha"
+
+[[destinations]]
+ssh = "operator@orbit-build"
+machine_id = "hm_beta"
+```
+
+Each row has exactly two required keys: `ssh`, an SSH alias or `user@host` transport target, and `machine_id`, the destination's stable `hm_…` identity. TCP/MCP destination rows are not a v1 file variant. A duplicate `machine_id` makes the entire file invalid with `ambiguous_destination` during config load, before the gateway advertises tools or accepts any `tools/call`.
+
 ## Selector identity
 
 1. The host-qualified selector is **structured, caller-uninterpreted**. Encoding `hm_<id>/ws_*` is normative (example: `hm_<id>/ws_orbit`). The stable key is `machine_id` (`hm_…`), not renameable `host_id`.
@@ -100,9 +116,11 @@ Federated list does **not** inherit that envelope or that filter:
    | `selector` | Structured, caller-uninterpreted host-qualified route token (`hm_<id>/ws_*`). Copy this field; do not parse it. |
    | `host` | Destination display identity (renameable `host_id`; display only) |
    | `machine_id` | Destination stable identity (`hm_…`) |
-   | host-reachability | Whether the configured destination answers |
-   | checkout-health | Repo-root presence at that destination (`active` / `invalid` / `unknown` if the host cannot be probed) |
+   | `reachability` | Whether the configured destination answers: `reachable` or `unreachable` |
+   | `checkout_health` | Repo-root presence at that destination: `active`, `invalid`, or `unknown` if the host cannot be probed |
    | `capabilities` | Classes the destination currently **advertises** for that workspace (a hint; see Capabilities vs checkout roles) |
+
+   The federated-only keys are exactly `selector`, `host`, `machine_id`, `reachability`, `checkout_health`, and `capabilities`. `capabilities` is an array whose values are `control_plane` and/or `execute`. These names are protocol keys; implementations must not substitute a combined `health` key or the prose labels used to describe them.
 
 3. **Do not overload one `health` field** with SSH/MCP reachability and repo-root presence.
 4. **Include unreachable and inactive destinations.** Configured workspaces on unreachable or inactive destinations are included, not omitted. A down destination appears with an explicit unreachable (and, if checkout cannot be probed, unknown/unhealthy) projection. Omission makes every later call a stale-route surprise.

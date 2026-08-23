@@ -70,6 +70,52 @@ fn owner_transport_errors_keep_stable_codes_and_call_identity() {
 }
 
 #[test]
+fn federated_routing_errors_keep_distinct_stable_codes() {
+    for (error, expected_code) in [
+        (
+            OrbitError::UnknownSelector("bad selector".to_string()),
+            "unknown_selector",
+        ),
+        (
+            OrbitError::AmbiguousDestination("hm_duplicate".to_string()),
+            "ambiguous_destination",
+        ),
+        (
+            OrbitError::UnreachableDestination("hm_offline".to_string()),
+            "unreachable_destination",
+        ),
+        (
+            OrbitError::StaleRoute("hm_host/ws_missing".to_string()),
+            "stale_route",
+        ),
+        (
+            OrbitError::UnhealthyCheckout("hm_host/ws_broken".to_string()),
+            "unhealthy_checkout",
+        ),
+        (
+            OrbitError::ToolNotOnThisHost("orbit_job_run_show".to_string()),
+            "tool_not_on_this_host",
+        ),
+        (
+            OrbitError::CapabilityRefused("control_plane".to_string()),
+            "capability_refused",
+        ),
+    ] {
+        let payload = error_payload(&error);
+        assert_eq!(payload["code"], expected_code);
+        assert_ne!(payload["code"], "invalid_input");
+        assert_ne!(payload["code"], "capability_denied");
+
+        let result = tool_error_result(&error);
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(
+            result.structured_content.expect("structured error payload")["code"],
+            expected_code
+        );
+    }
+}
+
+#[test]
 fn task_bundle_corruption_has_a_stable_code_and_structured_context() {
     let payload = error_payload(&OrbitError::TaskBundleCorrupt {
         task_id: "ORB-00123".to_string(),
