@@ -68,7 +68,7 @@ pub(super) fn ssh_command(args: &RemoteProxyArgs, caller_machine_id: &str) -> Co
 }
 
 /// Remote command whose hidden argument marks an SSH-originated MCP session.
-pub(super) fn remote_serve_command(caller_machine_id: &str) -> String {
+pub(crate) fn remote_serve_command(caller_machine_id: &str) -> String {
     format!(
         "orbit mcp serve --remote-caller-machine-id {}",
         quote_posix_arg(caller_machine_id)

@@ -12,9 +12,10 @@
 //!
 //! This crate owns protocol framing, advertised-name translation, structured
 //! responses, canonical tool discovery, server identity presentation, the TCP
-//! listener transport, and the direct SSH stdio proxy. Workspace resolution,
-//! domain validation, auditing, and authorization remain behind the injected
-//! [`McpHost`] boundary.
+//! listener transport, the direct SSH stdio proxy, and the federated mux over
+//! operator-configured destinations. Workspace resolution, domain validation,
+//! auditing, and authorization remain behind the injected [`McpHost`]
+//! boundary.
 
 mod adapter;
 mod error;

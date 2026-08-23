@@ -72,14 +72,25 @@ pub enum ServeMode {
     /// Present stdio MCP locally and relay it directly to a remote Orbit over
     /// one non-PTY SSH process.
     Remote,
+    /// Present one stdio MCP surface over every destination configured in
+    /// `~/.orbit/mcp-destinations.toml`.
+    ///
+    /// This mode serves no workspace of its own and binds to none. It lists
+    /// each configured destination's workspaces as live descriptors, probing
+    /// the destinations on every call, and includes destinations that are
+    /// unreachable right now rather than hiding them.
+    Federated,
 }
 
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
-    /// Run as a client-side proxy to a remote Orbit instead of serving this
-    /// machine. Requires an SSH destination.
-    #[arg(long, value_name = "MODE", requires = "ssh_host")]
+    /// Run as a client to other Orbit servers instead of serving this machine.
+    ///
+    /// `remote` proxies one chosen SSH destination and requires it as an
+    /// argument. `federated` muxes the destinations configured in
+    /// `~/.orbit/mcp-destinations.toml` and takes no argument.
+    #[arg(long, value_name = "MODE")]
     pub mode: Option<ServeMode>,
     /// SSH destination for `--mode remote`, such as a host, `user@host`, or a
     /// configured alias.
@@ -124,8 +135,9 @@ impl ServeArgs {
         }
         match self.mode {
             Some(ServeMode::Remote) => {
-                // Clap enforces the pairing; this keeps the invariant local
-                // rather than trusting a derive attribute at a distance.
+                // Each mode owns its own argument rule, so the pairing lives
+                // here rather than in a derive attribute that cannot express
+                // "required by one mode and refused by the other".
                 let ssh_host = self.ssh_host.ok_or_else(|| {
                     OrbitError::InvalidInput(
                         "`orbit mcp serve --mode remote` needs an SSH destination, e.g. \
@@ -134,6 +146,16 @@ impl ServeArgs {
                     )
                 })?;
                 orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
+            }
+            Some(ServeMode::Federated) => {
+                if let Some(ssh_host) = self.ssh_host {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "`orbit mcp serve --mode federated` takes no SSH destination, but got \
+                         '{ssh_host}'; destinations are configured in \
+                         `~/.orbit/mcp-destinations.toml`"
+                    )));
+                }
+                super::server::serve_mcp_federated_stdio()?
             }
             None => super::server::serve_mcp_stdio(
                 self.remote_caller_machine_id,

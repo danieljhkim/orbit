@@ -1,3 +1,5 @@
+//! Operator-configured federated destinations and the host-qualified selector.
+
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -127,7 +129,3 @@ fn validate_destinations(destinations: &DestinationsFile, path: &Path) -> Result
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "tests/federated.rs"]
-mod tests;

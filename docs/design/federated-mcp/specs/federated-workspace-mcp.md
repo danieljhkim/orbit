@@ -8,12 +8,12 @@ status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, spec]
 related_features: [federated-mcp, host-registry, mcp-bridge]
-related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Federated workspace MCP
 
-The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. This spec is proposed; it is not implemented.
+The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. The federated list is implemented in [ORB-11014]; routing is not yet.
 
 ## Why This Exists
 
@@ -104,6 +104,14 @@ The would-be signal is matching `git_remote` across destinations with differing 
 
 Federated `orbit_workspace_list` is a **new session-unbound response shape**, not a compatible extension of v1 `orbit.workspace.list`.
 
+Implemented in [ORB-11014] as `orbit mcp serve --mode federated`
+(`crates/orbit-mcp/src/federated/`). That server advertises this list tool and
+nothing else, because routing has not landed and a half-routed canonical
+surface would promise delivery the mux cannot perform. Membership is loaded
+once at startup from the destinations file; every call then probes each
+destination live over the v1 remote argv and caches nothing. The response
+envelope is `{"workspaces": [...]}` — no envelope `machine_id`.
+
 v1 (`crates/orbit-mcp/src/remote/discovery.rs`) returns `{"machine_id": "hm_…", "workspaces": […]}` with `machine_id` on the **envelope**, and filters to `Active` workspaces that are locally checked out on the accepting machine.
 
 Federated list does **not** inherit that envelope or that filter:
@@ -120,10 +128,14 @@ Federated list does **not** inherit that envelope or that filter:
    | `checkout_health` | Repo-root presence at that destination: `active`, `invalid`, or `unknown` if the host cannot be probed |
    | `capabilities` | Classes the destination currently **advertises** for that workspace (a hint; see Capabilities vs checkout roles) |
 
+   `host` is the operator's configured `ssh` target: the v1 discovery envelope carries no `host_id`, so that alias is the only display identity the mux can honestly attribute to a destination.
+
    The federated-only keys are exactly `selector`, `host`, `machine_id`, `reachability`, `checkout_health`, and `capabilities`. `capabilities` is an array whose values are `control_plane` and/or `execute`. These names are protocol keys; implementations must not substitute a combined `health` key or the prose labels used to describe them.
 
 3. **Do not overload one `health` field** with SSH/MCP reachability and repo-root presence.
 4. **Include unreachable and inactive destinations.** Configured workspaces on unreachable or inactive destinations are included, not omitted. A down destination appears with an explicit unreachable (and, if checkout cannot be probed, unknown/unhealthy) projection. Omission makes every later call a stale-route surprise.
+
+   Every configured destination therefore contributes at least one row. A destination that fails, times out, or answers under a `machine_id` other than its config pin yields one row with `reachability=unreachable`, `checkout_health=unknown`, `selector=null`, and no v1 workspace fields — there is no observed workspace to name, and inventing one would let a caller address a route that was never seen. A destination that answers with no workspaces yields the same row shape with `reachability=reachable`, which is a different fact from silence.
 5. v1 `orbit.workspace.list` on a single accepting machine is unchanged: it remains machine-local, envelope-keyed, and Active-and-locally-checked-out, and is documented in mcp-bridge / host-registry current-behavior docs.
 
 ## Fail-closed routing
@@ -156,7 +168,7 @@ Unreachable wins over capability and stale because those are undecidable without
 
 ## mcp-bridge invariant exception
 
-The mux replaces v1 "byte-transparent / no Orbit process relays onward" **for the federated namespace only**. v1 current-behavior text in [mcp-bridge 2_design.md](../../mcp-bridge/2_design.md) stays. This spec does not claim the mux is implemented.
+The mux replaces v1 "byte-transparent / no Orbit process relays onward" **for the federated namespace only**. v1 current-behavior text in [mcp-bridge 2_design.md](../../mcp-bridge/2_design.md) stays. `orbit mcp serve --mode remote` is unchanged and remains byte-transparent; the federated mux is a separate mode that speaks MCP as a client, reusing that same `ssh -T -- <host> orbit mcp serve --remote-caller-machine-id …` argv so a destination sees a session shape it already supports.
 
 Still excluded (not implied by the exception):
 
@@ -182,4 +194,4 @@ A disconnected or failed host therefore removes the affected route from useful s
 
 ## Agent Signature
 
-Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008].
+Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014].

@@ -1,4 +1,6 @@
-use super::*;
+use orbit_common::OrbitError;
+
+use super::super::config::{HostQualifiedSelector, destinations_path, load_destinations};
 
 #[test]
 fn host_qualified_selector_accepts_only_machine_and_workspace_ids() {
