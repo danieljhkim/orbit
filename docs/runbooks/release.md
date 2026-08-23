@@ -92,9 +92,11 @@ date has passed or its `revoked_at` field is set.
    - smoke the tagged shell installer on macOS and Ubuntu, including semantic
      companion installation where supported.
 
-   Require every job to pass. Then follow
-   [RELEASING.md §10b](../../RELEASING.md#10b-promote-to-main) to promote
-   `agent-main` to `main`, and
+   Review the result of every job, but treat CI as informational on
+   `agent-main`: no job is a merge gate. Failures are queued for asynchronous
+   remediation by the `qa-sweep` and `ci-failure-remediation` routines. Then
+   follow [RELEASING.md §10b](../../RELEASING.md#10b-promote-to-main) to
+   promote `agent-main` to `main`, and
    [§10c](../../RELEASING.md#10c-post-merge-back-merge-to-agent-main) to
    back-merge in the same session.
 
