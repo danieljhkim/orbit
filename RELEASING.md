@@ -2,7 +2,7 @@
 
 Runbook for cutting an Orbit release. Codified from [T20260510-23] (v0.4.0).
 
-See also [docs/runbooks/release.md](docs/runbooks/release.md) for the npm package, plugin manifest, and GitHub Release publishing steps.
+See also [docs/runbooks/release.md](docs/runbooks/release.md) for the npm package and GitHub Release publishing steps.
 
 ## Versioning policy
 
@@ -105,16 +105,13 @@ Surface the breaking-change candidate list before drafting the final section. Sh
 
 ### 4. Bump versions
 
-Six files change every release:
+Three files change every release:
 
 | File | Field |
 |------|-------|
 | `Cargo.toml` | `[workspace.package].version` |
 | `Cargo.lock` | refresh via `cargo update --workspace` (no third-party drift) |
-| `plugin/.claude-plugin/plugin.json` | `version` |
-| `plugin/.codex-plugin/plugin.json` | `version` |
-| `plugin/plugin.json` | `version` |
-| `plugin/npm/package.json` | `version` |
+| `npm/package.json` | `version` |
 
 The other `0.X.Y` matches in the repo (install-script doc comments, the website task pages, the Node engine pin in `website/package-lock.json`) are intentional — leave them.
 
@@ -126,7 +123,19 @@ make build
 
 Must finish clean. `cargo update --workspace` should report only Orbit workspace members re-locked — investigate any third-party version movement before continuing.
 
-If this cycle changed any CLI the plugin-install smoke drives (`orbit init`, `workspace init`, `mcp serve`, plugin layout), update [`scripts/smoke-plugin-install.sh`](scripts/smoke-plugin-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and then runs `@orbit-tools/cli@latest` from npm — a post-tag script fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts).
+If this cycle changed any CLI the npm-install smoke drives (`orbit init`, `workspace init`, or `mcp serve`), update [`scripts/smoke-npm-install.sh`](scripts/smoke-npm-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and then runs `@orbit-tools/cli@latest` from npm — a post-tag script fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#npm-install-smoke-two-artifacts).
+
+The tag-triggered npm-install smoke must be treated as a versioned check: it
+fails when the installed `@orbit-tools/cli` version does not equal the tag
+version. Publish the matching npm package, then re-run the workflow from
+Actions → `smoke-npm-install` → **Run workflow**, entering the release tag
+(for example, `v0.14.0`) in the `tag` input. Confirm that this post-publish,
+versioned run is green before considering the install chain verified. The
+script's assertion can be checked without network access with:
+
+```sh
+./scripts/smoke-npm-install.sh --dry-run-version-assertion
+```
 
 ### 6. Create the Orbit task
 
@@ -138,14 +147,11 @@ context_files:
   - file:CHANGELOG.md
   - file:Cargo.toml
   - file:Cargo.lock
-  - file:plugin/.claude-plugin/plugin.json
-  - file:plugin/.codex-plugin/plugin.json
-  - file:plugin/plugin.json
-  - file:plugin/npm/package.json
-  - file:scripts/smoke-plugin-install.sh
+  - file:npm/package.json
+  - file:scripts/smoke-npm-install.sh
 ```
 
-Acceptance criteria: each of the six version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the plugin-install smoke script still drives this cycle's CLI non-interactively.
+Acceptance criteria: Cargo and npm report the new version, Cargo.lock is refreshed without third-party drift, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the npm-install smoke script still drives this cycle's CLI non-interactively.
 
 ### 7. Human approval
 
@@ -227,11 +233,21 @@ cat <<'EOF' | gh api -X PUT repos/danieljhkim/orbit/branches/agent-main/protecti
   "enforce_admins": false,
   "required_pull_request_reviews": null,
   "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": true,
   "allow_deletions": false,
-  "allow_force_pushes": true
+  "block_creations": false,
+  "required_conversation_resolution": false,
+  "lock_branch": false,
+  "allow_fork_syncing": false
 }
 EOF
 ```
+
+Protection on `agent-main` exists only to prevent branch deletion
+(`allow_deletions: false`); merges are never gated on CI. CI failures are
+consumed asynchronously by the `qa-sweep` and `ci-failure-remediation`
+routines, which append remediation tasks to the queue.
 
 If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
 
@@ -259,14 +275,14 @@ Watch the Actions tab after pushing the tag. Real failure modes seen historicall
 - **`cargo build --locked` fails**: `Cargo.lock` was not refreshed after the version bump (step 4) — fix forward in the next patch.
 - **Homebrew tap step**: `secrets.TAP_GITHUB_TOKEN` expired, or the tap repo branch protection rejected the push.
 - **Smoke install** (`release.yml`): a regression in `install.sh` itself, since that smoke pulls it from the tagged ref. Verify locally before tagging if `install.sh` changed in this release.
-- **Plugin-install smoke** (separate workflow, `smoke-plugin-install.yml`): fails on the tag until npm is published (expected). After publish, a red run is either the tagged script speaking an old CLI contract, or a bad published artifact. Triage in [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts) — do not cut a patch for a script-only fix, and do not re-dispatch the old tag after the script has moved on.
+- **Npm-install smoke** (separate workflow, `smoke-npm-install.yml`): a tag run is expected to fail when npm does not yet contain the tag version. After publishing npm, manually dispatch the workflow with that tag in its `tag` input and require the versioned run to go green. A post-publish red run is either the tagged script speaking an old CLI contract, or a bad published artifact. Triage in [docs/runbooks/release.md](docs/runbooks/release.md#npm-install-smoke-two-artifacts) — do not cut a patch for a script-only fix, and do not re-dispatch the old tag after the script has moved on.
 
 ## When something goes wrong
 
 - **Tag pushed pointing at the wrong commit**: do NOT force-update the tag. Cut the next patch release with the fix instead.
 - **Release CI fails after the tag landed**: leave the tag, fix forward in the next patch release. The GitHub Release can be re-run from the Actions UI once the underlying issue is resolved (if the failure was infrastructure, not artifact-correctness).
 - **Breaking change discovered post-tag that wasn't in the CHANGELOG**: amend the next release's CHANGELOG with a backdated note rather than rewriting the prior section.
-- **Plugin-install smoke red after a successful npm publish**: follow [docs/runbooks/release.md](docs/runbooks/release.md#plugin-install-smoke-two-artifacts). A missing `orbit init` flag is a script fix on `agent-main`, not a patch release.
+- **Npm-install smoke red after a successful npm publish**: follow [docs/runbooks/release.md](docs/runbooks/release.md#npm-install-smoke-two-artifacts). A missing `orbit init` flag is a script fix on `agent-main`, not a patch release.
 
 ## Hotfix flow
 

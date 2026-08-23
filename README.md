@@ -8,11 +8,11 @@
   <em>The Orbit dashboard (<code>orbit web serve</code>) — task backlog, live audit log, per-agent scoreboard.</em>
 </p>
 
-**Orbit brings engineering rigor to AI-assisted coding. Tasks for every change, decisions recorded beside the code they explain, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch — local-first.**
+**Orbit brings engineering rigor to AI-assisted coding. A durable task for every change, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch, and a searchable corpus built from the docs you already write — local-first.**
 
-You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no decision record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap and enforces them by default: tasks before edits, load-bearing decisions written into the feature's design docs, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks.
+You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap and enforces them by default: tasks before edits, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks, and your team's own design docs retrievable by the agents doing the work.
 
-The constraints are the point — they're what keep agent-assisted code shippable at volume. And the history of decisions lives right alongside the code, so that agents (and you) can reconstruct how the code came to be.
+The constraints are the point — they're what keep agent-assisted code shippable at volume. And because every commit carries its task ID, the history of how the code came to be stays reconstructable, by you and by the agents.
 
 ---
 
@@ -20,98 +20,40 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 
 - **Durable, intent-tracked task layer.** Lifecycle (`proposed → backlog → in-progress → review → done`) survives sessions and branches; every commit carries the `task_id`, so `orbit task show` reconstructs prompt, plan, execution trace, and review threads months later. → [docs/design/task-artifacts/](docs/design/task-artifacts/)
 
-- **Decisions live beside the code they explain.** A load-bearing decision is a titled section in its feature's `docs/design/<feature>/4_decisions.md` — context, decision, consequences, and an explicit cost — reviewed in the same PR as the code and indexed with the ordinary docs corpus. Two admission doors keep the file honest: the decision either explains a specific surprising code site or governs decisions the project hasn't hit yet. → [docs/design/CONVENTIONS.md](docs/design/CONVENTIONS.md)
-
-- **A searchable docs corpus.** Register the markdown you already write — designs, runbooks, patterns — with `orbit docs add`, and agents retrieve it by concept instead of by filename: `orbit search --kind doc <query>` ranks against locked frontmatter, and `orbit docs index` plus `--hybrid` adds body-level embedding recall. → [docs/design/orbit-docs/](docs/design/orbit-docs/)
-
-- **A friction ledger for what the tooling gets wrong.** When Orbit itself is the obstacle — a confusing error, a missing flag, a misleading prompt — the agent files it (`orbit friction add`, or `orbit_friction_add` over MCP) instead of silently working around it. Records are triaged (`open → triaged → resolved`) and a task carrying `relations: [{"type": "resolves", ...}]` closes its friction on reaching `done`.
-
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
-
-- **Dependency-ordered execution.** Tasks carry `dependencies` and typed `relations` (`blocked_by`, …). The pipeline gates admission on them, so a dependent task waits for its blocker to reach `done` instead of being hand-sequenced by whoever is dispatching — declare the order once and let the queue enforce it.
-
-- **Recurring work as data, not code.** `orbit auto-task add/list/show/update/toggle` defines `.orbit/auto_tasks/*.yaml` templates with a cron or interval schedule and a dedupe policy; a seeded scheduler routine mints tasks from the due ones, collapsing catch-up runs and skipping duplicates when one is already open. `orbit auto-task mint <name>` mints one on demand — same template mapping, same provenance — so a new definition can be exercised without waiting for its slot. Provider-neutral, checked into the repo.
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
 
 - **Sandboxed-by-default execution.** Dispatched agent CLIs use a platform-specific OS boundary where supported. macOS uses `sandbox-exec`; Linux uses trusted `/usr/bin/bwrap` after a capability probe to enforce writes from the resolved policy. The Linux boundary leaves host filesystem reads and host network access available, so it does not provide worktree-only reads or policy-gated network egress. Windows and other unsupported platforms have no shipped OS-level backend, while in-process FS guards still cover HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
+- **A searchable docs corpus — your conventions, not Orbit's.** Register the markdown you already write — designs, decision records, ADRs, runbooks, patterns, in whatever layout your team uses — with `orbit docs add`, and agents retrieve it by concept instead of by filename: `orbit search --kind doc <query>` ranks against locked frontmatter, and `orbit docs index` plus `--hybrid` adds body-level embedding recall. Orbit imposes no doc structure; it makes the structure you already have retrievable. → [docs/design/orbit-docs/](docs/design/orbit-docs/)
+
+- **A friction ledger for what the tooling gets wrong.** When Orbit itself is the obstacle — a confusing error, a missing flag, a misleading prompt — the agent files it (`orbit friction add`, or `orbit_friction_add` over MCP) instead of silently working around it. Records are triaged (`open → triaged → resolved`) and a task carrying `relations: [{"type": "resolves", ...}]` closes its friction on reaching `done`.
+
+- **Dependency-ordered execution.** Tasks carry `dependencies` and typed `relations` (`blocked_by`, …). The pipeline gates admission on them, so a dependent task waits for its blocker to reach `done` instead of being hand-sequenced by whoever is dispatching — declare the order once and let the queue enforce it.
+
+- **Recurring work as data, not code.** `orbit auto-task add/list/show/update/toggle` defines `.orbit/auto_tasks/*.yaml` templates with a cron or interval schedule and a dedupe policy; a seeded scheduler routine mints tasks from the due ones, collapsing catch-up runs and skipping duplicates when one is already open. `orbit auto-task mint <name>` mints one on demand — same template mapping, same provenance — so a new definition can be exercised without waiting for its slot. Provider-neutral, checked into the repo.
+
 ---
 
 ## Quick Start
 
-### Setup via Agent Prompt (clone & build) - Recommended
+### Install the Binary — Recommended
 
-Cloning is the recommended and best way to get started with Orbit. Curl/brew/plugin paths give you a binary; cloning gives you a customizable framework to mold into your team's conventions. No need to contribute back to Orbit unless you want to, you can just fork it.
-
-- If you need to build your custom workflow, ask the agent directly.
-- If you don't like any orbit conventions, ask the agent to tweak it.
-- If something doesn't work, ask the agent to fix it.
-- If you need a new feature, ask the agent to add it.
-- If you are unsure about any orbit features, ask the agent to help you.
-
-Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) **from inside the repo where you want to use Orbit**. The agent clones Orbit, builds from source, sets up MCP, and reads the key docs so it can drive the workflow on your behalf afterwards.
-
-<details>
-<summary><strong>Agent setup prompt</strong> — copy this into your agent (click to expand)</summary>
-
-> You are helping me set up Orbit, a local governance and audit layer for coding agents.
->
-> I am a staff/principal/founding engineer who already uses multiple coding agents heavily (Claude Code, Codex, Gemini, Aider, etc.) and has started to feel the long-term maintainability cost of moving fast without enough structure.
->
-> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, a searchable docs corpus, and safe parallel execution.
->
-> Follow these steps carefully:
->
-> 1. Ask me where I want to clone the Orbit repository (suggest something like `~/code/orbit` or `~/dev/orbit`).
-> 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit declares `rust-version = "1.89"` (MSRV), so I need Rust **1.89 or newer**. If cargo is missing, or rustc is older than 1.89, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
-> 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
-> 4. Run `orbit init` to initialize global state at `~/.orbit`. It selects the host-appropriate sandbox for the shipped executor definitions: `macos-sandbox-exec` on macOS, `linux-bwrap` on Linux, and no OS-level backend on unsupported platforms. On Linux, after `orbit init`, follow the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) below and require its capability probe to pass before dispatching agents.
-> 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini). The registered server is **operator-authorized**: it can dispatch workflows (`orbit.workflow.ship`, run observation/resume) and run `orbit.command.exec`. Tell me before running this if you'd rather it stay agent-only (`orbit mcp init` instead).
-> 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
-> 7. Read the key documents so you actually understand the model:
->    - `README.md` — feature surface, install model, plugin vs CLI
->    - `docs/POSITIONING.md` — what Orbit is for, what it isn't (especially "who this is for")
->    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
->    - `ARCHITECTURE.md` — crate layering and dependency rules
->    - `docs/design/CONVENTIONS.md` — design-doc structure, and the admission test for what earns a decision entry
->    - `docs/CONFIG.md` — config reference: crew/workflow knobs and per-task crew override
-> 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
-> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit` skill — it should be auto-discovered after step 5).
->
-> Rules:
-> - Never run destructive commands without explicit confirmation. Specifically: cloning, installing rustup, running `make install` outside `~/.cargo/bin`, and any shell-profile modification all need a confirmation prompt.
-> - If anything is unclear or fails, stop and ask me.
-> - Do not try to "make it simpler" or hide Orbit's conventions. I am choosing this because I want the discipline.
->
-> Report back what you did and the current state of the workspace.
-
-</details>
-
-### Install the Binary
-
-Faster to get running, and the right choice if you don't need to change how Orbit works: `curl`, Homebrew, or an agent plugin all give you a released, signed build. You give up the ability to reshape Orbit's conventions in place — you can always clone later and keep your `.orbit/` state.
+One command gets you a released, signed build. Within your first fifteen minutes you have durable tasks, an audit log, MCP tools registered with your agent CLI, and the dashboard — no clone, no Rust toolchain.
 
 **Prerequisites:** at least one supported agent CLI (Codex, Claude Code, Cursor, or Gemini CLI), authenticated. For PR-based workflows (i.e., `orbit run ship` in the default `--mode pr`), `gh` installed and authenticated; otherwise use `--mode local`. On Linux, install and verify the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) after `orbit init`.
-
-<details>
-<summary><strong>Manual setup commands</strong> — copy these into your terminal (click to expand)</summary>
 
 ```bash
 # install
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 # or: brew install danieljhkim/tap/orbit
-# or, in Claude Code:
-#   /plugin marketplace add danieljhkim/orbit
-#   /plugin install orbit
-# or, in Codex CLI:
-#   codex plugin marketplace add danieljhkim/orbit --ref main
-#   codex plugin add orbit@orbit
-# or, in Cursor (local Agent Plugin; marketplace publication is a human follow-up):
-#   mkdir -p ~/.cursor/plugins/local
-#   ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
-#   # then restart Cursor or run Developer: Reload Window
+```
 
+<details>
+<summary><strong>Your first fifteen minutes</strong> — initialize, ship a task, watch it land (click to expand)</summary>
+
+```bash
 # initialize
 orbit init                                 # global state (~/.orbit)
 cd <repo> && orbit workspace init --mcp    # workspace state + operator-authorized MCP integration
@@ -151,6 +93,56 @@ orbit web connect my-server
 
 </details>
 <br>
+
+Everything is incremental from here: the task layer and audit log work on day one, and the docs corpus, friction ledger, auto-tasks, and parallel dispatch switch on as you adopt them — none is a prerequisite for the others.
+
+### Clone & Customize via Agent Prompt
+
+The binary is a released build; cloning gives you a customizable framework to mold into your team's conventions. Everything `.orbit/` holds carries over, so you can start on the binary and switch later. No need to contribute back to Orbit unless you want to, you can just fork it.
+
+- If you need to build your custom workflow, ask the agent directly.
+- If you don't like any orbit conventions, ask the agent to tweak it.
+- If something doesn't work, ask the agent to fix it.
+- If you need a new feature, ask the agent to add it.
+- If you are unsure about any orbit features, ask the agent to help you.
+
+Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) **from inside the repo where you want to use Orbit**. The agent clones Orbit, builds from source, sets up MCP, and reads the key docs so it can drive the workflow on your behalf afterwards.
+
+<details>
+<summary><strong>Agent setup prompt</strong> — copy this into your agent (click to expand)</summary>
+
+> You are helping me set up Orbit, a local governance and audit layer for coding agents.
+>
+> I am a staff/principal/founding engineer who already uses multiple coding agents heavily (Claude Code, Codex, Gemini, Aider, etc.) and has started to feel the long-term maintainability cost of moving fast without enough structure.
+>
+> Your job is to install and configure Orbit inside this repository so that I can keep using my existing agents while gaining durable tasks, structured audit, a searchable docs corpus, and safe parallel execution.
+>
+> Follow these steps carefully:
+>
+> 1. Ask me where I want to clone the Orbit repository (suggest something like `~/code/orbit` or `~/dev/orbit`).
+> 2. Verify the Rust toolchain. Run `cargo --version` and `rustc --version`. Orbit declares `rust-version = "1.89"` (MSRV), so I need Rust **1.89 or newer**. If cargo is missing, or rustc is older than 1.89, **stop and ask me before installing anything** — the canonical path is `rustup` (`curl https://sh.rustup.rs | sh`), but that modifies shell profile, so I want to confirm first. If rustup is already installed but the toolchain is old, suggest `rustup update stable` and confirm before running.
+> 3. Clone `https://github.com/danieljhkim/orbit` into the location from step 1, then run `make install`. This builds with cargo and copies the `orbit` binary to `$INSTALL_BIN_DIR` (default: `~/.cargo/bin`). Confirm the install path with me before running. Verify with `orbit --version`.
+> 4. Run `orbit init` to initialize global state at `~/.orbit`. It selects the host-appropriate sandbox for the shipped executor definitions: `macos-sandbox-exec` on macOS, `linux-bwrap` on Linux, and no OS-level backend on unsupported platforms. On Linux, after `orbit init`, follow the [Linux Bubblewrap host prerequisite](#linux-bubblewrap-host-prerequisite) below and require its capability probe to pass before dispatching agents.
+> 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini). The registered server is **operator-authorized**: it can dispatch workflows (`orbit.workflow.ship`, run observation/resume) and run `orbit.command.exec`. Tell me before running this if you'd rather it stay agent-only (`orbit mcp init` instead).
+> 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
+> 7. Read the key documents so you actually understand the model:
+>    - `README.md` — feature surface and install model
+>    - `docs/POSITIONING.md` — what Orbit is for, what it isn't (especially "who this is for")
+>    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
+>    - `ARCHITECTURE.md` — crate layering and dependency rules
+>    - `docs/design/CONVENTIONS.md` — design-doc structure, and the admission test for what earns a decision entry
+>    - `docs/CONFIG.md` — config reference: crew/workflow knobs and per-task crew override
+> 8. After setup, run `orbit task list` and `orbit semantic stats` and show me the output.
+> 9. Ask me what my first real task should be and create it properly using Orbit's task surface (use the `orbit` skill — it should be auto-discovered after step 5).
+>
+> Rules:
+> - Never run destructive commands without explicit confirmation. Specifically: cloning, installing rustup, running `make install` outside `~/.cargo/bin`, and any shell-profile modification all need a confirmation prompt.
+> - If anything is unclear or fails, stop and ask me.
+> - Do not try to "make it simpler" or hide Orbit's conventions. I am choosing this because I want the discipline.
+>
+> Report back what you did and the current state of the workspace.
+
+</details>
 
 ### Linux Bubblewrap host prerequisite
 
@@ -210,47 +202,6 @@ After install, task writes are embedded automatically in the background; `orbit 
 
 ---
 
-## Agent Plugins vs CLI
-
-Orbit ships lightweight Claude Code, Codex, and Cursor (Agent Plugins 1.0) plugins. The CLI gives you the full power of Orbit; choose a plugin when you want Orbit's MCP tools and shared skills strapped onto one agent without installing `orbit` on your `$PATH`.
-
-```bash
-# Claude Code
-/plugin marketplace add danieljhkim/orbit
-/plugin install orbit
-
-# Codex CLI
-codex plugin marketplace add danieljhkim/orbit --ref main
-codex plugin add orbit@orbit
-
-# Cursor (local Agent Plugin)
-mkdir -p ~/.cursor/plugins/local
-ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
-# Restart Cursor or run Developer: Reload Window, then confirm the Orbit
-# skill and MCP server under Customize → Plugins.
-
-# Later, after an Orbit release:
-codex plugin marketplace upgrade orbit
-codex plugin add orbit@orbit
-```
-
-Cursor loads the same `plugin/skills/orbit` tree and `npx -y @orbit-tools/cli@latest mcp serve` contract through the root Agent Plugins 1.0 manifests (`plugin/plugin.json` and `plugin/mcp.json`). Public Cursor Marketplace submission, account setup, and publication are a human follow-up and are not part of this install path.
-
-<details>
-<summary><strong>Plugin vs. CLI</strong> — (click to expand)</summary>
-
-|   | **Claude Code plugin** | **Codex plugin** | **Cursor Agent Plugin** | **CLI (curl / brew)** |
-|---|---|---|---|---|
-| Install | `/plugin install orbit` after `/plugin marketplace add danieljhkim/orbit` | `codex plugin add orbit@orbit` after `codex plugin marketplace add danieljhkim/orbit --ref main` | Symlink `plugin/` to `~/.cursor/plugins/local/orbit`, then reload Cursor | `curl … \| sh` or `brew install danieljhkim/tap/orbit` |
-| Orbit binary | Lives inside the plugin sandbox (not on `$PATH`) | Lives inside the plugin cache (not on `$PATH`) | Launched via `npx -y @orbit-tools/cli@latest` (not on `$PATH`) | Installed on `$PATH` |
-| MCP registration | Automatic in Claude Code | Automatic in Codex | Automatic in Cursor from `plugin/mcp.json` | Manual: `orbit workspace init --mcp` per workspace |
-| Shared Orbit skills | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Seeded by `orbit workspace init` |
-| Web dashboard (`orbit web serve`) | No | No | No | Yes |
-| Other agent CLIs | No, scoped to Claude Code | No, scoped to Codex | No, scoped to Cursor | Yes |
-| Workflows (ship, run show/list/resume) | Yes — same MCP surface | Yes — same MCP surface | Yes — same MCP surface | Yes — CLI or MCP |
-
-</details>
-
 > **Cowork users:** Orbit advertises its canonical MCP surface independently of the
 > server's launch directory. Workspace routing comes from the server's
 > `--workspace` binding, MCP initialize/session context, or an explicit registered
@@ -277,7 +228,7 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ## Orbit MCP Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The registered server launches as `orbit mcp serve --operator --workspace <ws_id>`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini). The registered server launches as `orbit mcp serve --operator --workspace <ws_id>`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
 
 `--workspace` is the workspace binding: most MCP clients cannot announce one at initialize, so the generated integration names the workspace it was registered for and workspace-scoped tools route without repeating a selector on every call. An explicit `workspace` on a tool call still overrides it, and a server launched without a binding still refuses a workspace-scoped call that names no workspace.
 
@@ -364,10 +315,11 @@ Couple things to note:
 Pre-1.0 and under active development. Breaking changes ride a minor bump (`0.10.x → 0.11.0`); see [CHANGELOG.md](CHANGELOG.md) and [RELEASING.md](RELEASING.md).
 
 - Core local execution, workflows, MCP, tasks, docs, frictions, and audit infrastructure are usable today.
-- 0.11.0 removed two native knowledge stores. `orbit adr` / `orbit.adr.*` and
-  `orbit learning` / `orbit.learning.*` are gone: decisions now live in each
-  feature's `4_decisions.md`, and durable know-how goes to the docs corpus,
-  tasks, or a friction record. Workspaces migrate on open.
+- 0.11.0 removed two native knowledge stores: `orbit adr` / `orbit.adr.*` and
+  `orbit learning` / `orbit.learning.*` are gone. Durable know-how now lives in
+  your own markdown registered into the docs corpus, in tasks, or in friction
+  records — Orbit no longer prescribes a decision-record format. Workspaces
+  migrate on open.
 - The former parsed code-graph subsystem is also gone. Agents inspect source
   with `grep`/`rg` and direct file reads.
 

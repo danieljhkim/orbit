@@ -52,7 +52,7 @@ help:
 	@echo "  make ci-lint      Pre-handoff clippy gate for agents (compiles all workspace targets)"
 	@echo "  make docs-index   Regenerate docs/INDEX.md"
 	@echo "  make stability    Verify per-crate stability tier markers"
-	@echo "  make release-check  Verify /plugin install orbit version lockstep (see docs/runbooks/release.md)"
+	@echo "  make release-check  Verify Cargo/npm/release version lockstep (see docs/runbooks/release.md)"
 	@echo "  make install      Install CLI locally (INSTALL_PROFILE=debug optional)"
 	@echo "  make uninstall    Remove installed binary"
 	@echo "  make clean        Clean build artifacts"
@@ -127,8 +127,6 @@ ci-fast:
 	./scripts/check-error-translation.sh
 	./scripts/check-orphan-modules.sh
 	./scripts/check-embedded-asset-portability.py
-	./scripts/test-validate-codex-plugin.sh
-	./scripts/test-validate-agent-plugin.sh
 
 # Compile-time pre-handoff gate for agents. Keep this invocation aligned with
 # the default workspace clippy pass in scripts/ci-guardrails.sh.
@@ -139,7 +137,7 @@ ci-lint:
 stability:
 	./scripts/check-stability.sh
 
-# Verify /plugin install orbit version invariant before cutting a release
+# Verify Cargo/npm/release version invariant before cutting a release
 release-check:
 	./scripts/release-check.sh
 

@@ -67,9 +67,9 @@ scheduler's cursor untouched — so it is the safe way to test a definition's
 wording before enabling it. Over MCP: `orbit_auto_task_list` and
 `orbit_auto_task_mint`.
 
-## The three seeded definitions
+## The four seeded definitions
 
-`orbit workspace init` seeds all three, disabled:
+`orbit workspace init` seeds all four, disabled:
 
 - **`qa-sweep`** — hourly. Identifies recent changes, exercises them hands-on
   through their real user-facing paths rather than just re-running the test
@@ -81,6 +81,11 @@ wording before enabling it. Over MCP: `orbit_auto_task_list` and
   dependencies, secret handling, and configuration with evidence; files a
   durable Orbit task for each non-duplicate finding with severity and impact; a
   clean review is a successful no-op.
+- **`code-review-sweep`** — every six hours. Reviews the commits merged into the
+  integration branch since the previous sweep's recorded cursor, verifies each
+  candidate finding against the live code, files the non-duplicate ones as tasks
+  tagged `code-review`, and records the new last-reviewed commit in its execution
+  summary — that cursor is the next sweep's window start.
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.

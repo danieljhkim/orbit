@@ -1,7 +1,7 @@
 ---
 type: pattern
 summary: "Crate-Boundary Error Translation"
-last_validated: 2026-07-26
+last_validated: 2026-08-23
 ---
 # Crate-Boundary Error Translation
 
@@ -70,7 +70,7 @@ pub fn dispatch_error_to_orbit(error: DispatchError) -> OrbitError {
 ```
 
 Other live translators in the same shape are `selector_error_to_orbit`
-(`orbit-common::utility::selector`) and `rpc_error_to_orbit`
+(`orbit-common::fs::selector`) and `rpc_error_to_orbit`
 (`orbit-search::rpc`).
 
 Patterns to copy:
@@ -80,4 +80,4 @@ Patterns to copy:
 - **One named match per surfaced variant; everything else passes through.** "`InvalidData` → `InvalidInput`, `Io` → `Io`, default → `Execution`" is the right granularity — name the kinds callers will actually branch on, dump the rest into the generic bucket.
 - **`.map_err(translator)?`, not `.map_err(|e| translator(e))?`.** The translator's signature is `FnOnce(E) -> OrbitError`, so the bare path works as a closure. The shorter form reads better at boundary sites.
 
-Use this shape for every new crate in the workspace per the architecture diagram in `CLAUDE.md`. A new typed error should land in the same PR as its translator. `scripts/check-error-translation.sh` (ORB-10013, wired into `make ci-fast` and CI guardrails) enforces the mechanically checkable core: registered boundary errors must export their translator from the owning crate, translators may not live in caller crates, and no foreign error type may be mapped to `OrbitError` variants at a call site.
+Use this shape for every new crate in the workspace per the architecture diagram in `ARCHITECTURE.md`. A new typed error should land in the same PR as its translator. `scripts/check-error-translation.sh` (ORB-10013, wired into `make ci-fast` and CI guardrails) enforces the mechanically checkable core: registered boundary errors must export their translator from the owning crate, translators may not live in caller crates, and no foreign error type may be mapped to `OrbitError` variants at a call site.

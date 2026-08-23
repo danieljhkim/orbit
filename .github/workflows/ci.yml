@@ -102,12 +102,11 @@ jobs:
           rustc --version | grep -F "${MSRV}"
           cargo check --workspace --locked
 
-  # [ORB-10010] Coverage visibility — informational, NOT a merge gate. This
-  # job is intentionally excluded from any required-status-check wiring
-  # (agent-main's branch protection sets required_status_checks: null, see
-  # RELEASING.md §10c; keep it that way for this job if checks are ever made
-  # required). Per-crate coverage targets (goals, not gates) are documented in
-  # CONTRIBUTING.md "Testing & Coverage".
+  # [ORB-10010] Coverage visibility — informational, NOT a merge gate. No CI
+  # job gates merges on agent-main; failures are signals consumed by the
+  # qa-sweep and ci-failure-remediation routines. Coverage is doubly
+  # informational, and per-crate coverage targets (goals, not gates) are
+  # documented in CONTRIBUTING.md "Testing & Coverage".
   coverage:
     name: Coverage (informational)
     runs-on: ubuntu-latest

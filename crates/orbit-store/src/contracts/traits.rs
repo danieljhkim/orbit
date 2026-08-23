@@ -76,6 +76,23 @@ pub trait TaskStoreBackend: Send + Sync {
     }
     fn delete_task(&self, id: &str) -> Result<bool, OrbitError>;
 
+    /// Run `op` while holding this task's write lock.
+    ///
+    /// A caller that reads a task, decides something from that snapshot, and
+    /// then writes needs the read and the write to be one critical section;
+    /// locking only the write lets a concurrent update land in between and be
+    /// overwritten (ORB-10988). The lock is re-entrant within a thread, so the
+    /// per-write locking the backend already does still applies underneath.
+    ///
+    /// The default is a no-op passthrough for backends with no per-task lock.
+    fn with_task_write_lock(
+        &self,
+        _id: &str,
+        op: &mut dyn FnMut() -> Result<(), OrbitError>,
+    ) -> Result<(), OrbitError> {
+        op()
+    }
+
     /// Status counts per complexity bucket from the generated task index.
     /// Default is empty; the v2 store answers from SQLite without bundle reads.
     fn task_completion_by_complexity(&self) -> Result<Vec<TaskCompletionByComplexity>, OrbitError> {

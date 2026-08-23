@@ -4,7 +4,7 @@ type: design
 title: "Activity / Job — Overview"
 owner: codex
 last_updated: 2026-07-20
-last_validated: 2026-07-26
+last_validated: 2026-08-23
 status: Draft
 feature: activity-job
 doc_role: overview
@@ -25,7 +25,7 @@ Orbit needs a runtime layer that humans can inspect and code can execute. Activi
 
 1. **Typed execution.** Agent loops and deterministic actions share one schema family after [T20260418-2010].
 2. **Durable local control flow.** Retry, parallelism, fan-out, and loops survive outside one model turn via `JobV2` DAG constructs from [T20260418-2018].
-3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the `V2RuntimeHost` work in [T20260418-2143] and [T20260418-2210].
+3. **Clean runtime boundaries.** orbit-core coordinates runs without naming `orbit-agent` internals through the unified `RuntimeHost` boundary in [T20260418-2143] and [T20260418-2210].
 4. **One canonical schema.** `schemaVersion: 1` assets fail load-time parsing after [T20260419-2156].
 
 ---
@@ -67,7 +67,7 @@ Name resolution arrived in [T20260418-2019]; `run-v2` entrypoints in [T20260418-
 
 ### 2.4 Provider is the only agent runtime choice
 
-For `agent_loop`, the asset declares a **provider** — `claude`, `codex`, `gemini`, `grok`, `ollama`, or `openai_compat` — and Orbit dispatches it through the CLI agent path. A provider without a CLI runtime (`openai_compat`) fails structurally instead of falling back.
+For `agent_loop`, the asset declares a **provider** — `claude`, `codex`, `gemini`, `grok`, `copilot`, `ollama`, `openai_compat`, or `cursor`. Orbit's CLI entry point executes the canonical four (`claude`, `codex`, `gemini`, and `grok`); other provider identities fail structurally instead of falling back.
 
 ### 2.5 Audit, policy, and seeded assets make the runtime inspectable
 
@@ -94,14 +94,14 @@ failures still terminate the parent.
 
 | Concern | Where it lives | Primary task ID |
 |---------|----------------|-----------------|
-| v2 activity type system | `crates/orbit-common/src/types/activity_job/activity_v2.rs` | [T20260418-2010] |
-| v2 job step grammar | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260418-2018] |
-| Job kinds (`workflow`, `subroutine`) | `crates/orbit-common/src/types/activity_job/job_v2.rs` | [T20260419-0339] |
-| Target-ref resolution | `crates/orbit-common/src/types/activity_job/catalog.rs` | [T20260418-2019] |
-| `run-v2` core entrypoints and host boundary | `crates/orbit-cmd/src/activity_v2.rs`, `crates/orbit-core/src/command/job/exec.rs` | [T20260418-2143], [T20260418-2210] |
-| Retired-declaration rejection | `crates/orbit-common/src/types/activity_job/retired.rs` | [ORB-10801] |
+| v2 activity type system | `crates/orbit-types/src/workflow/activity_job/activity_v2.rs` | [T20260418-2010] |
+| v2 job step grammar | `crates/orbit-types/src/workflow/activity_job/job_v2.rs` | [T20260418-2018] |
+| Job kinds (`workflow`, `subroutine`) | `crates/orbit-types/src/workflow/activity_job/job_v2.rs` | [T20260419-0339] |
+| Target-ref resolution | `crates/orbit-engine/src/activity_job/catalog.rs` | [T20260418-2019] |
+| `run-v2` core entrypoints and host boundary | `crates/orbit-cmd/src/activity_v2.rs`, `crates/orbit-core/src/application/job/exec.rs`, `crates/orbit-engine/src/context/hosts.rs`, `crates/orbit-core/src/adapter/engine_host/runtime_host.rs` | [T20260418-2143], [T20260418-2210] |
+| Retired-declaration rejection | `crates/orbit-types/src/workflow/activity_job/retired.rs` | [ORB-10801] |
 | v2 DAG executor | `crates/orbit-engine/src/activity_job/job_executor/` | [T20260418-2018], [T20260509-2] |
-| V2 audit envelope and disk sink | `crates/orbit-common/src/types/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
+| V2 audit envelope and disk sink | `crates/orbit-types/src/workflow/activity_job/audit_envelope.rs`, `crates/orbit-engine/src/activity_job/audit_writer.rs` | [T20260419-0002] |
 | CLI agent runtime path | `crates/orbit-engine/src/activity_job/cli_runner/mod.rs` | [T20260419-0104] |
 | `fsProfile` enforcement | `crates/orbit-policy`, `tool_context_for_activity`, CLI describe/get surfaces | [T20260419-0503] |
 | Seeded reference activities and pipeline jobs | `crates/orbit-core/assets/activities/`, `crates/orbit-core/assets/jobs/` | [T20260419-2347], [T20260419-0622-3], [T20260419-0623] |
@@ -114,8 +114,8 @@ failures still terminate the parent.
 - **[T20260418-2010]** — Add the first v2 activity runtime scaffolding.
 - **[T20260418-2018]** — Add `JobV2` DAG constructs (`parallel`, `fan_out`, `loop`, `retry`, `when`).
 - **[T20260418-2019]** — Add v2 activity name resolution and pipeline skeleton assets.
-- **[T20260418-2143]** — Wire `V2RuntimeHost` in orbit-core and add `orbit activity run-v2`.
-- **[T20260418-2210]** — Reshape `V2RuntimeHost` to keep `orbit-agent` types out of orbit-core.
+- **[T20260418-2143]** — Wire the v2 runtime host in orbit-core and add `orbit activity run-v2`.
+- **[T20260418-2210]** — Reshape the v2 runtime host to keep `orbit-agent` types out of orbit-core.
 - **[T20260419-0002]** — Add `workspace_path` provenance to the v2 audit envelope.
 - **[T20260419-0104]** — Add `backend: cli` dispatch for v2 `agent_loop`.
 - **[T20260419-0339]** — Add v2 job kinds to the job catalog.

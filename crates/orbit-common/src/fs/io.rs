@@ -14,6 +14,8 @@
 //! module domain-free preserves the `types::` / `utility::` split inside
 //! `orbit-common`.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -247,9 +249,47 @@ pub fn write_text_with_parent(path: &Path, content: &str) -> io::Result<()> {
     fs::write(path, content)
 }
 
+thread_local! {
+    /// Lock files this thread currently holds, by lock-file path.
+    ///
+    /// ORB-10988: `flock(2)` is owned by the open file description, not by the
+    /// process or thread, so a nested `with_exclusive_file_lock` on the same
+    /// path opens a *second* descriptor and blocks against the outer one —
+    /// a self-deadlock, not a re-entry. Tracking held paths per thread makes
+    /// the helper re-entrant, which is what lets a caller hold a task lock
+    /// across a read-modify-write whose inner writes lock the same file.
+    static HELD_LOCK_PATHS: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+}
+
+/// Removes `path` from this thread's held set on drop, including on unwind.
+struct HeldLockPath(PathBuf);
+
+impl Drop for HeldLockPath {
+    fn drop(&mut self) {
+        HELD_LOCK_PATHS.with(|held| {
+            held.borrow_mut().remove(&self.0);
+        });
+    }
+}
+
+/// Registers `path` as held by this thread, or returns `None` when this thread
+/// already holds it (the caller then runs `op` under the outer lock).
+fn claim_lock_path(path: &Path) -> Option<HeldLockPath> {
+    HELD_LOCK_PATHS.with(|held| {
+        held.borrow_mut()
+            .insert(path.to_path_buf())
+            .then(|| HeldLockPath(path.to_path_buf()))
+    })
+}
+
 /// Run `op` while holding an exclusive advisory flock on a sibling lock
 /// file of `target_path` (`.<filename>.lock`). Creates the parent directory
 /// if missing. The lock is released when this function returns.
+///
+/// The lock is re-entrant per thread: a nested call for the same lock path
+/// runs `op` directly under the outermost acquisition instead of deadlocking
+/// on a second descriptor. Cross-thread and cross-process callers still block
+/// on the flock as before.
 ///
 /// The closure returns `Result<T, E>` where any filesystem error hit while
 /// acquiring the lock is folded into `E` via `From<std::io::Error>` —
@@ -269,9 +309,12 @@ where
             format!("cannot determine parent for '{}'", target_path.display()),
         )
     })?;
-    create_private_dir_all(parent).map_err(|e| classify_lock_io(parent, e))?;
 
-    let lock_path = lock_path_for(target_path)?;
+    let lock_path = resolved_lock_path(target_path)?;
+    let Some(_held) = claim_lock_path(&lock_path) else {
+        return op();
+    };
+    create_private_dir_all(parent).map_err(|e| classify_lock_io(parent, e))?;
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true).truncate(false);
     apply_private_file_mode(&mut options);
@@ -292,6 +335,26 @@ where
     })?;
 
     op()
+}
+
+/// The lock path to open and to key re-entrancy on, resolved through symlinks
+/// where the parent directory already exists.
+///
+/// Orbit reaches one task bundle by more than one route — the canonical store
+/// path and the checkout projection that links to it — so keying re-entrancy
+/// on the literal path would let a nested call miss its own outer lock and
+/// deadlock on a second descriptor to the same file. Resolving the parent
+/// collapses those routes to one key. An unresolvable parent means the
+/// directory does not exist yet, so nothing can be holding a lock inside it.
+fn resolved_lock_path(target_path: &Path) -> io::Result<PathBuf> {
+    let lock_path = lock_path_for(target_path)?;
+    let Some(file_name) = lock_path.file_name() else {
+        return Ok(lock_path);
+    };
+    match lock_path.parent().map(fs::canonicalize) {
+        Some(Ok(parent)) => Ok(parent.join(file_name)),
+        _ => Ok(lock_path),
+    }
 }
 
 fn lock_path_for(path: &Path) -> io::Result<PathBuf> {

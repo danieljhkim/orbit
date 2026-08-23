@@ -246,3 +246,98 @@ fn drive_to_done(runtime: &OrbitRuntime, id: &str) -> Task {
         .expect("in-progress -> review with execution summary");
     update_status(runtime, id, TaskStatus::Done).expect("review -> done")
 }
+
+/// ORB-10988 / F2026-07-119: the update path must hold the task lock across
+/// its *whole* read-modify-write, not just around the store write.
+///
+/// The body reads the task, decides from that snapshot whether the mutation is
+/// even legal, and only then writes. When the lock covered the write alone, a
+/// concurrent update could commit a status change inside that gap: the second
+/// writer had already cleared the guard against a status it never saw, and its
+/// write landed on a task that had since become unmodifiable.
+///
+/// The other thread holds the bundle lock directly, so the window is opened
+/// deliberately rather than raced for.
+#[test]
+fn concurrent_update_cannot_write_through_a_status_change_it_never_saw() {
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
+
+    let (root, runtime) = test_runtime();
+    let task = add_proposed_task(&runtime, "Guard under contention");
+    let lock_target = task_bundle_dir(root.path(), &task.id).join("task.yaml");
+
+    let (locked_tx, locked_rx) = sync_channel::<()>(0);
+    let (contender_tx, contender_rx) = sync_channel::<()>(0);
+
+    // `move` on the holder closure captures only the channel endpoints; the
+    // runtime and paths cross as shared references, which are `Copy`.
+    let holder_runtime = &runtime;
+    let holder_lock_target = lock_target.as_path();
+    let holder_id = task.id.clone();
+    let contended = std::thread::scope(|scope| {
+        scope.spawn(move || {
+            orbit_common::fs::io::with_exclusive_file_lock::<(), orbit_common::OrbitError, _>(
+                holder_lock_target,
+                "ORB-10988 regression",
+                || {
+                    locked_tx.send(()).expect("announce the held lock");
+                    contender_rx.recv().expect("await the contending update");
+                    // Long enough that an update which reads before locking has
+                    // certainly taken its stale snapshot by now.
+                    std::thread::sleep(Duration::from_millis(250));
+                    holder_runtime
+                        .archive_task(&holder_id)
+                        .expect("archive under the lock");
+                    Ok(())
+                },
+            )
+            .expect("hold the task lock");
+        });
+
+        locked_rx.recv().expect("await the held lock");
+        contender_tx
+            .send(())
+            .expect("announce the contending update");
+        runtime.update_task(
+            &task.id,
+            TaskUpdateParams {
+                title: Some("renamed by the loser of the race".to_string()),
+                ..Default::default()
+            },
+        )
+    });
+
+    let err = contended.expect_err("an archived task must refuse a rename");
+    assert!(
+        err.to_string().contains("cannot be modified"),
+        "expected the archived-task guard, got: {err}"
+    );
+    let reread = runtime.get_task(&task.id).expect("task still readable");
+    assert_eq!(reread.status, TaskStatus::Archived);
+    assert_eq!(
+        reread.title, "Guard under contention",
+        "the losing writer must not have renamed an archived task"
+    );
+}
+
+/// Locate a task's bundle directory under a test runtime's roots. The store
+/// owns the layout; the test only needs *a* path to contend on.
+fn task_bundle_dir(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+    fn walk(dir: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+        for entry in std::fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if path.file_name().is_some_and(|name| name == id) && path.join("task.yaml").is_file() {
+                return Some(path);
+            }
+            if let Some(found) = walk(&path, id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    walk(root, id).unwrap_or_else(|| panic!("no bundle directory for {id} under {root:?}"))
+}

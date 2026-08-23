@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.0
+
+### Breaking Changes
+
+- **Agent plugin channel retired**: Orbit no longer ships Claude, Codex, or Cursor agent plugins; install and use the standalone Orbit CLI instead. ([ORB-10995])
+
+### Highlights
+
+- **Built-in code-review sweep**: fresh workspaces include a disabled code-review auto-task that teams can enable to schedule recurring reviews. ([ORB-10997])
+- **Reliable concurrent task updates**: task writes now coordinate safely across simultaneous CLI, MCP, and dashboard activity. ([ORB-10988])
+- **Simpler binary-first onboarding**: the Quick Start now leads with installing the standalone CLI and brings your existing repository conventions into Orbit. ([ORB-10992])
+
 ## 0.14.0
 
 ### Breaking Changes

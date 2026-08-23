@@ -191,10 +191,32 @@ pub(crate) fn read_bundle_at(bundle_dir: &Path) -> Result<TaskBundleV2, OrbitErr
     })
 }
 
-fn read_bundle_for_id(
+/// Read only a bundle's envelope.
+///
+/// The envelope carries every field the generated task index projects, so
+/// index validation reads this instead of assembling the whole bundle — one
+/// small YAML file per task rather than the bundle's seven.
+pub(crate) fn read_envelope_at(bundle_dir: &Path) -> Result<TaskEnvelopeV2, OrbitError> {
+    let expected_task_id = task_id_from_bundle_dir(bundle_dir)?;
+    read_envelope_for_id(bundle_dir, &expected_task_id).map_err(|error| match error {
+        OrbitError::NotFound {
+            kind: NotFoundKind::Task,
+            ..
+        }
+        | OrbitError::TaskBundleCorrupt { .. }
+        | OrbitError::Io(_) => error,
+        other => OrbitError::TaskBundleCorrupt {
+            task_id: expected_task_id,
+            path: bundle_dir.to_string_lossy().into_owned(),
+            reason: other.to_string(),
+        },
+    })
+}
+
+fn read_envelope_for_id(
     bundle_dir: &Path,
     expected_task_id: &str,
-) -> Result<TaskBundleV2, OrbitError> {
+) -> Result<TaskEnvelopeV2, OrbitError> {
     let envelope_path = bundle_dir.join(TASK_ENVELOPE_FILE_NAME);
     if !envelope_path.is_file() {
         return Err(OrbitError::not_found(
@@ -212,9 +234,15 @@ fn read_bundle_for_id(
             envelope.id
         )));
     }
+    Ok(envelope)
+}
 
+fn read_bundle_for_id(
+    bundle_dir: &Path,
+    expected_task_id: &str,
+) -> Result<TaskBundleV2, OrbitError> {
     let bundle = TaskBundleV2 {
-        envelope,
+        envelope: read_envelope_for_id(bundle_dir, expected_task_id)?,
         description: read_required_text(&bundle_dir.join(TASK_DESCRIPTION_FILE_NAME))?,
         acceptance: read_required_text(&bundle_dir.join(TASK_ACCEPTANCE_FILE_NAME))?,
         plan: read_required_text(&bundle_dir.join(TASK_PLAN_FILE_NAME))?,

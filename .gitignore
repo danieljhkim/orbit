@@ -24,9 +24,6 @@ agentspace
 !.grok/
 !.grok/config.toml
 !.grok/hooks/
-# ...except the published plugin's MCP registration, which ships in the package.
-!plugin/.mcp.json
-
 # OS / editor
 .DS_Store
 .vscode/settings.json
@@ -47,9 +44,6 @@ orbit.db
 orbit.db-shm
 orbit.db-wal
 
-# Benchmark run/task artifacts — regenerated per run, not committed
-benchmarks/**/runs/**
-benchmarks/**/tasks/**
 # Orbit runtime state stays workspace-local. Project-authored decisions live in
 # feature `docs/design/**/4_decisions.md` files.
 .orbit/*

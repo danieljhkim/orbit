@@ -1,6 +1,6 @@
 {
   "name": "@orbit-tools/cli",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "npm proxy for the Orbit CLI. Downloads the matching native binary from GitHub Releases on install and forwards all invocations.",
   "bin": {
     "orbit": "bin/orbit.js"
@@ -30,7 +30,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/danieljhkim/orbit.git",
-    "directory": "plugin/npm"
+    "directory": "npm"
   },
   "homepage": "https://github.com/danieljhkim/orbit",
   "bugs": "https://github.com/danieljhkim/orbit/issues",

@@ -346,6 +346,28 @@ pub(super) fn server_error(e: orbit_core::OrbitError) -> Response {
         .into_response()
 }
 
+/// Run a blocking runtime call on the blocking pool instead of the async
+/// worker that is serving the request.
+///
+/// Every `OrbitRuntime` task mutation descends into an exclusive `flock` with
+/// no timeout. Calling one straight from a handler parks a tokio worker for
+/// the whole wait, so a burst of concurrent writes parks every worker and the
+/// server stops answering — the `ReadTimeout`-then-`ConnectError` shape of
+/// F2026-07-119. `label` names the operation in the panic-propagation error.
+pub(super) async fn blocking<T, F>(label: &str, op: F) -> Result<T, Box<Response>>
+where
+    F: FnOnce() -> Result<T, orbit_core::OrbitError> + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(op).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(Box::new(map_runtime_error(e))),
+        Err(join_err) => Err(Box::new(server_error(orbit_core::OrbitError::Execution(
+            format!("{label} panicked: {join_err}"),
+        )))),
+    }
+}
+
 /// Browser-CSRF mitigation only — NOT an access-control boundary.
 ///
 /// This rejects cross-origin state-changing requests originating from a
