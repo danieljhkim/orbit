@@ -253,6 +253,7 @@ fn dispatch_v2_activity_inner(
             Some(host) => run_deterministic(
                 host,
                 input.run_id,
+                input.activity_name,
                 spec,
                 input.fs_profile,
                 input.audit.clone(),
@@ -291,9 +292,31 @@ fn inject_run_id(input: &Value, run_id: &str) -> Value {
     Value::Object(augmented)
 }
 
+/// Name the dispatching step in a deterministic action's input.
+///
+/// [ORB-10971] An action that persists something into the run's own state —
+/// a child dispatch checkpoint, say — needs to say *which* step produced it,
+/// and `run_id` alone cannot. Scoped to the deterministic path: agent-loop
+/// envelopes are a provider-facing contract and are deliberately left alone.
+/// An input that already carries `step_id` wins, so a job asset can still
+/// address a different step explicitly.
+fn inject_step_id(input: &Value, step_id: &str) -> Value {
+    let Value::Object(map) = input else {
+        return input.clone();
+    };
+    if map.contains_key("step_id") {
+        return input.clone();
+    }
+
+    let mut augmented = map.clone();
+    augmented.insert("step_id".to_string(), Value::String(step_id.to_string()));
+    Value::Object(augmented)
+}
+
 fn run_deterministic(
     host: &dyn RuntimeHost,
     run_id: &str,
+    activity_name: &str,
     spec: &DeterministicSpec,
     fs_profile: Option<&str>,
     audit: Arc<V2AuditWriter>,
@@ -331,9 +354,12 @@ fn run_deterministic(
                 message: error.to_string(),
             })?
         }
-        Some(DeterministicAction::Core(_)) | None => {
-            host.run_deterministic(&spec.action, &spec.config, input, tool_context)?
-        }
+        Some(DeterministicAction::Core(_)) | None => host.run_deterministic(
+            &spec.action,
+            &spec.config,
+            &inject_step_id(input, activity_name),
+            tool_context,
+        )?,
     };
     Ok(DispatchOutcome {
         success: true,

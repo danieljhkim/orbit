@@ -2,9 +2,10 @@
 type: runbook
 summary: Check Orbit workspace, database, dashboard, log-sink, job-run, and routine-clock health.
 tags: [operations, health, doctor, dashboard, routines]
-paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/command/job/run/reconcile.rs"]
+paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/application/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
-related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558]
+related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558, ORB-10986]
+last_validated: 2026-08-23
 ---
 
 # Check Orbit Health
@@ -14,8 +15,8 @@ database recovery, or upgrade.
 
 ## Run `orbit doctor`
 
-`orbit doctor` performs nine checks in order. Every check degrades to a row rather than
-aborting unless the store itself cannot open.
+`orbit doctor` performs infrastructure checks and one row for each definition-artifact kind.
+Every check degrades to a row rather than aborting unless the store itself cannot open.
 
 | Check | What it verifies |
 |---|---|
@@ -24,11 +25,10 @@ aborting unless the store itself cannot open.
 | `disk-space` | free space on the volume holding `.orbit` (warn below 1 GiB or 5%; fail below 256 MiB or 1%) |
 | `semantic-index` | stale embedding rows; skipped if never indexed |
 | `stale-locks` | `.lock` files under `state/`, `tasks/`, `learnings/`, and `adrs/.locks/` whose recorded holder PID is dead |
-| `job-runs` | orphaned `pending` or `running` runs whose owner process is gone |
+| `job-runs` | orphaned `pending` or `running` runs with no live worker process |
 | `task-reservations` | active reservations whose owner run or terminal task association proves the reservation stale |
 | `task-relations` | unresolved relation/dependency targets that would block a task-index rebuild |
-| `id-allocations` | learning/ADR ids pinned to a worktree that no longer exists, with no readable body |
-| `artifacts-*` | skills, jobs, activities, auto-tasks, and routines on disk: stale, deprecated, or catalog-invalid |
+| `artifacts-*` | skills, jobs, activities, auto-tasks, and routines on disk: stale, deprecated, residual, or catalog-invalid |
 
 Example:
 
@@ -45,7 +45,6 @@ $ orbit doctor
 │ job-runs         ok        no orphaned job runs                                              │
 │ task-reservations ok       no conclusively stale active task reservations                    │
 │ task-relations   ok        no unresolved relation/dependency targets                        │
-│ id-allocations   ok        no learning/ADR allocations pinned to a missing worktree         │
 0 failure(s), 1 warning(s).
 ```
 
@@ -100,15 +99,6 @@ The repair deletes only that obsolete `spec.backend` key, leaves unknown backend
 unrelated malformed activities untouched (and reports them for a manual edit), and is
 idempotent across every activity catalog directory in the workspace.
 
-An `id-allocations` warning means an id was allocated inside a worktree that has since been
-reaped, before its body was merged: the body is unrecoverable and the row would otherwise stay
-in the legacy allocation ledger forever. Confirm the named
-worktrees really are gone — a volume that is merely unmounted reads the same way — then retire
-the rows with `orbit doctor --fix-orphaned-allocations`. The repair re-verifies every row
-before writing, refuses any that became readable again, and flips the row to `abandoned`
-instead of deleting it, so the retired ids are never reissued ([Detect and retire id allocations pinned to a reaped worktree](../design/worktree-artifacts/4_decisions.md#detect-and-retire-id-allocations-pinned-to-a-reaped-worktree), ORB-10501). Without
-the flag, `orbit doctor` only reports.
-
 Graph is retired under [Retire and delete Orbit's code-graph subsystem](../design/_archive/orbit-graph/4_decisions.md#retire-and-delete-orbits-code-graph-subsystem) and is not inspected by ordinary health checks. To remove
 leftover state explicitly, run `orbit doctor --remove-graph`. This deletes only the current
 worktree's `.orbit/graph` and the shared workspace's `.orbit/knowledge/graph`; it is
@@ -155,11 +145,15 @@ orbit routine list
 orbit sweep --json
 ```
 
-On Linux, a healthy enabled status includes a finite next systemd trigger and an effective
-cadence. `clock: unhealthy` with an inactive effective cadence means the timer is enabled but
-elapsed, unscheduled, or could not be probed; follow the printed diagnostic and reinstall the
-generated units with `orbit routine init --install-clock`. The generated timer schedules its
-first sweep from each systemd user-manager startup and then recurs from service activation.
+On Linux, a healthy enabled status includes an active timer, a finite next systemd trigger,
+and an effective cadence. `clock: unhealthy` with an inactive effective cadence means the
+timer is enabled but elapsed, unscheduled, inactive, or could not be probed. Inspect the
+printed diagnostic, then run `orbit routine clock enable`: it restarts the timer even when it
+is already enabled and returns success only after verifying a finite next trigger. If that
+verification fails, inspect the `systemctl --user status` and `journalctl --user` commands in
+the error before retrying. The generated timer schedules its first sweep from every timer
+activation and then recurs from service activation; installation and cadence changes perform
+the same post-activation verification.
 It does not replay every tick missed during host or manager downtime: on the next sweep,
 routine `missed_run: catch_up_once` fires once for a gap while `skip` waits for the next natural
 cron slot.
@@ -170,13 +164,11 @@ fire immediately only when the recorded owner process is conclusively gone; a li
 unprobeable owner remains protected until terminal or until the routine timeout. Use
 `orbit doctor` and the stuck-job-run runbook below when the run itself remains orphaned.
 
-The dashboard also exposes `GET /api/routines`. Auto-task definitions such as
-`qa-sweep` and `artifact-deprecation-review` are ordinary workspace data under
-`.orbit/auto_tasks/`, processed by the generic auto-task scheduler routine.
-`artifact-deprecation-review` is report-only — it mints a task that lists stale
-learning candidates and stale artifact-id comment references via
-`execution_summary` and never mutates learnings, ADRs, tasks, friction
-records, or comments (ORB-10318, ORB-10348).
+The dashboard also exposes `GET /api/routines`. `qa-sweep` and other auto-task
+definitions are ordinary workspace data under `.orbit/auto_tasks/`, processed by the
+generic auto-task scheduler routine. The scheduler mints tasks from every due,
+enabled definition; it does not itself edit docs, ADRs, learnings, friction records,
+or comments.
 
 ## Verification and escalation
 

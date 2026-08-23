@@ -75,13 +75,30 @@ impl Store {
             std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
         }
 
-        let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        apply_default_pragmas(&conn)?;
+        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
+        let pragmas = apply_default_pragmas(&conn)?;
+        let read_only =
+            pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)?;
+        if read_only {
+            drop(conn);
+            conn = orbit_common::storage::sqlite::open_immutable(path)?;
+        }
 
-        migration::apply_schema(&conn)?;
+        if let Err(error) = migration::apply_schema(&conn) {
+            if read_only && error.is_readonly_or_access_failure() {
+                orbit_common::tracing::warn!(
+                    target: "orbit.store.sqlite",
+                    path = %path.display(),
+                    error = %error,
+                    "skipped schema migration while opening a store for immutable reads"
+                );
+            } else {
+                return Err(error);
+            }
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            readers: Some(Arc::new(ReadPool::new(path.to_path_buf()))),
+            readers: (!read_only).then(|| Arc::new(ReadPool::new(path.to_path_buf()))),
         })
     }
 

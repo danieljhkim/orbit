@@ -73,6 +73,10 @@ fn error_code(err: &OrbitError) -> &str {
         OrbitError::TaskStatusTransition(_)
         | OrbitError::JobRunStateTransition(_)
         | OrbitError::AdrInvalidTransition(_) => "invalid_transition",
+        // [ORB-10965] Not "invalid_transition": a duplicate start losing to the
+        // incumbent owner is an expected race, and the caller yields rather
+        // than treating its own request as malformed.
+        OrbitError::JobRunStartConflict(_) => "job_run_start_conflict",
         OrbitError::DependencyNotDelivered { .. } => "dependency_not_delivered",
         OrbitError::ShipRunInFlight { .. } => "ship_run_in_flight",
         OrbitError::WorkspaceClaimHeld(_) => "workspace_claim_held",

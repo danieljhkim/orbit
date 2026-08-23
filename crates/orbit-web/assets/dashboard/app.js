@@ -834,8 +834,9 @@ function fetchAndCacheCrews() {
 // active status chips are sent as `?status=a,b` instead of over-fetching every
 // status and filtering client-side. That keeps the `total`/`limit`/`truncated`
 // envelope meaningful for the filter actually in effect (see formatTaskCount
-// in tasks.js). Omitted when every status (or none) is active, matching the
-// endpoint's own "status-neutral" default for the all-active case.
+// in tasks.js). Omitted when every status (or none) is active: the endpoint's
+// status-neutral response is correct for all-active, while an empty selection
+// is applied client-side because the API has no empty status set.
 function tasksListPath() {
   const sp = new URLSearchParams();
   if (activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length) {
@@ -941,9 +942,13 @@ function buildWorkspaceSelector() {
   note.hidden = true;
   note.title = "Reliability ignores the selected workspace";
 
-  const meta = $("meta");
-  meta.insertBefore(select, $("refresh-btn"));
-  meta.insertBefore(note, $("refresh-btn"));
+  // ORB-10972: the selector moved from the header meta cluster into the rail
+  // foot, beside the connection line. Same element, same id, same listeners.
+  const host = $("rail-workspace");
+  if (!host) return;
+  host.innerHTML = "";
+  host.appendChild(select);
+  host.appendChild(note);
 }
 
 // ORB-10874/ORB-10872: workspace + window live in the query string so a
@@ -1185,6 +1190,18 @@ function fetchAndRenderFrictions() {
   });
 }
 
+// ORB-10972: sets a count badge on a rail entry. `alert` renders it in the
+// blocked colour so a failure count is legible from any tab without opening
+// the tab it belongs to. Every value here comes from a fetch the dashboard
+// already makes — this adds no endpoint.
+function setRailCount(id, value, alert = false) {
+  const node = $(id);
+  if (!node) return;
+  const empty = value == null || value === 0;
+  node.textContent = empty ? "" : formatBigInt(value);
+  node.classList.toggle("alert", Boolean(alert) && !empty);
+}
+
 function renderHealthStrip(data) {
   if (!data) return;
   $("tile-events-value").textContent = formatBigInt(data.events);
@@ -1198,6 +1215,12 @@ function renderHealthStrip(data) {
   } else {
     tile.classList.remove("tile-alert");
   }
+  const failed = $("tile-failed");
+  if (failed) failed.classList.toggle("tile-alert", (data.failed_runs || 0) > 0);
+
+  setRailCount("rail-count-audit", data.events);
+  setRailCount("rail-count-diagnostics", data.failed_runs, true);
+  setRailCount("rail-count-diag-errors", data.failed_runs, true);
   renderSparkline(data.sparkline || []);
 }
 

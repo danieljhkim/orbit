@@ -1002,6 +1002,54 @@ fn bind_workspace_rejects_explicit_workspace_id_conflict() {
 }
 
 #[test]
+fn rebind_checkout_moves_orbit_dir_onto_the_requested_workspace() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let data_dir = temp.path().join("data");
+    let parent = temp.path().to_path_buf();
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    let synthetic = store
+        .bind_workspace(BindWorkspaceParams {
+            workspace_id: Some("tmp-5b7149".into()),
+            slug: "tmp".into(),
+            repo_root: parent.clone(),
+            workspace_path: parent,
+            orbit_dir: data_dir.clone(),
+            repo_fingerprint: None,
+        })
+        .expect("mint synthetic parent bind");
+
+    let repo_root = temp.path().join("repo");
+    fs::create_dir_all(&repo_root).expect("create repo");
+    let rebound = store
+        .rebind_checkout(BindWorkspaceParams {
+            workspace_id: Some("ws_qa".into()),
+            slug: "qa".into(),
+            repo_root: repo_root.clone(),
+            workspace_path: repo_root.clone(),
+            orbit_dir: data_dir.clone(),
+            repo_fingerprint: None,
+        })
+        .expect("rebind orbit dir");
+
+    assert_eq!(rebound.workspace_id, "ws_qa");
+    assert_eq!(rebound.repo_root, normalize_path(&repo_root));
+    assert_eq!(rebound.orbit_dir, normalize_path(&data_dir));
+    assert!(
+        store
+            .find_workspace_checkout(&synthetic.workspace_id)
+            .expect("lookup synthetic")
+            .is_none(),
+        "the synthetic checkout row must not keep the data dir"
+    );
+    let by_orbit = store
+        .find_rebind_candidates(&repo_root, &repo_root, &data_dir)
+        .expect("lookup rebound orbit dir");
+    assert_eq!(by_orbit.len(), 1);
+    assert_eq!(by_orbit[0].workspace_id, "ws_qa");
+}
+
+#[test]
 fn workspace_config_round_trips_and_validates() {
     let temp = TempDir::new().expect("tempdir");
     let orbit_dir = temp.path().join(".orbit");

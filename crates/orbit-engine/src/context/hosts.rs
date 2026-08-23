@@ -15,7 +15,7 @@ use orbit_types::task::{
 };
 use orbit_types::telemetry::InvocationTrace;
 use orbit_types::workflow::activity_job::Provider;
-use orbit_types::workflow::{ActivityV2, JobRun, JobRunState, PipelineState};
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunStartOutcome, JobRunState, PipelineState};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,7 +94,7 @@ pub trait RuntimeHost: Send + Sync {
         run_id: &str,
         started_at: chrono::DateTime<chrono::Utc>,
         pid: u32,
-    ) -> Result<bool, OrbitError> {
+    ) -> Result<JobRunStartOutcome, OrbitError> {
         let _ = (run_id, started_at, pid);
         Err(unsupported_runtime_capability("mark_job_run_running"))
     }
@@ -209,7 +209,15 @@ pub trait RuntimeHost: Send + Sync {
     fn agent_subprocess_environment(&self, required_env_vars: &[&str]) -> Vec<(String, String)> {
         allowlisted_child_env(&[], required_env_vars)
     }
-    fn orbit_root(&self) -> Option<String> {
+    /// The authoritative shared Orbit registry root to hand a spawned CLI
+    /// agent as `ORBIT_ROOT`.
+    ///
+    /// This is the registry that owns the task store, not the dispatching
+    /// checkout's workspace `.orbit`. A managed run executes in a linked
+    /// worktree whose workspace `.orbit` is mounted read-only, so pinning a
+    /// child there makes the documented `orbit tool run` fallback unable to
+    /// bootstrap, read, or update the injected task. [ORB-10980]
+    fn orbit_registry_root(&self) -> Option<String> {
         None
     }
     fn missing_required_environment_vars(&self, _required_env_vars: &[&str]) -> Vec<String> {

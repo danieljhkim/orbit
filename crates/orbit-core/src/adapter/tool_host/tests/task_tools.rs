@@ -8,7 +8,7 @@ use orbit_types::tool::ToolSessionContext;
 use serde_json::{Value, json};
 
 use super::super::test_support::{
-    create_task, invalid_input_message, run_tool_as_operator, test_runtime,
+    create_task, create_task_with_crew, invalid_input_message, run_tool_as_operator, test_runtime,
 };
 use crate::adapter::command::ToolEntryPoint;
 
@@ -490,6 +490,88 @@ fn task_add_and_show_tools_roundtrip_crew() {
         .expect("task show tool succeeds");
     assert_eq!(shown.get("crew"), Some(&json!("sol")));
     assert_eq!(shown.get("orchestrator"), Some(&json!("sol")));
+}
+
+/// ORB-10968: crew configuration is host-local, so a stored crew this host has
+/// no `[crews.*]` entry for — a legacy name, or one only the authoring machine
+/// defines — must not make the task unreadable. ORB-10586 established that for
+/// `orbit task show`; the tool-host projection behind CLI tool-run and every
+/// MCP session still propagated the resolution error.
+#[test]
+fn task_read_tools_render_a_task_whose_stored_crew_is_undefined_here() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task_with_crew(
+        &runtime,
+        &repo_root,
+        "Legacy crew task",
+        "Authored when `all-grok` was still a defined crew.",
+        TaskStatus::Backlog,
+        &[],
+        Some("all-grok"),
+    );
+
+    let shown = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task show tool stays readable with an unresolvable crew");
+    assert_eq!(
+        shown.get("crew"),
+        Some(&json!("all-grok")),
+        "the raw stored crew stays visible: {shown}"
+    );
+    assert!(
+        shown.get("resolved_crew").is_none() && shown.get("crew_model").is_none(),
+        "resolved crew/model must be omitted rather than guessed: {shown}"
+    );
+    let unresolved = shown
+        .get("crew_unresolved")
+        .and_then(Value::as_str)
+        .expect("an unresolvable crew is explicitly marked");
+    assert!(
+        unresolved.contains("all-grok"),
+        "the non-fatal warning names the crew: {unresolved}"
+    );
+
+    // Listing and a field projection apply the same tolerant read contract.
+    let listed = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({ "workspace": "." }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("task list tool stays readable with an unresolvable crew");
+    assert_task_titles(&listed, &["Legacy crew task"]);
+    let fields = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id, "fields": ["crew"] }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("field projection stays readable with an unresolvable crew");
+    assert_eq!(fields, json!("all-grok"));
+
+    // Execution still resolves strictly: start must fail with the actionable
+    // crew-validation error rather than inherit a fallback.
+    let started = runtime.execute_tool_command(
+        "orbit.task.start",
+        json!({ "id": task.id }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    );
+    let message = match started {
+        Err(error) => error.to_string(),
+        Ok(value) => panic!("expected start to reject an unresolvable crew, got {value}"),
+    };
+    assert!(
+        message.contains("all-grok") && message.contains("not defined"),
+        "starting an unresolvable crew must stay a crew-validation error: {message}"
+    );
 }
 
 /// ORB-10648: `priority` is an advertised and applied update field. The record
@@ -1923,6 +2005,93 @@ fn task_show_tool_recovers_mcp_encoded_fields_array() {
             "description": "Exercise field projection through MCP encoded array shape.",
             "context_files": ["file:src/lib.rs"],
         })
+    );
+}
+
+#[test]
+fn task_show_tool_projects_status_as_a_bare_json_string() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Show status",
+        "Exercise the observed fields:[status] call.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": task.id, "fields": ["status"] }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("fields:[status] must succeed");
+
+    assert_eq!(output, json!("backlog"));
+}
+
+#[test]
+fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Show mixed fields",
+        "Exercise mixed top-level and sidecar projection.",
+        TaskStatus::InProgress,
+        &["file:src/lib.rs"],
+    );
+
+    let output = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({
+                "id": task.id,
+                "fields": ["status", "title", "context_files", "plan"],
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("mixed projection must succeed");
+
+    assert_eq!(
+        output,
+        json!({
+            "status": "in-progress",
+            "title": "Show mixed fields",
+            "context_files": ["file:src/lib.rs"],
+            "plan": "",
+        })
+    );
+}
+
+#[test]
+fn task_show_tool_rejects_unknown_projection_with_the_shared_vocabulary() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Unknown projection",
+        "Exercise unknown field validation.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.show",
+        json!({ "id": task.id, "fields": ["not_a_field"] }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(
+        message.contains("unknown field selector `not_a_field`"),
+        "{message}"
+    );
+    assert!(
+        message.contains(orbit_types::task::TASK_SHOW_PROJECTION_FIELDS_CSV),
+        "{message}"
     );
 }
 

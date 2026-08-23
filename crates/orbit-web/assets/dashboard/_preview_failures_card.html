@@ -29,15 +29,23 @@
       { tool: "orbit.search",     count: 1, mcp: 0, cli: 1 },
     ];
 
+    function isNamedTool(name) {
+      const trimmed = String(name || "").trim();
+      return trimmed.length > 0 && trimmed !== "unknown";
+    }
+
     function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
       const failByTool = new Map();
-      for (const f of failuresRows) failByTool.set(f.tool, f);
+      for (const f of failuresRows) {
+        if (isNamedTool(f.tool)) failByTool.set(f.tool, f);
+      }
 
       const container = el("div", { class: "audit-summary-container" });
       container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
       const grid = el("div", { class: "tool-health-grid" });
 
       for (const row of rateRows) {
+        if (!isNamedTool(row.tool)) continue;
         const rate = row.rate || 0;
         const severity = rate >= 0.14 ? "critical" : rate >= 0.05 ? "warning" : "normal";
         const card = el("div", { class: `health-card ${severity}` });
@@ -73,6 +81,36 @@
       }
 
       container.appendChild(grid);
+
+      const lifecycleCard = el("div", { class: "audit-summary-card lifecycle-failure-card" });
+      lifecycleCard.appendChild(el("div", { class: "card-title", text: "job-run lifecycle" }));
+      const lifeBody = el("div", { class: "card-body" });
+      lifeBody.appendChild(el("div", {
+        class: "lifecycle-failure-counts",
+        text: "10 failed events · 5 incidents · 8 affected runs",
+      }));
+      lifeBody.appendChild(el("div", {
+        class: "metric-trend",
+        text: "Excluded from tool denominators and rates · window 24h",
+      }));
+      lifecycleCard.appendChild(lifeBody);
+      container.appendChild(lifecycleCard);
+
+      const incidentHead = el("section", { class: "incident-summary" }, [
+        el("div", { class: "incident-summary-head" }, [
+          el("strong", { class: "incident-summary-headline", text: "5 incidents" }),
+          el("span", {
+            class: "incident-summary-denominator",
+            text: "10 failed events · 5 grouped incidents · 8 affected runs of 12 audited events",
+          }),
+          el("span", { class: "incident-summary-window", text: "window 24h" }),
+        ]),
+        el("div", {
+          class: "incident-lifecycle-note",
+          text: "job-run lifecycle: 10 failed events · 5 incidents (excluded from tool rates)",
+        }),
+      ]);
+      container.appendChild(incidentHead);
       return container;
     }
 

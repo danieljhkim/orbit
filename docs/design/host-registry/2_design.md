@@ -126,7 +126,7 @@ RegisteredRuntimeFactory also carries replica ownership into Core's coordination
 
 ### CLI
 
-The main CLI opens ordinary runtimes through RegisteredRuntimeFactory using cwd, --root and optional --workspace. `task show` is the one exception: without --workspace it opens the checkout the coordination task registry names as the task ID's owner, so it works from a foreign checkout and from a directory that is no workspace at all, and it reports the owning workspace name and logical ID. With --workspace it is the ordinary registered bootstrap, and the selector filters. Workspace init, role, list, show, remove and teardown call orbit-registry directly for catalog operations. The only active host command is local rename.
+The main CLI opens ordinary runtimes through RegisteredRuntimeFactory using cwd, --root and optional --workspace. `task show` is the one exception, on both the human subcommand and `orbit tool run orbit.task.show`: without `--workspace` or a tool-input `workspace` it opens the checkout the coordination task registry names as the task ID's owner, so it works from a foreign checkout, a linked worktree, and from a directory that is no workspace at all, and it reports the owning workspace name and logical ID. With an explicit workspace selector it is the ordinary registered bootstrap, and the selector filters. Linked-worktree runtime identities are not selectors. Workspace init, role, list, show, remove and teardown call orbit-registry directly for catalog operations. The only active host command is local rename.
 
 There is no active v1 CLI surface for fleet host registration, enumeration or retirement, and no workspace owner-link command.
 
@@ -136,7 +136,7 @@ Orbit Web loads local workspaces from orbit-registry, derives checkout-path heal
 
 ### MCP
 
-orbit-mcp reads orbit-registry identity state to describe the accepting process and exposes machine-local discovery definitions. The CLI MCP server resolves each workspace-scoped call against the accepting machine's registry, composes the runtime, and dispatches through Core.
+orbit-mcp reads orbit-registry identity state to describe the accepting process and exposes machine-local discovery definitions. The CLI MCP server resolves each workspace-scoped call against the accepting machine's registry, composes the runtime, and dispatches through Core. `orbit.task.show` is the exception: an id-only call follows the globally unique task ID through the host task registry. Ambient initialize metadata — including a linked-worktree runtime identity — is not a filter. An explicit per-call `workspace` remains fail-closed.
 
 orbit.workspace.list returns active logical workspaces that have a checkout registered on the accepting machine. This includes locally registered replicas and excludes active checkoutless catalog entries; owner_machine_id is not a discovery filter. Remote MCP uses direct SSH stdio, and the local proxy does not resolve workspaces, inspect checkouts or read the remote registry.
 

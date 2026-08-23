@@ -1,9 +1,34 @@
 use serde_json::json;
 
 use super::super::run::{
-    LOCAL_MACHINE_ID_FALLBACK, local_machine_identity, local_tool_session_context,
+    LOCAL_MACHINE_ID_FALLBACK, ToolRunArgs, local_machine_identity, local_tool_session_context,
     shape_tool_output,
 };
+
+#[test]
+fn task_show_id_is_read_only_from_orbit_task_show_input() {
+    let show = ToolRunArgs {
+        name: "orbit.task.show".to_string(),
+        input: Some(r#"{"id":" ORB-10961 ","model":"codex"}"#.to_string()),
+        input_file: None,
+        agent: None,
+        model: None,
+        timeout: None,
+        dry_run: false,
+        fields: Vec::new(),
+        full: false,
+        pretty: false,
+        output: super::super::run::OutputFormat::Json,
+    };
+    assert_eq!(show.task_show_id().as_deref(), Some("ORB-10961"));
+
+    let list = ToolRunArgs {
+        name: "orbit.task.list".to_string(),
+        input: Some(r#"{"id":"ORB-10961"}"#.to_string()),
+        ..show
+    };
+    assert_eq!(list.task_show_id(), None);
+}
 
 #[test]
 fn list_output_uses_minimal_task_projection() {

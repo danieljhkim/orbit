@@ -44,6 +44,8 @@ pub fn compile_macos_sandbox_profile(
     let codex_home = std::env::var_os("CODEX_HOME");
     let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
     let grok_home = std::env::var_os("GROK_HOME");
+    let copilot_home = std::env::var_os("COPILOT_HOME");
+    let xdg_cache_home = std::env::var_os("XDG_CACHE_HOME");
     compile_macos_sandbox_profile_with_env(
         rules,
         provider,
@@ -52,6 +54,8 @@ pub fn compile_macos_sandbox_profile(
             codex_home: codex_home.as_deref(),
             claude_config_dir: claude_config_dir.as_deref(),
             grok_home: grok_home.as_deref(),
+            copilot_home: copilot_home.as_deref(),
+            xdg_cache_home: xdg_cache_home.as_deref(),
         },
     )
 }
@@ -65,6 +69,8 @@ pub(super) struct SandboxCompileEnv<'a> {
     pub(super) codex_home: Option<&'a OsStr>,
     pub(super) claude_config_dir: Option<&'a OsStr>,
     pub(super) grok_home: Option<&'a OsStr>,
+    pub(super) copilot_home: Option<&'a OsStr>,
+    pub(super) xdg_cache_home: Option<&'a OsStr>,
 }
 
 pub(super) fn compile_macos_sandbox_profile_with_env(
@@ -77,6 +83,8 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
         codex_home,
         claude_config_dir,
         grok_home,
+        copilot_home,
+        xdg_cache_home,
     } = env;
     let mut out = String::new();
     out.push_str("(version 1)\n");
@@ -130,6 +138,34 @@ pub(super) fn compile_macos_sandbox_profile_with_env(
     // unconditionally.
     for state_dir in
         super::provider_dirs::provider_state_dirs(home, codex_home, claude_config_dir, grok_home)
+    {
+        out.push_str(&format!(
+            "(allow file-write* (subpath \"{}\"))\n",
+            super::sbpl_filter::sbpl_escape(&state_dir.display().to_string())
+        ));
+    }
+    // [ORB-10946] Copilot's directories are granted only when Copilot is the
+    // provider actually being confined. The comment above explains why the
+    // four original providers are emitted unconditionally: their entries are
+    // per-tool configuration directories. Copilot's second entry is a
+    // package-*extraction* directory — the launcher unpacks and executes code
+    // from it — so it is not something an unrelated provider should be handed
+    // just because both run under the same profile compiler.
+    if Provider::parse(provider).ok() == Some(Provider::Copilot) {
+        for state_dir in
+            super::provider_dirs::copilot_state_dirs(home, copilot_home, xdg_cache_home)
+        {
+            out.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                super::sbpl_filter::sbpl_escape(&state_dir.display().to_string())
+            ));
+        }
+    }
+    // Cursor's logged-in CLI state and permissions live in `$HOME/.cursor`.
+    // Grant the directory only to the active Cursor executor; API-key auth is
+    // an explicit environment opt-in and needs no additional path. [ORB-10945]
+    if Provider::parse(provider).ok() == Some(Provider::Cursor)
+        && let Some(state_dir) = super::provider_dirs::cursor_state_dir(home)
     {
         out.push_str(&format!(
             "(allow file-write* (subpath \"{}\"))\n",

@@ -63,6 +63,40 @@ fn migrate_only_bootstraps_the_applying_form() {
 }
 
 #[test]
+fn tool_run_task_show_bootstraps_the_task_owner_from_id_only_input() {
+    assert_eq!(
+        operation_for(&[
+            "orbit",
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            r#"{"id":"ORB-10961","model":"codex"}"#,
+        ])
+        .runtime_need,
+        RuntimeNeed::TaskOwner {
+            task_id: "ORB-10961".to_string()
+        }
+    );
+    assert_eq!(
+        operation_for(&["orbit", "tool", "run", "orbit.task.show"]).runtime_need,
+        RuntimeNeed::Required
+    );
+    assert_eq!(
+        operation_for(&[
+            "orbit",
+            "tool",
+            "run",
+            "orbit.task.list",
+            "--input",
+            r#"{"id":"ORB-10961"}"#,
+        ])
+        .runtime_need,
+        RuntimeNeed::Required
+    );
+}
+
+#[test]
 fn json_error_preferences_are_derived_from_operations() {
     assert_eq!(
         operation_for(&["orbit", "tool", "run", "orbit.task.show"]).json_error_preference,

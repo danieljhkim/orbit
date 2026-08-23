@@ -56,7 +56,7 @@ pub(super) fn ship(
 
 pub(super) fn show(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let id = orbit_common::protocol::tool_input::required_string(&input, &["id"], "id")?;
-    run_json(&runtime.show_job_run(&id)?)
+    run_json_with_lineage(runtime, &runtime.show_job_run(&id)?)
 }
 
 pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
@@ -83,7 +83,10 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         since,
         limit: Some(parse_limit(&input)?),
     })?;
-    let items = runs.iter().map(run_json).collect::<Result<Vec<_>, _>>()?;
+    let items = runs
+        .iter()
+        .map(|run| run_json_with_lineage(runtime, run))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({ "items": items }))
 }
 
@@ -136,5 +139,25 @@ fn run_json(run: &JobRun) -> Result<Value, OrbitError> {
     let mut value = serde_json::to_value(run).map_err(serialize_error("serialize workflow run"))?;
     value["steps"] = serde_json::to_value(&run.steps)
         .map_err(serialize_error("serialize workflow run steps"))?;
+    Ok(value)
+}
+
+/// [ORB-10971] The run record plus the child Runs it dispatched.
+///
+/// The `JobRun` row alone cannot answer "what did this run submit, and is it
+/// still waiting on it" — that lives in the run's `PipelineState`. Reading it
+/// here is what keeps the MCP surface agreeing with the CLI and the dashboard
+/// about lineage instead of each reader seeing a different half of the truth.
+/// An unreadable state degrades to an empty list rather than failing the read.
+fn run_json_with_lineage(runtime: &OrbitRuntime, run: &JobRun) -> Result<Value, OrbitError> {
+    let mut value = run_json(run)?;
+    let dispatches = runtime
+        .read_run_state(&run.run_id)
+        .ok()
+        .flatten()
+        .map(|state| state.child_dispatches)
+        .unwrap_or_default();
+    value["child_dispatches"] =
+        serde_json::to_value(&dispatches).map_err(serialize_error("serialize child dispatches"))?;
     Ok(value)
 }

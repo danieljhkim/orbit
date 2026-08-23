@@ -996,6 +996,55 @@ fn dashboard_task_filters_are_represented_in_the_url_and_summarized() {
     );
 }
 
+/// ORB-10942: an explicit all-status selection must survive the hash round
+/// trip instead of becoming plain `#tasks`, whose omitted status query means
+/// the default set without `someday`. The four cases below are asserted as a
+/// deterministic source contract because the dashboard has no JS test runner.
+#[test]
+fn dashboard_task_filter_hash_round_trips_default_all_someday_and_none() {
+    let tasks = include_str!("../../assets/dashboard/tasks.js");
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    assert!(
+        tasks.contains(r#"sp.set("status", "all")"#) && tasks.contains(r#"statusParam === "all""#),
+        "all statuses need a distinct hash representation and matching parser branch"
+    );
+    assert!(
+        tasks.contains(r#"sp.set("status", selected.length > 0 ? selected.join(",") : "none")"#)
+            && tasks.contains(r#"statusParam === "none""#),
+        "partial and empty selections need stable hash representations"
+    );
+    assert!(
+        tasks.contains("setActiveStatuses(context, new Set(defaultActiveStatuses(context)))"),
+        "an omitted status query must retain the documented default set"
+    );
+
+    for (label, hash_query, parser_marker) in [
+        ("default", "#tasks", "statusParam == null"),
+        ("all", "#tasks?status=all", "statusParam === \"all\""),
+        (
+            "someday-only",
+            "#tasks?status=someday",
+            "statusParam === \"none\"",
+        ),
+        (
+            "none-selected",
+            "#tasks?status=none",
+            "statusParam === \"none\"",
+        ),
+    ] {
+        assert!(!hash_query.is_empty(), "{label} hash must be deterministic");
+        assert!(
+            tasks.contains(parser_marker),
+            "{label} parser branch must remain present"
+        );
+    }
+    assert!(
+        app.contains("activeStatuses.size > 0 && activeStatuses.size < STATUS_ORDER.length"),
+        "single-workspace requests must send only partial active status sets"
+    );
+}
+
 /// ORB-10874: switching the workspace selector only updated in-memory state,
 /// so a reload silently fell back to the server's default workspace instead
 /// of the one the operator had selected.
@@ -1009,37 +1058,168 @@ fn dashboard_workspace_selection_persists_to_the_url() {
     );
 }
 
-/// ORB-10874: the live `orbit.log` panel can now be collapsed and resized,
-/// and the presentation choice is remembered locally (not shared/synced
-/// state, so localStorage rather than the URL). The task list keeps an
-/// explicit minimum height so it can never be squeezed toward zero.
+/// ORB-10972 supersedes ORB-10874's log-panel affordances. The tail moved into
+/// the Tasks tab's right dock, which has two modes (Status / Log) and fills the
+/// column's full height — so there is no panel height to drag and no collapsed
+/// state to toggle. Their job is now split between the dock's mode toggle and
+/// an always-on bottom status bar that carries the newest line on every tab.
+/// What survives from ORB-10874 is the principle: the presentation choice is
+/// local, so it persists to localStorage under the same key, and the task list
+/// keeps an explicit minimum height so it can never be squeezed toward zero.
 #[test]
-fn dashboard_log_panel_is_collapsible_resizable_and_remembers_presentation() {
+fn dashboard_log_dock_has_two_modes_and_an_always_on_status_bar() {
     let log_tail = include_str!("../../assets/dashboard/log-tail.js");
     let index = include_str!("../../assets/dashboard/index.html");
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
     assert!(
         log_tail.contains("orbit.dashboard.logPanel"),
-        "the log panel's collapsed/height preference must persist to localStorage"
+        "the dock's mode preference must persist to localStorage"
     );
     assert!(
-        log_tail.contains("function wireLogPanelToggle(")
-            && log_tail.contains("function wireLogPanelResizeHandle("),
-        "the log panel must offer both a collapse toggle and a resize handle"
+        log_tail.contains(r#"const DOCK_MODES = ["status", "log"];"#)
+            && log_tail.contains("function wireDockModeToggle("),
+        "the dock must offer exactly the Status and Log modes, with a wired toggle"
     );
     assert!(
-        index.contains(r#"id="log-panel-toggle""#) && index.contains(r#"id="log-panel-resize""#),
-        "the toggle and resize handle must exist in the markup"
+        !log_tail.contains("wireLogPanelResizeHandle")
+            && !log_tail.contains("LOG_PANEL_MIN_HEIGHT"),
+        "the superseded height-resize handle must be gone, not left dead"
     );
     assert!(
-        css.contains("#log-panel.collapsed") && css.contains(".log-resize-handle"),
-        "the collapsed state and the resize handle must be styled"
+        index.contains(r#"id="dock-mode-toggle""#) && index.contains(r#"id="side-dock""#),
+        "the dock and its mode toggle must exist in the markup"
     );
+    assert!(
+        index.contains(r#"data-pane="status""#) && index.contains(r#"data-pane="log""#),
+        "the dock must declare both panes"
+    );
+    assert!(
+        css.contains(r#"#side-dock[data-mode="log"] .dock-pane[data-pane="log"]"#),
+        "the visible pane must be driven by the host's data-mode, so the column \
+         width is identical in both modes and the task table never reflows"
+    );
+
+    // The always-on ambient line, present on every tab — including the ones
+    // where the dock is not mounted.
+    assert!(
+        index.contains(r#"id="log-statusbar""#) && index.contains(r#"id="log-statusbar-message""#),
+        "the bottom status bar must exist in the markup"
+    );
+    assert!(
+        log_tail.contains("function updateLogStatusBar(")
+            && log_tail.contains("updateLogStatusBar(ev);"),
+        "each incoming log event must be mirrored into the status bar"
+    );
+    assert!(
+        css.contains(".log-statusbar"),
+        "the status bar must be styled"
+    );
+
     assert!(
         css.contains("#tasks-panel > .body") && css.contains("min-height: 240px;"),
-        "the task list must keep a guaranteed minimum usable height regardless of log panel state"
+        "the task list must keep a guaranteed minimum usable height"
     );
+    assert!(
+        css.contains(".main-col > .tab-pane[data-tab=\"tasks\"] .col-tasks")
+            && css.contains(".col-tasks {\n        min-height: 0;"),
+        "the tasks column must be allowed to shrink so #tasks-body can scroll"
+    );
+}
+
+/// ORB-10972: the top-level nav is a left rail, and the vertical chrome above
+/// the task table collapses into one bar. The rail keeps the class and id
+/// contract `router.js` selects on, which is what makes every prior hash route
+/// resolve unchanged.
+#[test]
+fn dashboard_nav_rail_preserves_the_router_selector_contract() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+    let app = include_str!("../../assets/dashboard/app.js");
+
+    assert!(
+        index.contains(r#"<nav class="rail""#) && css.contains(".rail {"),
+        "the nav must render as a rail"
+    );
+    // The router appends #tab-indicator to `.tabs` and #subtab-indicator to
+    // `#diag-subtabs`, and toggles `.active` on `.tab` / `.subtab`. Those hooks
+    // must survive the move or every route breaks at once.
+    assert!(
+        index.contains(r#"<div class="tabs" id="tabs">"#),
+        "the router appends its indicator to .tabs; the container must remain"
+    );
+    assert_eq!(
+        index.matches(r#"id="diag-subtabs""#).count(),
+        1,
+        "Diagnostics' subtabs must keep exactly one id, now as visible rail children"
+    );
+    assert!(
+        css.contains(".rail .tab-indicator { display: none !important; }"),
+        "the sliding underline is suppressed in the rail, not removed from the router"
+    );
+
+    // The four health metrics ride inline in the top bar, keeping their ids.
+    assert!(
+        index.contains(r#"class="topbar""#) && index.contains(r#"class="kpis" id="health-strip""#),
+        "the health metrics must ride inline in the top bar"
+    );
+    for id in [
+        "tile-events-value",
+        "tile-denials-value",
+        "tile-failed-value",
+        "tile-active-value",
+    ] {
+        assert!(
+            index.contains(&format!(r#"id="{id}""#)),
+            "{id} must survive the move"
+        );
+    }
+
+    // Rail counts come from data the dashboard already fetches — no new endpoint.
+    assert!(
+        app.contains("function setRailCount("),
+        "rail counts must be set through one helper"
+    );
+    assert!(
+        css.contains(".rail-count.alert"),
+        "a failure count must be distinguishable in the rail"
+    );
+}
+
+/// ORB-10972: a two-tier border scale. `--border` draws panel and control
+/// edges; `--hair` draws hairlines inside them. Before this both were #333333,
+/// which made the panel grid read as loud as its contents.
+#[test]
+fn dashboard_separates_panel_edges_from_internal_hairlines() {
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        css.contains("--hair: #17171a;") && css.contains("--border: #2a2a2e;"),
+        "both tiers must be defined, and they must differ"
+    );
+    assert!(
+        css.contains("--fg-mute:"),
+        "the tertiary text tier must be defined alongside them"
+    );
+
+    // The hairlines that separate rows within a panel must use the inner tier.
+    for rule in [
+        ".row {",
+        ".row.header {",
+        ".controls {",
+        ".filter-summary {",
+        ".panel > header {",
+    ] {
+        let start = css
+            .find(rule)
+            .unwrap_or_else(|| panic!("{rule} must exist"));
+        let block = &css[start..start + 900.min(css.len() - start)];
+        let end = block.find('}').map(|i| &block[..i]).unwrap_or(block);
+        assert!(
+            !end.contains("1px solid var(--border)"),
+            "{rule} draws an internal hairline; it must use --hair, not --border"
+        );
+    }
 }
 
 /// ORB-10874: inline status/crew edits must show a pending state, refuse a
@@ -1300,12 +1480,12 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
     // Both counts, both denominators, and the window are rendered — never one
     // number standing in for the other.
     assert!(
-        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events"),
-        "the panel count must show grouped incidents and raw failed events together"
+        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events / ${asCount(payload.affected_run_count)} affected runs"),
+        "the panel count must show grouped incidents, raw failed events, and affected runs together"
     );
     assert!(
-        diagnostics.contains("grouped from ${failed} failed events of ${total} audited events"),
-        "the incident count must state what it is out of"
+        diagnostics.contains("${failed} failed events · ${incidents} grouped incidents · ${runs} affected runs of ${total} audited events"),
+        "the incident count must state raw events, grouped incidents, and affected runs"
     );
     assert!(
         diagnostics.contains("`window ${window}`"),
@@ -1325,6 +1505,7 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
         "\"runs\"",
         "\"tasks\"",
         "Underlying audit events",
+        "\"tool\"",
     ] {
         assert!(
             diagnostics.contains(needle),
@@ -1375,8 +1556,54 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
         .expect("a 720px breakpoint must exist");
     assert!(
         css[responsive_at..].contains(".incident-facts { grid-template-columns: minmax(0, 1fr);")
-            && css[responsive_at..].contains(".incident-evidence"),
-        "the incident expansion must reflow rather than clip below 720px"
+            && css[responsive_at..].contains(".incident-evidence")
+            && css[responsive_at..].contains(".lifecycle-failure-counts")
+            && css[responsive_at..]
+                .contains(".tool-health-grid { grid-template-columns: minmax(0, 1fr); }"),
+        "the incident expansion and tool/lifecycle cards must reflow rather than clip below 720px"
+    );
+}
+
+/// ORB-10969: Failures-by-tool excludes the synthetic `unknown` bucket;
+/// job-run lifecycle failures are labeled on their own; expansion lists
+/// every underlying row's run/task/tool identifiers.
+#[test]
+fn dashboard_tool_metrics_exclude_unknown_and_label_lifecycle_failures() {
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    let preview = include_str!("../../assets/dashboard/_preview_failures_card.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        audit.contains("function isNamedTool(")
+            && audit.contains("trimmed !== \"unknown\"")
+            && audit.contains("job_run_lifecycle_failures")
+            && audit.contains("job-run lifecycle")
+            && audit.contains("Excluded from tool denominators and rates"),
+        "tool cards must drop `unknown` and name the job-run lifecycle category"
+    );
+    assert!(
+        audit.contains("${lifecycleFailures} failed events · ${lifecycleIncidents} incidents · ${Number(data.affected_run_count) || 0} affected runs"),
+        "the lifecycle card must distinguish raw events, incidents, and affected runs"
+    );
+    assert!(
+        diagnostics.contains("incident.events")
+            && diagnostics.contains("event.tool || \"-\"")
+            && diagnostics.contains("event.run_id || \"-\"")
+            && diagnostics.contains("event.task_id || \"-\""),
+        "incident expansion must expose run/task/tool identifiers for every row"
+    );
+    assert!(
+        preview.contains("job-run lifecycle")
+            && preview.contains("10 failed events · 5 incidents · 8 affected runs")
+            && preview.contains("isNamedTool"),
+        "the failures-card preview must render the lifecycle category and three counts"
+    );
+    assert!(
+        css.contains(".lifecycle-failure-card")
+            && css.contains(".lifecycle-failure-counts")
+            && css.contains(".incident-lifecycle-note"),
+        "lifecycle labels need their own presentation hooks"
     );
 }
 

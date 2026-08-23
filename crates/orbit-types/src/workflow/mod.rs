@@ -2,6 +2,7 @@
 
 pub mod activity_job;
 mod auto_task;
+mod child_dispatch;
 mod error;
 mod executor_def;
 mod job;
@@ -34,13 +35,17 @@ pub use auto_task::{
     AUTO_TASK_SCHEMA_VERSION, AUTO_TASK_TAG_PREFIX, AutoTaskDefinition, AutoTaskSchedule,
     AutoTaskTemplate, DedupePolicy, auto_task_tag, is_valid_auto_task_name,
 };
+pub use child_dispatch::{
+    ChildCancellation, ChildCancellationPolicy, ChildDispatch, ChildDispatchPhase,
+};
 pub use executor_def::{
     ExecutorDef, ExecutorSandboxKind, ExecutorType, ModelPairOverride, StdoutFormat,
 };
 pub use job::{
-    AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunState, JobRunStep,
-    JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics, RunEvent, StepCondition,
-    default_job_max_active_runs, default_max_iterations, default_retry_backoff_seconds,
+    AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunStartOutcome,
+    JobRunState, JobRunStep, JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics,
+    RunEvent, StepCondition, default_job_max_active_runs, default_max_iterations,
+    default_retry_backoff_seconds,
 };
 pub use routine::{
     MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,

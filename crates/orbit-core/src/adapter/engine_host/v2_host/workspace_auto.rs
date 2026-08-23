@@ -41,6 +41,7 @@ pub(super) fn classify_workspace_auto_tasks(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let loose_task_dispatches = crew_homogeneous_dispatches(runtime, action, &loose_task_ids)?;
 
     let active_epic = active_epic_run(runtime, action)?;
     let epic_task_id = match &active_epic {
@@ -58,6 +59,7 @@ pub(super) fn classify_workspace_auto_tasks(
     let has_epic = epic_task_id.is_some();
     Ok(json!({
         "loose_task_ids": loose_task_ids,
+        "loose_task_dispatches": loose_task_dispatches,
         "has_leaves": has_leaves,
         "epic_task_id": epic_task_id,
         "has_epic": has_epic,
@@ -65,6 +67,46 @@ pub(super) fn classify_workspace_auto_tasks(
         "active_epic_run_id": active_epic.as_ref().map(|epic| epic.run_id.clone()),
         "active_epic_task_id": active_epic.and_then(|epic| epic.task_id),
     }))
+}
+
+/// Partition the already priority-ordered loose leaves by their effective
+/// crew, preserving both task order within a partition and the first-seen
+/// order of the crews. `task_auto_pipeline` resolves the crew again from the
+/// child input and therefore remains the fail-closed authority; this split
+/// only prevents workspace-auto from constructing a heterogeneous child in
+/// the first place.
+fn crew_homogeneous_dispatches(
+    runtime: &OrbitRuntime,
+    action: &str,
+    task_ids: &[Value],
+) -> Result<Vec<Value>, DispatchError> {
+    let mut partitions: Vec<(String, Vec<String>)> = Vec::new();
+    for task_id in task_ids.iter().filter_map(Value::as_str) {
+        let task = runtime.get_task(task_id).map_err(|err| {
+            action_failed(
+                action,
+                format!("load loose task {task_id} for crew partition: {err}"),
+            )
+        })?;
+        let crew = runtime
+            .resolve_crew_for_task(None, task.crew.as_deref())
+            .map_err(|err| {
+                action_failed(
+                    action,
+                    format!("resolve crew for loose task {task_id}: {err}"),
+                )
+            })?;
+        if let Some((_, ids)) = partitions.iter_mut().find(|(name, _)| name == &crew.name) {
+            ids.push(task_id.to_string());
+        } else {
+            partitions.push((crew.name, vec![task_id.to_string()]));
+        }
+    }
+
+    Ok(partitions
+        .into_iter()
+        .map(|(crew, task_ids)| json!({ "crew": crew, "task_ids": task_ids }))
+        .collect())
 }
 
 /// A live `epic_pipeline` run, if one is already supervising a root.

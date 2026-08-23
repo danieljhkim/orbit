@@ -228,6 +228,10 @@ pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQ
         "failure_incidents": bundle.failure_incidents,
         "failure_incidents_by_class": bundle.failure_incidents_by_class,
         "failed_events_by_class": bundle.failed_events_by_class,
+        "affected_run_count": bundle.affected_run_count,
+        "job_run_lifecycle_failures": bundle.job_run_lifecycle_failures,
+        "job_run_lifecycle_incidents": bundle.job_run_lifecycle_incidents,
+        "job_run_lifecycle_label": "job-run lifecycle",
         "failed_runs": bundle.failed_runs,
         "active_long_runs": bundle.active_long_runs,
         "sparkline": sparkline,
@@ -255,6 +259,9 @@ struct AuditSummaryBundle {
     failure_incidents: u64,
     failure_incidents_by_class: BTreeMap<String, u64>,
     failed_events_by_class: BTreeMap<String, u64>,
+    affected_run_count: u64,
+    job_run_lifecycle_failures: u64,
+    job_run_lifecycle_incidents: u64,
     failed_runs: i64,
     active_long_runs: i64,
     buckets: Vec<(String, i64)>,
@@ -307,7 +314,7 @@ fn compute_audit_summary_bundle(
 
     let mut failures_vec: Vec<_> = tool_aggs
         .iter()
-        .filter(|t| t.failures > 0)
+        .filter(|t| t.failures > 0 && is_named_tool(&t.tool_name))
         .map(|t| {
             json!({
                 "tool": t.tool_name,
@@ -352,7 +359,7 @@ fn compute_audit_summary_bundle(
 
     let mut rate_vec: Vec<_> = tool_aggs
         .iter()
-        .filter(|t| t.total >= 5)
+        .filter(|t| t.total >= 5 && is_named_tool(&t.tool_name))
         .map(|t| {
             let rate = t.failures as f64 / t.total as f64;
             let mcp_rate = if t.mcp_total > 0 {
@@ -450,6 +457,9 @@ fn compute_audit_summary_bundle(
         failure_incidents: incidents.incident_count(),
         failure_incidents_by_class: incidents.incidents_by_class,
         failed_events_by_class: incidents.raw_events_by_class,
+        affected_run_count: incidents.affected_run_count,
+        job_run_lifecycle_failures: incidents.job_run_lifecycle_events,
+        job_run_lifecycle_incidents: incidents.job_run_lifecycle_incidents,
         failed_runs,
         active_long_runs,
         buckets,
@@ -578,4 +588,12 @@ fn count_active_long_runs(
         }
     }
     Ok(count)
+}
+
+/// SQL aggregates fold NULL `tool_name` into `"unknown"`. That bucket is not
+/// a tool: those rows are job-run lifecycle events and must not enter tool
+/// denominators or rates.
+fn is_named_tool(name: &str) -> bool {
+    let trimmed = name.trim();
+    !trimmed.is_empty() && trimmed != "unknown"
 }

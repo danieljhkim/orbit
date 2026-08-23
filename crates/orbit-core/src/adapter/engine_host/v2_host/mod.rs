@@ -8,6 +8,7 @@
 //! `orbit-engine`, so this module never names orbit-agent types.
 
 pub(super) mod backlog_exclusion;
+pub(super) mod child_dispatch;
 pub(super) mod cli_executor;
 pub(super) mod dispatch;
 pub(super) mod pipeline_actions;

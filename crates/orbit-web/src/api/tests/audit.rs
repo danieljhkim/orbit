@@ -66,6 +66,98 @@ fn seed_audit_event(
         .expect("seed audit event");
 }
 
+fn seed_lifecycle_audit_event(
+    runtime: &OrbitRuntime,
+    execution_id: &str,
+    command: &str,
+    job_run_id: Option<&str>,
+    activity_id: Option<&str>,
+    task_id: Option<&str>,
+    error_message: &str,
+) {
+    runtime
+        .record_audit_event(&AuditEventInsertParams {
+            execution_id: execution_id.to_string(),
+            command: command.to_string(),
+            subcommand: (command != "Start").then(|| "run".to_string()),
+            tool_name: None,
+            target_type: Some("job_run".to_string()),
+            target_id: job_run_id.map(str::to_string),
+            role: "actor-one".to_string(),
+            status: AuditEventStatus::Failure,
+            exit_code: 1,
+            duration_ms: 5,
+            working_directory: "/tmp/fixture".to_string(),
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: Some(error_message.to_string()),
+            host: None,
+            pid: std::process::id(),
+            session_id: None,
+            workspace_id: Some("ws-orbit".to_string()),
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: task_id.map(str::to_string),
+            job_run_id: job_run_id.map(str::to_string),
+            activity_id: activity_id.map(str::to_string),
+            step_index: None,
+        })
+        .expect("seed lifecycle audit event");
+}
+
+fn seed_ten_unknown_lifecycle_rows(runtime: &OrbitRuntime) {
+    seed_lifecycle_audit_event(
+        runtime,
+        "exec-start-1",
+        "Start",
+        None,
+        None,
+        None,
+        "job run start failed",
+    );
+    seed_lifecycle_audit_event(
+        runtime,
+        "exec-start-2",
+        "Start",
+        None,
+        None,
+        None,
+        "job run start failed",
+    );
+    for index in 0..4 {
+        let leaf = format!("jrun-leaf-{index}");
+        let parent = format!("jrun-parent-{index}");
+        seed_lifecycle_audit_event(
+            runtime,
+            &format!("exec-leaf-{index}"),
+            "job",
+            Some(&leaf),
+            Some("leaf-step"),
+            Some(&format!("REC-leaf-{index}")),
+            "child step returned a nonzero status",
+        );
+        seed_lifecycle_audit_event(
+            runtime,
+            &format!("exec-parent-{index}"),
+            "job",
+            Some(&parent),
+            Some("pipeline_success_guard"),
+            Some(&format!("REC-parent-{index}")),
+            &format!(
+                "pipeline child run did not succeed: result run {leaf} status failed: child step returned a nonzero status"
+            ),
+        );
+    }
+}
+
 async fn request_audit(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
     router()
         .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
@@ -343,5 +435,63 @@ async fn audit_summary_separates_raw_failed_events_from_grouped_incidents() {
     assert_eq!(
         body["failed_events_by_class"]["unexpected"].as_u64(),
         Some(12)
+    );
+}
+
+/// ORB-10969: no-tool lifecycle rows must not appear as tool `unknown` in
+/// failures-by-tool denominators or rates; they land in the named category.
+#[tokio::test]
+async fn audit_summary_excludes_lifecycle_rows_from_tool_metrics() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    seed_ten_unknown_lifecycle_rows(&runtime);
+    seed_audit_event(
+        &runtime,
+        "exec-tool-ok",
+        "orbit.search",
+        AuditEventStatus::Success,
+        "actor-one",
+        None,
+    );
+    seed_audit_event(
+        &runtime,
+        "exec-tool-fail",
+        "orbit.search",
+        AuditEventStatus::Failure,
+        "actor-one",
+        Some("search backend unavailable"),
+    );
+
+    let response = request_audit(runtime, "/audit/summary?since=24h").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+
+    assert_eq!(body["failed_events"].as_u64(), Some(11));
+    assert_eq!(body["failure_incidents"].as_u64(), Some(6));
+    assert_eq!(body["affected_run_count"].as_u64(), Some(9));
+    assert_eq!(body["job_run_lifecycle_failures"].as_u64(), Some(10));
+    assert_eq!(body["job_run_lifecycle_incidents"].as_u64(), Some(5));
+    assert_eq!(body["job_run_lifecycle_label"], "job-run lifecycle");
+
+    let failures = body["failures_by_tool"]
+        .as_array()
+        .expect("failures_by_tool");
+    assert!(
+        failures
+            .iter()
+            .all(|row| row["tool"] != "unknown" && row["tool"] != ""),
+        "no-tool rows must not enter the tool histogram: {failures:?}"
+    );
+    let search = failures
+        .iter()
+        .find(|row| row["tool"] == "orbit.search")
+        .expect("named tool still counted");
+    assert_eq!(search["count"].as_u64(), Some(1));
+
+    let rates = body["failure_rate_by_tool"]
+        .as_array()
+        .expect("failure_rate_by_tool");
+    assert!(
+        rates.iter().all(|row| row["tool"] != "unknown"),
+        "lifecycle rows must not form a tool rate denominator"
     );
 }

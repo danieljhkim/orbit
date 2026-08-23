@@ -55,6 +55,8 @@ impl Default for ProviderRegistry {
         let _ = registry.register(Arc::new(crate::providers::claude::ClaudeFactory));
         let _ = registry.register(Arc::new(crate::providers::gemini::GeminiFactory));
         let _ = registry.register(Arc::new(crate::providers::grok::GrokFactory));
+        let _ = registry.register(Arc::new(crate::providers::copilot::CopilotFactory));
+        let _ = registry.register(Arc::new(crate::providers::cursor::CursorFactory));
         let _ = registry.register(Arc::new(crate::providers::ollama::OllamaFactory));
         registry
     }

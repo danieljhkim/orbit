@@ -1,8 +1,8 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-08-12
-last_validated: 2026-08-16
+last_updated: 2026-08-23
+last_validated: 2026-08-23
 status: Accepted
 feature: routines
 doc_role: decisions
@@ -11,7 +11,7 @@ summary: Decision log for the routines scheduler, including default seeding and 
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ORB-10986]
 ---
 
 # Routines — Decisions
@@ -31,12 +31,12 @@ Something must wake the scheduler. Alternatives: a resident `orbit schedulerd` o
 
 ### Decision
 
-launchd (`StartInterval` 60s) and a systemd timer (`OnStartupSec` plus `OnUnitActiveSec`) invoke `orbit sweep`; sweep is stateless-in, durable-out. The systemd timer arms itself in every fresh user-manager session and recurs after service activation. Missed cron-slot semantics belong to each routine's `missed_run` policy. There is no resident Orbit daemon.
+launchd (`StartInterval` 60s) and a systemd timer (`OnActiveSec` plus `OnUnitActiveSec`) invoke `orbit sweep`; sweep is stateless-in, durable-out. The systemd timer arms itself from every timer activation and recurs after service activation. Missed cron-slot semantics belong to each routine's `missed_run` policy. There is no resident Orbit daemon [ORB-10986].
 
 ### Consequences
 
 - No process supervision, crash recovery, or memory-leak surface; a wedged pass affects one minute, not the scheduler.
-- launchd wake behavior and systemd's first sweep after a fresh manager session pair with `missed_run: catch_up_once` to cover laptop sleep and host downtime without replaying every missed clock tick.
+- launchd wake behavior and systemd's first sweep after timer activation pair with `missed_run: catch_up_once` to cover laptop sleep and host downtime without replaying every missed clock tick.
 - Cost: minute granularity is a hard floor and event triggers are structurally impossible in v1; correct behavior depends on two platform-specific unit files that must be kept in parity and tested on both platforms.
 
 ## Routine discovery via the workspace registry and a versioned [routines] role=source config key
@@ -162,8 +162,8 @@ Store the supported whole-minute cadence in host-local `~/.orbit/clock.toml` and
 
 ### Consequences
 - Clock status reports configured and effective cadence, and native-manager failures include recovery commands.
-- On Linux, enabled state is insufficient for health: status reports an effective cadence only when systemd also exposes a finite next trigger, and an elapsed or unscheduled timer reports the clock reinstall recovery command.
-- Linux uses monotonic startup and post-activation triggers. A fresh user-manager session always gains an initial trigger; missed timer ticks are not replayed, leaving catch-up versus skip behavior to each routine's persisted cursor and `missed_run` policy.
+- On Linux, enabled state and successful manager command exits are insufficient for health: installation and controls report success only when systemd exposes an active timer with a finite next trigger. An elapsed or unscheduled timer reports `orbit routine clock enable`, which restarts the timer even when already enabled and verifies the repaired state.
+- Linux uses monotonic timer-activation and service-activation triggers. `OnActiveSec` establishes the first deadline after every install, reinstall, cadence change, and re-enable; `OnUnitActiveSec` establishes recurrence after each sweep service activation. `AccuracySec=5s` bounds coalescing after either deadline. Missed timer ticks are not replayed, leaving catch-up versus skip behavior to each routine's persisted cursor and `missed_run` policy.
 - Cost: the host-local setting intentionally does not travel with a workspace, so operators configure each host separately.
 
 ## Task References

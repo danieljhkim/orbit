@@ -112,9 +112,13 @@ pub struct AgentLoopSpec {
     #[serde(default = "default_require_completion_envelope")]
     pub require_completion_envelope: bool,
     /// Program allowlist enforced before `proc.spawn` executes a request.
-    /// `None` means `proc.spawn` is not constrained at the activity layer
-    /// (legacy / human-driven paths); an empty `Some(vec![])` denies all
-    /// programs (fail-closed).
+    /// An empty `Some(vec![])` denies every program (fail-closed).
+    ///
+    /// `None` is only legal for an activity that does not grant `proc.spawn`:
+    /// asset load rejects the pairing of a `proc.spawn` grant with a missing
+    /// allowlist, so an author opts into deny-all by writing `[]` rather than
+    /// getting allow-all by forgetting the key. The v2 activity tool context
+    /// treats `None` as deny-all too. [ORB-10959]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proc_allowed_programs: Option<Vec<String>>,
 }
@@ -178,9 +182,11 @@ pub enum Provider {
     Codex,
     Gemini,
     Grok,
+    Copilot,
     Ollama,
     #[serde(rename = "openai_compat", alias = "openai-compat")]
     OpenaiCompat,
+    Cursor,
 }
 
 /// One accepted non-canonical spelling for a [`Provider`]. Alias normalization
@@ -221,13 +227,15 @@ impl std::error::Error for ProviderParseError {}
 impl Provider {
     /// Every canonical provider, in declaration order. Adding a variant here is
     /// a compile-time forcing function for the match arms below.
-    pub const ALL: [Provider; 6] = [
+    pub const ALL: [Provider; 8] = [
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
         Provider::Grok,
+        Provider::Copilot,
         Provider::Ollama,
         Provider::OpenaiCompat,
+        Provider::Cursor,
     ];
 
     /// Accepted non-canonical spellings, normalized by [`Provider::parse`] /
@@ -238,6 +246,10 @@ impl Provider {
     /// canonical `openai_compat` id (it is also a serde alias on the enum).
     /// This table is **closed** — an unlisted string is `provider.unknown`,
     /// never guessed. New aliases require a contract bump.
+    ///
+    /// `copilot` and `cursor` deliberately have **no** alias rows. Neither the
+    /// platform name nor a selected underlying model vendor may resolve to a
+    /// different execution lane. [ORB-10946] [ORB-10945]
     pub const ALIASES: &'static [ProviderAlias] = &[
         ProviderAlias {
             alias: "anthropic",
@@ -272,7 +284,8 @@ impl Provider {
     ];
 
     /// Human-readable canonical id list used in diagnostics.
-    pub const CANONICAL_LIST: &'static str = "claude, codex, gemini, grok, ollama, openai_compat";
+    pub const CANONICAL_LIST: &'static str =
+        "claude, codex, gemini, grok, copilot, ollama, openai_compat, cursor";
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -280,8 +293,10 @@ impl Provider {
             Provider::Codex => "codex",
             Provider::Gemini => "gemini",
             Provider::Grok => "grok",
+            Provider::Copilot => "copilot",
             Provider::Ollama => "ollama",
             Provider::OpenaiCompat => "openai_compat",
+            Provider::Cursor => "cursor",
         }
     }
 
@@ -341,10 +356,16 @@ impl Provider {
     }
 
     /// Whether the model-neutral Worker leaf executor can execute this
-    /// provider. Worker only wires the CLI agent families; `ollama` and
-    /// `openai_compat` are Orbit-canonical capabilities Worker does not run.
+    /// provider. Worker only wires the four shared CLI agent families;
+    /// `copilot`, `cursor`, `ollama`, and `openai_compat` are Orbit-canonical
+    /// capabilities Worker does not run.
     /// Preserving this distinction is an explicit ORB-10091 constraint — Orbit
     /// keeps the wider set even though Worker cannot execute all of it.
+    ///
+    /// [ORB-10946] `copilot` returning `false` here is the stable
+    /// unavailable diagnostic, not a fallback: a Worker-routed step naming
+    /// `copilot` is refused by identity rather than silently re-pointed at
+    /// another family.
     pub fn is_worker_executable(self) -> bool {
         matches!(
             self,

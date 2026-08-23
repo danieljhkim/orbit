@@ -2,11 +2,15 @@ use orbit_common::OrbitError;
 use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
-use crate::{OrbitBuiltinAction, Tool, ToolContext};
+use crate::{OrbitBuiltinAction, Tool, ToolContext, ToolExecutionKind};
 
 pub struct OrbitTaskListTool;
 
 impl Tool for OrbitTaskListTool {
+    fn execution_kind(&self) -> ToolExecutionKind {
+        ToolExecutionKind::ReadOnly
+    }
+
     fn schema(&self) -> ToolSchema {
         let mut parameters = vec![
             ToolParam {

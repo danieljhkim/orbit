@@ -304,7 +304,7 @@ asserts 100 collision-free dense IDs per artifact kind ([ORB-10596]).
 5. **macOS provenance syscall allowances are private.** `vnguard` and `Sandbox`/67 mirror current Codex startup needs and may require review after OS changes.
 6. **Pipeline env fallback can leave `fs_profile = None`.** Legacy contexts without `ORBIT_ACTIVITY_FS_PROFILE` still omit a profile name; the retired in-process helper used to treat that as unguarded.
 7. **No in-process `fs.*` enforcement remains.** A revived harness would need to rebuild the retired helper (or move enforcement below the tool layer) rather than rely on leftover builtins.
-8. **Generic exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, and `run_process + NoSandbox` remains unchanged; the OS wrappers attach only to CLI-agent dispatch.
+8. **Generic exec has no policy hook.** `proc.spawn` program allowlists are activity-layer data, and `run_process + NoSandbox` remains unchanged; the OS wrappers attach only to CLI-agent dispatch. The allowlist is mandatory rather than opt-in: asset load rejects an activity whose `tools` cover `proc.spawn` while `proc_allowed_programs` is absent, and the v2 activity tool context always marks `proc.spawn` activity-scoped, so a missing list denies every program instead of degrading to allow-all ([ORB-10959]).
 9. **Symlink semantics are implicit.** `workspace_relative_path` follows symlinks and rejects out-of-workspace targets, but no spec states that invariant.
 10. **Glob syntax is narrow.** Character classes, brace expansion, and POSIX bracket expressions are unsupported.
 11. **Policy result shapes are parallel.** `PolicyDecision` and `FsPolicyEvaluation` have no bridge for future non-fs evaluators.

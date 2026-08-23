@@ -165,8 +165,8 @@ fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<Stri
 #[test]
 fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     let definition = definition_with_scope(
-        "orbit.task.show",
-        vec![param("id")],
+        "orbit.task.list",
+        vec![param("limit")],
         McpToolScope::WorkspaceRequired,
     );
 
@@ -195,6 +195,55 @@ fn workspace_scoped_tool_advertises_the_authoritative_server_selector() {
     assert!(
         description.contains("absolute path registered on that server"),
         "selector must document the server-side path form: {description}"
+    );
+}
+
+#[test]
+fn task_show_skips_generic_workspace_selector_injection() {
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    assert!(
+        !properties.contains_key("workspace"),
+        "generic workspace-selection machinery must not inject a selector on task.show: {properties:?}"
+    );
+}
+
+#[test]
+fn task_show_own_workspace_param_documents_global_id_resolution() {
+    let declared = ToolParam {
+        name: "workspace".to_string(),
+        description: "Optional explicit workspace filter. `id` is resolved globally by default"
+            .to_string(),
+        param_type: "string".to_string(),
+        required: false,
+    };
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id"), declared],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties(&definition);
+    let workspace = properties
+        .get("workspace")
+        .and_then(Value::as_object)
+        .expect("task.show declares its own optional workspace filter");
+    let description = workspace
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("filter carries routing guidance");
+    assert!(
+        description.contains("resolved globally by default"),
+        "task.show must document global id resolution: {description}"
+    );
+    assert!(
+        !description.contains("_meta.orbit.workspace"),
+        "generic session-default copy must not replace the task.show filter docs: {description}"
     );
 }
 
@@ -237,6 +286,160 @@ fn tool_declaring_its_own_workspace_param_keeps_that_description() {
         Some("Workspace path for the task"),
         "injection must not overwrite a tool's own selector documentation"
     );
+}
+
+/// A server launched for a workspace advertises the selector as optional, and
+/// says why, so an agent in that session does not have to discover a selector
+/// it will never need.
+#[test]
+fn a_launch_bound_session_advertises_the_selector_as_optional() {
+    let definition = definition_with_scope(
+        "orbit.task.update",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let description = selector_description(&definition, Some("ws_orbit"));
+
+    assert!(
+        description.contains("Optional in this session"),
+        "a bound session must advertise the selector as optional: {description}"
+    );
+    assert!(
+        description.contains("orbit mcp serve --workspace"),
+        "the binding's origin must be named: {description}"
+    );
+}
+
+/// An unbound session must not read as if it could omit the selector: it
+/// cannot, and a call that omits one is refused.
+#[test]
+fn an_unbound_session_advertises_the_selector_as_required() {
+    let definition = definition_with_scope(
+        "orbit.task.update",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let description = selector_description(&definition, None);
+
+    assert!(
+        description.contains("Required in this session"),
+        "an unbound session must advertise the selector as required: {description}"
+    );
+    assert!(
+        description.contains("refused"),
+        "the fail-closed consequence must be stated: {description}"
+    );
+}
+
+fn selector_description(definition: &McpToolDefinition, launch_workspace: Option<&str>) -> String {
+    let context = ToolSessionContext {
+        workspace: launch_workspace.map(ToOwned::to_owned),
+        ..ToolSessionContext::default()
+    };
+    let server =
+        OrbitToolServer::new_with_context(Arc::new(SessionContextHost::default()), context);
+    server
+        .input_schema_for(definition)
+        .expect("input schema resolves")["properties"]["workspace"]["description"]
+        .as_str()
+        .expect("selector carries routing guidance")
+        .to_string()
+}
+
+/// The managed-executor shape: the server knows its workspace, the client
+/// cannot say anything about one, and the session must still route.
+#[test]
+fn initialize_without_an_announced_workspace_keeps_the_launch_binding() {
+    let server = launch_bound_server(Some("ws_orbit"));
+
+    server.adopt_announced_session(session_context_from_initialize(
+        &InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("claude-code", "0"),
+        ),
+        &Meta::new(),
+    ));
+
+    assert_eq!(
+        server.session_context().workspace.as_deref(),
+        Some("ws_orbit")
+    );
+}
+
+#[test]
+fn an_announced_workspace_overrides_the_launch_binding() {
+    let server = launch_bound_server(Some("ws_orbit"));
+
+    server.adopt_announced_session(session_context_from_initialize(
+        &initialize_params_with_meta(json!({ "orbit": { "workspace": "/repo/other" } })),
+        &Meta::new(),
+    ));
+
+    assert_eq!(
+        server.session_context().workspace.as_deref(),
+        Some("/repo/other")
+    );
+}
+
+/// The fallback is the immutable launch value, never the previous client's
+/// claim, so one session cannot inherit a workspace it was never bound to.
+#[test]
+fn re_initialize_falls_back_to_the_launch_binding_not_the_previous_claim() {
+    let server = launch_bound_server(Some("ws_orbit"));
+    server.adopt_announced_session(session_context_from_initialize(
+        &initialize_params_with_meta(json!({ "orbit": { "workspace": "/repo/other" } })),
+        &Meta::new(),
+    ));
+
+    server.adopt_announced_session(session_context_from_initialize(
+        &InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("claude-code", "0"),
+        ),
+        &Meta::new(),
+    ));
+
+    assert_eq!(
+        server.session_context().workspace.as_deref(),
+        Some("ws_orbit")
+    );
+}
+
+/// A standalone server binds nothing, so a silent client stays unbound and
+/// every workspace-scoped call must name its own workspace.
+#[test]
+fn an_unbound_server_stays_unbound_when_the_client_announces_nothing() {
+    let server = launch_bound_server(None);
+
+    server.adopt_announced_session(session_context_from_initialize(
+        &InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("claude-code", "0"),
+        ),
+        &Meta::new(),
+    ));
+
+    assert_eq!(server.session_context().workspace, None);
+}
+
+/// A blank binding names nothing, so it must not present as bound.
+#[test]
+fn a_blank_launch_binding_is_no_binding() {
+    let server = launch_bound_server(Some("   "));
+
+    assert_eq!(server.session_context().workspace, None);
+}
+
+fn launch_bound_server(launch_workspace: Option<&str>) -> OrbitToolServer {
+    OrbitToolServer::new_with_context(
+        Arc::new(SessionContextHost::default()),
+        ToolSessionContext {
+            workspace: launch_workspace.map(ToOwned::to_owned),
+            ..ToolSessionContext::default()
+        },
+    )
 }
 
 fn initialize_params_with_meta(meta: Value) -> InitializeRequestParams {

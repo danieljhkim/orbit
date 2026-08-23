@@ -3,6 +3,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -874,7 +875,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
             "workspace_path": missing.display().to_string()
         })),
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -934,7 +935,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
             "workspace_path": workspace_string.clone()
         })),
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1004,7 +1005,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
             "workspace_path": workspace.display().to_string()
         })),
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1114,7 +1115,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
             "workspace_path": workspace.display().to_string()
         })),
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1183,7 +1184,7 @@ fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() 
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2983,7 +2984,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -3056,7 +3057,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3133,7 +3134,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3187,7 +3188,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3242,7 +3243,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: None,
+        orbit_registry_root: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3302,7 +3303,7 @@ fi
         sandbox: None,
         task_context: None,
         workspace_root: None,
-        orbit_root: Some("/resolved/orbit/root".to_string()),
+        orbit_registry_root: Some("/resolved/orbit/root".to_string()),
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3319,6 +3320,104 @@ fi
 
     assert!(outcome.success);
     assert_eq!(outcome.output["provider"], "grok");
+}
+
+/// [ORB-10980] A managed run executes in a linked worktree whose workspace and
+/// worktree-local `.orbit` state roots are mounted read-only. The child must be
+/// pinned to the authoritative registry root the host reports, and the existing
+/// binary/PATH pinning plus managed provenance bindings must survive alongside
+/// it — those are what let the documented `orbit tool run` fallback work at all.
+#[test]
+fn run_cli_backend_injects_registry_root_not_worktree_state_root() {
+    let temp = tempdir().expect("tempdir");
+    let registry_root = temp.path().join("registry");
+    let workspace_state_root = temp.path().join("repo").join(".orbit");
+    let worktree_state_root = temp
+        .path()
+        .join("repo/.orbit/state/worktrees/jrun-fixture")
+        .join(".orbit");
+    for directory in [&registry_root, &workspace_state_root, &worktree_state_root] {
+        std::fs::create_dir_all(directory).expect("state root");
+    }
+    // Both `.orbit` state roots are read-only in a managed run; a child pinned
+    // to either cannot bootstrap, so make that concrete in the fixture.
+    for directory in [&workspace_state_root, &worktree_state_root] {
+        let mut permissions = std::fs::metadata(directory)
+            .expect("state root metadata")
+            .permissions();
+        permissions.set_mode(0o555);
+        std::fs::set_permissions(directory, permissions).expect("read-only state root");
+    }
+
+    let script = temp.path().join("grok");
+    write_executable(
+        &script,
+        &format!(
+            r#"#!/bin/sh
+cat > /dev/null
+fail() {{
+  printf '%s\n' "{{\"schemaVersion\":1,\"status\":\"failed\",\"error\":{{\"code\":\"$1\",\"message\":\"$1\",\"details\":null}}}}"
+  exit 1
+}}
+[ "$ORBIT_ROOT" = "{registry}" ] || fail orbit_root_not_registry
+[ "$ORBIT_ROOT" = "{workspace_state}" ] && fail orbit_root_is_workspace_state_root
+[ "$ORBIT_ROOT" = "{worktree_state}" ] && fail orbit_root_is_worktree_state_root
+[ -n "$ORBIT_BIN" ] || fail orbit_bin_missing
+[ -n "$PATH" ] || fail path_missing
+[ "$ORBIT_RUN_ID" = "job-grok-registry-root" ] || fail run_id_missing
+[ "$ORBIT_MANAGED_RUN_CONTEXT" = "1" ] || fail managed_run_context_missing
+[ "$ORBIT_ACTIVE_TASK_ID" = "ORB-10980" ] || fail active_task_missing
+printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"}},"error":null}}'
+"#,
+            registry = registry_root.display(),
+            workspace_state = workspace_state_root.display(),
+            worktree_state = worktree_state_root.display(),
+        ),
+    );
+
+    let sink = Arc::new(RecordingSink::default());
+    let sink_for_writer: Arc<dyn AuditSink> = sink;
+    let audit = Arc::new(V2AuditWriter::new(
+        "job-grok-registry-root",
+        "grok:grok-build",
+        sink_for_writer,
+    ));
+    let host = TestHost {
+        command: script.display().to_string(),
+        executor_args: Vec::new(),
+        provider_config: HashMap::new(),
+        sandbox: None,
+        task_context: None,
+        workspace_root: None,
+        orbit_registry_root: Some(registry_root.display().to_string()),
+    };
+    let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
+    spec.model = Some("grok-build".to_string());
+
+    let outcome = run_cli_backend(
+        &host,
+        &spec,
+        "job-grok-registry-root",
+        audit,
+        &serde_json::json!({"prompt": "hi", "task_id": "ORB-10980"}),
+        None,
+    )
+    .expect("run succeeds");
+
+    // Restore write permission so the fixture's temp tree can be reclaimed.
+    for directory in [&workspace_state_root, &worktree_state_root] {
+        let mut permissions = std::fs::metadata(directory)
+            .expect("state root metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(directory, permissions).expect("restore state root");
+    }
+
+    assert!(
+        outcome.success,
+        "managed child rejected its Orbit environment: {:?}",
+        outcome.output
+    );
 }
 
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty

@@ -33,12 +33,13 @@ pub enum RuntimeNeed {
     Required,
     Forbidden,
     /// Bind the workspace that owns this task ID rather than the one the cwd
-    /// or `--workspace` walk would pick [ORB-10797].
+    /// or `--workspace` walk would pick [ORB-10797] [ORB-10961].
     ///
-    /// Task IDs are a machine-global primary key, so `task show` is the one
-    /// verb whose target is addressable without knowing its workspace. A
-    /// `--workspace` selector still wins and still filters: the bootstrap
-    /// binds that workspace, and a task owned elsewhere is simply not found.
+    /// Task IDs are a machine-global primary key, so `task show` — including
+    /// `orbit tool run orbit.task.show` — is the one verb whose target is
+    /// addressable without knowing its workspace. A `--workspace` selector
+    /// still wins and still filters: the bootstrap binds that workspace, and a
+    /// task owned elsewhere is simply not found.
     TaskOwner {
         task_id: String,
     },
@@ -709,8 +710,15 @@ impl Commands {
                             ("doctor", None, None, None, "admin".to_string(), None)
                         }
                     };
+                let runtime_need = match &command.command {
+                    ToolSubcommand::Run(args) => match args.task_show_id() {
+                        Some(task_id) => RuntimeNeed::TaskOwner { task_id },
+                        None => RuntimeNeed::Required,
+                    },
+                    _ => RuntimeNeed::Required,
+                };
                 CommandOperation::new(
-                    RuntimeNeed::Required,
+                    runtime_need,
                     Some(CommandMeta {
                         command: "tool".to_string(),
                         subcommand: Some(subcommand.to_string()),

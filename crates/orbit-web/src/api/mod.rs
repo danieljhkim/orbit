@@ -264,6 +264,17 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         error @ orbit_core::OrbitError::WorkspaceClaimHeld(_) => {
             workspace_claim_held_conflict(error)
         }
+        // [ORB-10965] A duplicate run start that lost to the incumbent owner is
+        // a conflict, not a server fault: the request was well-formed and
+        // another worker simply got there first.
+        orbit_core::OrbitError::JobRunStartConflict(message) => (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": message,
+                "code": "job_run_start_conflict",
+            })),
+        )
+            .into_response(),
         other => server_error(other),
     }
 }

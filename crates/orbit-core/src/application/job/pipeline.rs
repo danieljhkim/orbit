@@ -15,7 +15,9 @@ use orbit_store::contracts::{
 };
 use orbit_types::record::OrbitEvent;
 use orbit_types::telemetry::AuditEventStatus;
-use orbit_types::workflow::{JobRun, JobRunState, JobScheduleState, JobTargetType};
+use orbit_types::workflow::{
+    JobRun, JobRunStartOutcome, JobRunState, JobScheduleState, JobTargetType,
+};
 use orbit_types::workspace::WorkspacePaths;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -642,47 +644,96 @@ impl OrbitRuntime {
             .max(PIPELINE_WAIT_MIN_POLL_SECONDS)
     }
 
+    /// [ORB-10965] Record a duplicate Start that was dropped without a second
+    /// execution.
+    ///
+    /// Delivery is at-least-once, so losing the Start race is an expected
+    /// outcome, not a fault: it is logged and audited as its own event and the
+    /// worker returns successfully, leaving the run's real state to the worker
+    /// that does own it.
+    fn record_deduplicated_start(&self, run: &JobRun, reason: &str) -> Result<(), OrbitError> {
+        tracing::info!(
+            target: "orbit.core.job_run",
+            run_id = %run.run_id,
+            job_id = %run.job_id,
+            attempt = run.attempt,
+            reason,
+            "duplicate job run start delivery deduplicated; the incumbent \
+             owner keeps execution authority",
+        );
+        self.record_event(OrbitEvent::JobRunStartDeduplicated {
+            job_id: run.job_id.clone(),
+            run_id: run.run_id.clone(),
+            attempt: run.attempt,
+            reason: reason.to_string(),
+        })
+    }
+
     fn execute_pipeline_run_now(&self, run: &JobRun, yaml_path: &Path) -> Result<(), OrbitError> {
         let started_at = Utc::now();
-        let changed = self.stores().jobs().mark_job_run_running(
+        // [ORB-10965] The state read in `execute_pipeline_run_worker` and this
+        // Start are separate transactions, so a second worker handed the same
+        // queued run can arrive here having also seen `pending`. The store
+        // arbitrates atomically; whoever does not win execution authority
+        // yields here, before any agent work.
+        let outcome = match self.stores().jobs().mark_job_run_running(
             &run.run_id,
             started_at,
             std::process::id(),
-        )?;
-        if !changed {
-            return Ok(());
+        ) {
+            Ok(outcome) => outcome,
+            Err(OrbitError::JobRunStartConflict(diagnostic)) => {
+                return self.record_deduplicated_start(run, &diagnostic);
+            }
+            Err(error) => return Err(error),
+        };
+        match outcome {
+            JobRunStartOutcome::Started => {}
+            JobRunStartOutcome::AlreadyStarted => {
+                return self.record_deduplicated_start(
+                    run,
+                    "this worker process had already started the run",
+                );
+            }
+            JobRunStartOutcome::NotFound => return Ok(()),
         }
         let input = run
             .input
             .clone()
             .unwrap_or_else(|| Value::Object(Default::default()));
-        self.record_run_crew_from_input(&run.run_id, &input)?;
+        // Once Start succeeds, every later error belongs to this run. Keep the
+        // whole setup path inside the outcome finalized below so crew
+        // validation, event persistence, and resume-state reads cannot escape
+        // with a durable `running` projection.
+        let outcome = (|| {
+            self.record_run_crew_from_input(&run.run_id, &input)?;
 
-        self.record_event(OrbitEvent::JobRunStarted {
-            job_id: run.job_id.clone(),
-            run_id: run.run_id.clone(),
-            attempt: run.attempt,
-        })?;
+            self.record_event(OrbitEvent::JobRunStarted {
+                job_id: run.job_id.clone(),
+                run_id: run.run_id.clone(),
+                attempt: run.attempt,
+            })?;
 
-        // [ORB-10470] The run's own persisted checkpoints are the resume
-        // cursor. A run seeded by `submit_resume_run` starts at the source's
-        // first non-successful step; a run whose previous worker died after
-        // checkpointing continues from where that worker stopped. Reusing a
-        // checkpoint is therefore idempotent — the successful steps are
-        // skipped, never re-dispatched.
-        let resume = self.read_run_state(&run.run_id)?.filter(|state| {
-            state
-                .step_states
-                .values()
-                .any(|step_state| *step_state == JobRunState::Success)
-        });
-        let outcome = self.run_job_v2_from_yaml_with_run_id_and_resume(
-            yaml_path,
-            input.clone(),
-            Some(run.run_id.clone()),
-            run.retry_source_run_id.clone(),
-            resume.as_ref(),
-        );
+            // [ORB-10470] The run's own persisted checkpoints are the resume
+            // cursor. A run seeded by `submit_resume_run` starts at the
+            // source's first non-successful step; a run whose previous worker
+            // died after checkpointing continues from where that worker
+            // stopped. Reusing a checkpoint is therefore idempotent — the
+            // successful steps are skipped, never re-dispatched.
+            let resume = self.read_run_state(&run.run_id)?.filter(|state| {
+                state
+                    .step_states
+                    .values()
+                    .any(|step_state| *step_state == JobRunState::Success)
+            });
+            self.run_job_v2_from_yaml_with_run_id_and_resume(
+                yaml_path,
+                input.clone(),
+                Some(run.run_id.clone()),
+                run.retry_source_run_id.clone(),
+                resume.as_ref(),
+            )
+        })();
         let finished_at = Utc::now();
         self.finalize_v2_pipeline_run(
             run,
@@ -723,7 +774,9 @@ impl OrbitRuntime {
         message: &str,
         state: JobRunState,
     ) -> Result<(), OrbitError> {
-        let current = self.show_job_run(&run.run_id)?;
+        let current = self
+            .get_job_run_backend(&run.run_id)?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run.run_id.clone()))?;
         let already_has_error = current
             .steps
             .iter()
@@ -940,9 +993,14 @@ impl OrbitRuntime {
         actor: Option<&str>,
     ) -> Result<(), OrbitError> {
         let child_pid = child.id();
+        let mut claimed = false;
         loop {
-            let run = self.show_job_run(run_id)?;
-            if let Some(owner_pid) = run.pid {
+            let run = self
+                .get_job_run_backend(run_id)?
+                .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
+            if let Some(owner_pid) = run.pid
+                && !claimed
+            {
                 let _ = self.record_pipeline_audit(
                     "pipeline.worker.claimed",
                     Some(run_id),
@@ -958,10 +1016,7 @@ impl OrbitRuntime {
                     }),
                     None,
                 );
-                return Ok(());
-            }
-            if run.state != JobRunState::Pending {
-                return Ok(());
+                claimed = true;
             }
 
             if let Some(status) = child.try_wait().map_err(|error| {
@@ -975,20 +1030,91 @@ impl OrbitRuntime {
                     .filter(|value| !value.is_empty())
                     .map(|value| format!("; worker output:\n{value}"))
                     .unwrap_or_default();
+                if run.state.is_terminal() {
+                    return Ok(());
+                }
+                let ownership = if run.pid.is_some() {
+                    "after claiming"
+                } else {
+                    "before claiming"
+                };
                 let message = format!(
-                    "pipeline worker for run '{run_id}' exited with status {status} before \
-                     claiming the persisted run from registered workspace '{}'; worker log: \
+                    "pipeline worker for run '{run_id}' exited with status {status} {ownership} \
+                     the persisted run from registered workspace '{}'; worker log: \
                      '{}'{output_detail}; verify workspace registration, worker root discovery, \
                      and action availability",
                     workspace.display(),
                     worker_log.display(),
                 );
-                self.finalize_pipeline_worker_startup_failure(&run, &message, actor)?;
+                self.finalize_pipeline_worker_exit_failure(&run, &message, actor)?;
                 return Ok(());
             }
 
             thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// Terminalize a worker process that exited while it still owned a
+    /// non-terminal run. `try_wait` has already reaped the process when this is
+    /// called. Pending exits are interrupted startup; a worker that reached
+    /// running failed its claimed execution.
+    fn finalize_pipeline_worker_exit_failure(
+        &self,
+        run: &JobRun,
+        message: &str,
+        actor: Option<&str>,
+    ) -> Result<(), OrbitError> {
+        let current = self
+            .get_job_run_backend(&run.run_id)?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run.run_id.clone()))?;
+        let (state, started_at, audit_name) = match current.state {
+            JobRunState::Pending => (
+                JobRunState::Interrupted,
+                current.scheduled_at,
+                "pipeline.worker.startup",
+            ),
+            JobRunState::Running => (
+                JobRunState::Failed,
+                current.started_at.unwrap_or(current.scheduled_at),
+                "pipeline.worker.exit",
+            ),
+            _ => return Ok(()),
+        };
+        let finished_at = Utc::now();
+        self.record_pipeline_diagnostic_step(
+            &current,
+            started_at,
+            finished_at,
+            None,
+            message,
+            state,
+        )?;
+        let changed = self.finalize_job_run_with_reservation_cleanup(
+            &current.run_id,
+            state,
+            finished_at,
+            None,
+            TaskReservationReleaseReason::RunTerminal,
+        )?;
+        if changed {
+            self.record_event(OrbitEvent::JobRunCompleted {
+                job_id: current.job_id.clone(),
+                run_id: current.run_id.clone(),
+                state: state.to_string(),
+            })?;
+        }
+        self.record_pipeline_audit(
+            audit_name,
+            Some(&current.run_id),
+            actor,
+            AuditEventStatus::Failure,
+            json!({
+                "run_id": current.run_id,
+                "workspace": self.paths().repo_root,
+                "worker_log": pipeline_worker_log_path(&self.paths().logs_dir, &current.run_id),
+            }),
+            Some(message.to_string()),
+        )
     }
 
     fn finalize_pipeline_worker_startup_failure(

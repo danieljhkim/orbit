@@ -115,10 +115,11 @@ pub(crate) fn collect_system_crew_setting(
 
 /// Cheap-tier system options in the same preference order as
 /// `orbit-config::default_system_crew`: Codex Luna, Claude Sonnet, Grok,
-/// Gemini Flash.
+/// Gemini Flash, Copilot Haiku, Cursor.
 fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
     use orbit_common::model_defaults::{
-        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
+        CLAUDE_DEFAULT_WEAK, CODEX_LUNA_MODEL, COPILOT_CREW_MODEL, CURSOR_CREW_MODEL,
+        GEMINI_CREW_MODEL, GROK_DEFAULT_MODEL,
     };
     let mut options = Vec::new();
     for (enabled, provider, model) in [
@@ -126,6 +127,8 @@ fn system_crew_options(detected: &DetectedAgents) -> Vec<CrewSeed> {
         (detected.claude_cli, "claude", CLAUDE_DEFAULT_WEAK),
         (detected.grok_cli, "grok", GROK_DEFAULT_MODEL),
         (detected.gemini_cli, "gemini", GEMINI_CREW_MODEL),
+        (detected.copilot_cli, "copilot", COPILOT_CREW_MODEL),
+        (detected.cursor_cli, "cursor", CURSOR_CREW_MODEL),
     ] {
         if enabled {
             options.push(CrewSeed {
@@ -159,6 +162,8 @@ fn system_crew_label(option: &CrewSeed) -> &'static str {
         Some("claude") => "Claude",
         Some("grok") => "Grok",
         Some("gemini") => "Gemini",
+        Some("copilot") => "Copilot",
+        Some("cursor") => "Cursor",
         _ => "Agent",
     }
 }
@@ -227,17 +232,60 @@ struct AgentOption {
     model: &'static str,
 }
 
+#[derive(Clone, Copy)]
+struct AgentFamily {
+    label: &'static str,
+    provider: &'static str,
+}
+
+const AGENT_FAMILIES: [AgentFamily; 7] = [
+    AgentFamily {
+        label: "Claude CLI",
+        provider: "claude",
+    },
+    AgentFamily {
+        label: "Codex CLI",
+        provider: "codex",
+    },
+    AgentFamily {
+        label: "Gemini CLI",
+        provider: "gemini",
+    },
+    AgentFamily {
+        label: "Grok CLI",
+        provider: "grok",
+    },
+    AgentFamily {
+        label: "Copilot CLI",
+        provider: "copilot",
+    },
+    AgentFamily {
+        label: "Cursor Agent CLI",
+        provider: "cursor",
+    },
+    AgentFamily {
+        label: "Ollama CLI",
+        provider: "ollama",
+    },
+];
+
+fn agent_families(detected: &DetectedAgents) -> impl Iterator<Item = (AgentFamily, bool)> {
+    AGENT_FAMILIES.into_iter().zip([
+        detected.claude_cli,
+        detected.codex_cli,
+        detected.gemini_cli,
+        detected.grok_cli,
+        detected.copilot_cli,
+        detected.cursor_cli,
+        detected.ollama_cli,
+    ])
+}
+
 fn agent_options(detected: &DetectedAgents) -> Vec<AgentOption> {
     let mut options = Vec::new();
-    for (enabled, label, provider) in [
-        (detected.claude_cli, "Claude CLI", "claude"),
-        (detected.codex_cli, "Codex CLI", "codex"),
-        (detected.gemini_cli, "Gemini CLI", "gemini"),
-        (detected.grok_cli, "Grok CLI", "grok"),
-        (detected.ollama_cli, "Ollama CLI", "ollama"),
-    ] {
+    for (family, enabled) in agent_families(detected) {
         if enabled {
-            options.push(agent_option(label, provider));
+            options.push(agent_option(family.label, family.provider));
         }
     }
 
@@ -272,20 +320,13 @@ fn intro_text(detected: &DetectedAgents, recommended: &CrewSeed) -> String {
 }
 
 fn detection_lines(detected: &DetectedAgents) -> String {
-    [
-        ("Claude CLI", detected.claude_cli),
-        ("Codex CLI", detected.codex_cli),
-        ("Gemini CLI", detected.gemini_cli),
-        ("Grok CLI", detected.grok_cli),
-        ("Ollama CLI", detected.ollama_cli),
-    ]
-    .into_iter()
-    .map(|(label, found)| {
-        let status = if found { "found" } else { "not found" };
-        format!("  {label:<18} {status}")
-    })
-    .collect::<Vec<_>>()
-    .join("\n")
+    agent_families(detected)
+        .map(|(family, found)| {
+            let status = if found { "found" } else { "not found" };
+            format!("  {:<18} {status}", family.label)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn format_agent_options(options: &[AgentOption]) -> String {
@@ -306,13 +347,13 @@ fn format_agent_options(options: &[AgentOption]) -> String {
 }
 
 fn agent_display_name(config: &CrewSeed) -> String {
-    match config.provider.as_deref().unwrap_or("custom") {
-        "claude" => "Claude CLI".to_string(),
-        "codex" => "Codex CLI".to_string(),
-        "gemini" => "Gemini CLI".to_string(),
-        "grok" => "Grok CLI".to_string(),
-        "ollama" => "Ollama CLI".to_string(),
-        provider => format!("{provider} (CLI)"),
+    let provider = config.provider.as_deref().unwrap_or("custom");
+    match AGENT_FAMILIES
+        .iter()
+        .find(|family| family.provider == provider)
+    {
+        Some(family) => family.label.to_string(),
+        None => format!("{provider} (CLI)"),
     }
 }
 

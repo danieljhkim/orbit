@@ -105,7 +105,7 @@ Surface the breaking-change candidate list before drafting the final section. Sh
 
 ### 4. Bump versions
 
-Five files change every release:
+Six files change every release:
 
 | File | Field |
 |------|-------|
@@ -113,6 +113,7 @@ Five files change every release:
 | `Cargo.lock` | refresh via `cargo update --workspace` (no third-party drift) |
 | `plugin/.claude-plugin/plugin.json` | `version` |
 | `plugin/.codex-plugin/plugin.json` | `version` |
+| `plugin/plugin.json` | `version` |
 | `plugin/npm/package.json` | `version` |
 
 The other `0.X.Y` matches in the repo (install-script doc comments, the website task pages, the Node engine pin in `website/package-lock.json`) are intentional — leave them.
@@ -139,11 +140,12 @@ context_files:
   - file:Cargo.lock
   - file:plugin/.claude-plugin/plugin.json
   - file:plugin/.codex-plugin/plugin.json
+  - file:plugin/plugin.json
   - file:plugin/npm/package.json
   - file:scripts/smoke-plugin-install.sh
 ```
 
-Acceptance criteria: each of the five version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the plugin-install smoke script still drives this cycle's CLI non-interactively.
+Acceptance criteria: each of the six version-bearing file bumps reports the new version, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the plugin-install smoke script still drives this cycle's CLI non-interactively.
 
 ### 7. Human approval
 

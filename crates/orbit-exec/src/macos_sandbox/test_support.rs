@@ -20,6 +20,8 @@ pub(super) struct EnvOverrides<'a> {
     pub(super) codex_home: Option<&'a str>,
     pub(super) claude_config_dir: Option<&'a str>,
     pub(super) grok_home: Option<&'a str>,
+    pub(super) copilot_home: Option<&'a str>,
+    pub(super) xdg_cache_home: Option<&'a str>,
 }
 
 /// Provider used by profile tests that are not about the per-provider
@@ -40,6 +42,8 @@ pub(super) fn compile_with_env(
             codex_home: env.codex_home.map(OsStr::new),
             claude_config_dir: env.claude_config_dir.map(OsStr::new),
             grok_home: env.grok_home.map(OsStr::new),
+            copilot_home: env.copilot_home.map(OsStr::new),
+            xdg_cache_home: env.xdg_cache_home.map(OsStr::new),
         },
     )
     .expect("compile")

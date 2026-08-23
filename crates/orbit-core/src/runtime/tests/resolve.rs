@@ -19,6 +19,9 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 #[test]
 fn caller_supplied_workspace_hint_keeps_registry_out_of_core_resolution() {
     let _guard = ENV_LOCK.lock().expect("lock env");
+    // `ORBIT_ROOT` outranks the caller hint, and a managed agent run exports
+    // one, so this case only tests hint precedence with the env root cleared.
+    let _root = EnvVarGuard::remove("ORBIT_ROOT");
     let home = tempdir().expect("home tempdir");
     let cwd = tempdir().expect("cwd tempdir");
     let hinted = tempdir().expect("hinted tempdir");

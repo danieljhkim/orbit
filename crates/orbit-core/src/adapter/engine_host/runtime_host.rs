@@ -22,7 +22,7 @@ use orbit_types::task::{
     push_external_ref_if_missing,
 };
 use orbit_types::telemetry::InvocationTrace;
-use orbit_types::workflow::{ActivityV2, JobRun, JobRunState};
+use orbit_types::workflow::{ActivityV2, JobRun, JobRunStartOutcome, JobRunState};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
@@ -57,7 +57,7 @@ impl RuntimeHost for OrbitRuntime {
         run_id: &str,
         started_at: DateTime<Utc>,
         pid: u32,
-    ) -> Result<bool, OrbitError> {
+    ) -> Result<JobRunStartOutcome, OrbitError> {
         self.stores()
             .jobs()
             .mark_job_run_running(run_id, started_at, pid)
@@ -269,11 +269,11 @@ impl RuntimeHost for OrbitRuntime {
             .agent_subprocess_env(required_env_vars)
     }
 
-    fn orbit_root(&self) -> Option<String> {
+    fn orbit_registry_root(&self) -> Option<String> {
         Some(
             self.context
                 .paths()
-                .orbit_dir
+                .global_dir
                 .to_string_lossy()
                 .into_owned(),
         )
@@ -507,7 +507,12 @@ impl RuntimeHost for OrbitRuntime {
             .canonicalize()
             .unwrap_or_else(|_| self.paths().repo_root.clone());
 
-        let proc_spawn_activity_scoped = proc_allowed_programs.is_some();
+        // Every context built here belongs to a v2 activity, so `proc.spawn` is
+        // always activity-scoped: a missing `proc_allowed_programs` denies every
+        // program instead of degrading to allow-all. Asset load already refuses
+        // an activity that grants `proc.spawn` without the key ([ORB-10959]);
+        // this keeps the enforcement point fail-closed on its own.
+        let proc_spawn_activity_scoped = true;
         let proc_allowed_programs = proc_allowed_programs
             .map(|programs| programs.to_vec())
             .unwrap_or_default();

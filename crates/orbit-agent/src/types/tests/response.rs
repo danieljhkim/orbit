@@ -172,8 +172,10 @@ mod parse {
 
     #[test]
     fn grok_json_wrapper_reports_no_model_or_cost() {
-        // The production Grok fix established this text/stopReason wrapper;
-        // the wrapper carries neither model identity nor a USD total.
+        // Wrappers that still omit provider metadata (older Grok CLI, or a
+        // result with only the text/stopReason envelope) leave both fields
+        // unset. Live `grok` 1.0.5+ results add modelUsage/total_cost_usd and
+        // are covered by grok_json_wrapper_extracts_model_usage_and_cost.
         let stdout = serde_json::json!({
             "text": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
             "stopReason": "EndTurn"
@@ -184,6 +186,33 @@ mod parse {
             parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Grok parses");
         assert_eq!(trace.provider_model, None);
         assert_eq!(trace.provider_cost_usd, None);
+    }
+
+    #[test]
+    fn grok_json_wrapper_extracts_model_usage_and_cost() {
+        // Captured shape from Grok Build CLI 1.0.5 (`jrun-20260822-1925-3`):
+        // `--model grok-4.6` produces a Claude-style wrapper whose usage
+        // ledger key is `grok-4.6-build` and which reports total_cost_usd.
+        // Extraction keeps the ledger key verbatim; ingest identity maps it
+        // to the requested public menu id.
+        let stdout = serde_json::json!({
+            "text": "{\"schemaVersion\":1,\"status\":\"success\",\"result\":{},\"error\":null}",
+            "stopReason": "EndTurn",
+            "total_cost_usd": 0.0123,
+            "modelUsage": {
+                "grok-4.6-build": {
+                    "inputTokens": 100,
+                    "outputTokens": 20,
+                    "costUSD": 0.0123
+                }
+            }
+        })
+        .to_string();
+
+        let (_, _, trace) =
+            parse_and_validate_response(&exec(&stdout, "", Some(0), true)).expect("Grok parses");
+        assert_eq!(trace.provider_model.as_deref(), Some("grok-4.6-build"));
+        assert_eq!(trace.provider_cost_usd, Some(0.0123));
     }
 
     #[test]

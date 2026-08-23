@@ -1,7 +1,7 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-08-13
+last_updated: 2026-08-22
 last_validated: 2026-07-27
 status: Accepted
 feature: auto-tasks
@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950]
 ---
 
 # Auto-tasks — Overview
@@ -78,7 +78,7 @@ becomes just the first definition.
 | Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
 | Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
-| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550 |
+| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |
 
 ## Definitions shipped in this repo
 
@@ -87,6 +87,10 @@ becomes just the first definition.
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
   verified-real issues (ORB-10440).
+- `security-review` — disabled-by-default weekly evidence-backed review of
+  applicable application code, dependencies, secret handling, and configuration;
+  each actionable finding is filed as a durable Orbit task, and a clean review
+  is a successful no-op (ORB-10950).
 - `ci-failure-remediation` — disabled-by-default hourly investigation and
   remediation of current-head GitHub Actions failures across integration,
   release, and open-PR refs, with stale-run filtering, root-cause clustering,
@@ -104,5 +108,7 @@ becomes just the first definition.
   Orbit ADR surface after this task lands.
 - ORB-10550 — Added the disabled qa-sweep default and standardized agent-facing
   friction tool invocations on the registered `orbit tool run` surface.
+- ORB-10950 — Added the disabled weekly `security-review` default to the
+  embedded catalog so new workspaces can opt into a recurring security review.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

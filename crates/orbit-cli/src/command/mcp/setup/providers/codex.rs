@@ -5,16 +5,17 @@ use crate::command::mcp::ORBIT_MCP_SERVER_ID;
 
 use super::super::dispatch::ConfigTarget;
 use super::super::format::*;
-use super::common::server_args;
+use super::common::{ServerLaunch, server_args};
 
 pub(in crate::command::mcp::setup) fn apply_codex_init(
     target: &ConfigTarget,
+    launch: ServerLaunch<'_>,
 ) -> Result<(), OrbitError> {
     let mut root = load_toml_table(&target.mcp_path)?;
     let mcp_servers = ensure_toml_table(&mut root, "mcp_servers")?;
     mcp_servers.insert(
         ORBIT_MCP_SERVER_ID.to_string(),
-        TomlValue::Table(codex_mcp_server_table()),
+        TomlValue::Table(codex_mcp_server_table(launch)),
     );
     write_toml_table(&target.mcp_path, &root)
 }
@@ -35,7 +36,7 @@ pub(in crate::command::mcp::setup) fn apply_codex_remove(
     write_or_remove_toml_table(&target.mcp_path, &root)
 }
 
-pub(super) fn codex_mcp_server_table() -> TomlTable {
+pub(super) fn codex_mcp_server_table(launch: ServerLaunch<'_>) -> TomlTable {
     TomlTable::from_iter([
         (
             "command".to_string(),
@@ -43,7 +44,12 @@ pub(super) fn codex_mcp_server_table() -> TomlTable {
         ),
         (
             "args".to_string(),
-            TomlValue::Array(server_args().into_iter().map(TomlValue::String).collect()),
+            TomlValue::Array(
+                server_args(launch)
+                    .into_iter()
+                    .map(TomlValue::String)
+                    .collect(),
+            ),
         ),
         ("enabled".to_string(), TomlValue::Boolean(true)),
     ])

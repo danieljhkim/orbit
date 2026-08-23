@@ -247,7 +247,7 @@ render_index() {
     printf '## Runbooks\n\n'
     printf 'Each runbook is scoped to one\n'
     printf 'operator goal or tightly coupled failure mode. Commands ported from the original\n'
-    printf 'operations guide were verified against `orbit 0.9.2`; update the source runbook when\n'
+    printf 'operations guide were verified against `orbit 0.13.0`; update the source runbook when\n'
     printf 'CLI behavior, state layout, or recovery semantics change.\n\n'
     printf '| Runbook | Purpose |\n'
     printf '| --- | --- |\n'

@@ -82,7 +82,19 @@ pub fn workspace_friction_store(
 ) -> Result<Arc<dyn FrictionStoreBackend>, orbit_common::OrbitError> {
     let workspace_id = workspace_id.into();
     let files_root = files_root.into();
-    import_workspace_frictions(&store, &workspace_id, &files_root)?;
+    if let Err(error) = import_workspace_frictions(&store, &workspace_id, &files_root) {
+        if error.is_readonly_or_access_failure() {
+            orbit_common::tracing::warn!(
+                target: "orbit.store.friction",
+                workspace_id,
+                root = %files_root.display(),
+                error = %error,
+                "skipped incidental legacy-friction import persistence"
+            );
+        } else {
+            return Err(error);
+        }
+    }
     Ok(Arc::new(FrictionStore::open(
         store,
         workspace_id,

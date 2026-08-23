@@ -224,16 +224,20 @@ fn persist_invocation_trace_does_not_record_retired_read_token_metrics() {
 fn tool_context_for_activity_passes_proc_allowlist() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
-    // No allowlist -> not activity-scoped (legacy unrestricted path).
-    let unscoped = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
+    // No allowlist -> still activity-scoped, so the empty list denies every
+    // program instead of degrading to allow-all. [ORB-10959]
+    let undeclared = <OrbitRuntime as RuntimeHost>::tool_context_for_activity(
         &runtime,
         Some("run-allowlist-test"),
         None,
         None,
         None,
     );
-    assert!(unscoped.proc_allowed_programs.is_empty());
-    assert!(!unscoped.proc_spawn_activity_scoped);
+    assert!(undeclared.proc_allowed_programs.is_empty());
+    assert!(
+        undeclared.proc_spawn_activity_scoped,
+        "a v2 activity context must never hand proc.spawn an unscoped allow-all"
+    );
 
     // Activity-scoped allowlist propagates verbatim and flips the bool.
     let programs = vec!["git".to_string(), "rg".to_string()];

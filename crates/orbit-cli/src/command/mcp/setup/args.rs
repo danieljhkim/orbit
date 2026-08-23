@@ -4,7 +4,8 @@ use clap::{Args, ValueEnum};
 use orbit_core::OrbitError;
 
 use super::dispatch::{print_action_summary, run_action};
-use super::workspace::{env_home_dir, resolve_workspace_layout};
+use super::providers::ServerLaunch;
+use super::workspace::{env_home_dir, registered_workspace_id, resolve_workspace_layout};
 use crate::command::{CommandOut, CommandOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
@@ -42,15 +43,19 @@ impl McpProvider {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum McpAction {
-    Init,
+pub(super) enum McpAction<'a> {
+    /// [`ServerLaunch`] is the argv identity written into the generated server
+    /// entry: its authority flag and its workspace binding. Carrying it on the
+    /// variant (rather than as separate `run_action` parameters) makes every
+    /// call site state both explicitly instead of inheriting a default.
+    Init(ServerLaunch<'a>),
     Remove,
 }
 
-impl McpAction {
+impl McpAction<'_> {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::Init => "init",
+            Self::Init(_) => "init",
             Self::Remove => "remove",
         }
     }
@@ -177,15 +182,23 @@ pub struct InitArgs {
 impl InitArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let layout = resolve_workspace_layout(root_override)?;
+        // Bare `orbit mcp init` keeps its pre-existing agent-only authority;
+        // only the `orbit workspace init --mcp` bootstrap path (below, via
+        // `init_auto_for_workspace`) selects operator authority.
+        let workspace_id = registered_workspace_id(&layout.repo_root);
+        let launch = ServerLaunch {
+            operator: false,
+            workspace: workspace_id.as_deref(),
+        };
         let providers = run_action(
-            McpAction::Init,
+            McpAction::Init(launch),
             &layout.repo_root,
             &layout.orbit_root,
             self.providers.resolve_mode()?,
             env_home_dir(),
             self.scope,
         )?;
-        print_action_summary(McpAction::Init, &providers);
+        print_action_summary(McpAction::Init(launch), &providers);
         Ok(CommandOutput::Silent)
     }
 }
@@ -219,12 +232,24 @@ impl RemoveArgs {
 pub(crate) fn init_auto_for_workspace(
     repo_root: &Path,
     orbit_root: &Path,
+    workspace_id: &str,
 ) -> Result<Vec<String>, OrbitError> {
     // `orbit workspace init` is a per-workspace setup, so its auto-MCP path
     // writes repo-local files. `orbit mcp init` defaults to workspace scope
     // as well; pass `--scope home` for a user-level registration.
+    //
+    // This is the operator-facing orchestrator connection (ORB-10960): the
+    // explicit `--mcp` request from `orbit workspace init` is treated as
+    // deliberate operator setup, so the registered server is authorized for
+    // governed operations such as `orbit.workflow.ship` and `orbit.command.exec`.
+    //
+    // The workspace being registered is known here, so the generated server is
+    // bound to it directly rather than re-derived from the checkout.
     run_action(
-        McpAction::Init,
+        McpAction::Init(ServerLaunch {
+            operator: true,
+            workspace: Some(workspace_id),
+        }),
         repo_root,
         orbit_root,
         ProviderSelectionMode::Auto,

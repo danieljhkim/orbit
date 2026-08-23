@@ -28,7 +28,11 @@ Workspace config defines one concrete assignment under each `[crews.<name>]`: fl
 
 `crates/orbit-config/src/raw.rs` owns the TOML shape, and `crates/orbit-config/src/resolved.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model`, `provider`, and `backend` fields, and `[workflow].default_crew` values that do not name a defined crew.
 
-The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; and Grok provides `grok`. Fresh `orbit init` config filters that registry by detected provider CLIs, always writes `backend = "cli"`, and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, or `grok`). It adds `qa` on Terra when Codex is available, otherwise on Sonnet when Claude is available. With no supported provider CLI, initialization emits neither crews nor a dangling default.
+The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; Grok provides `grok`; Copilot provides `copilot`; and Cursor provides `cursor`. Fresh `orbit init` config filters that registry by detected provider CLIs and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, `grok`, `copilot`, or `cursor`).
+
+It adds `qa` on Terra when Codex is available, otherwise on Sonnet when Claude is available. With no supported provider CLI, initialization emits neither crews nor a dangling default.
+
+`copilot` and `cursor` are crews named for their *provider* rather than their model: both lanes can select models supplied by other vendors, so model-named crews would hide which execution lane actually runs. They are appended after the original four families (`copilot`, then `cursor`) so adding them cannot move an existing host's defaults. See [CONFIG.md § GitHub Copilot CLI](../../CONFIG.md#github-copilot-cli) and [§ Cursor Agent CLI](../../CONFIG.md#cursor-agent-cli) for installation, authentication, model selection, and runtime boundaries. [ORB-10946] [ORB-10945]
 
 ## 3. Task and Tool Surface
 
@@ -42,7 +46,7 @@ The precedence chain is:
 
 This chain resolves the run crew. At activity dispatch there is one additional, explicit authoring choice: a rendered `crew` input selects a different named crew for that activity. With no such input, the run crew is the fallback. No role-keyed lookup participates in either selection.
 
-`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string.
+`orbit.task.show` surfaces the task field and, when the current registry resolves it, the effective crew name plus one `crew_model` string. Crew configuration is host-local, so a read surface never fails on a crew this host cannot resolve: the stored `crew` is returned verbatim, `resolved_crew`/`crew_model` are withheld, and `crew_unresolved` carries the reason as a non-fatal warning [ORB-10968]. Listing and the global id lookup follow the same contract; `orbit.task.start` and dispatch still resolve strictly and fail with the crew-validation error.
 
 ## 4. Run Records
 
@@ -52,13 +56,15 @@ Legacy records without crew fields still deserialize because the run-record fiel
 
 ## 5. Concerns & Honest Limitations
 
-Crew names are workspace-local strings. Renaming or deleting a crew can break a task that still references the old name, though existing run records keep the resolved model strings.
+Crew names are workspace-local strings. Renaming or deleting a crew leaves a task naming the old one unable to *run* here, though it stays readable and existing run records keep the resolved model strings.
 
 An activity-specific crew is carried in rendered input rather than persisted as separate per-step routing metadata. Authors must ensure that input is visible in the job asset when a step intentionally differs from its run.
 
 ## Task References
 
 - ORB-00042: Onboard Grok (xAI) as a first-class supported agent family.
+- ORB-10946: Add the standalone GitHub Copilot CLI as a first-class workflow executor.
+- ORB-10945: Add Cursor Agent CLI as a first-class Orbit workflow executor.
 - ORB-00058: Introduce per-task crew override for agent model selection.
 - ORB-10315: Seed model-specific crews only for providers available during initialization.
 - ORB-10620: Reject retired crew role sub-tables during config load.

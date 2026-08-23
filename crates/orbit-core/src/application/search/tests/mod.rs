@@ -127,7 +127,7 @@ fn task_semantic_hit(id: &str, score: f32) -> SemanticHit {
 }
 
 fn with_doc_semantic_override<T>(
-    result: Result<Vec<DocSemanticHit>, String>,
+    result: Result<Vec<DocSemanticHit>, orbit_common::OrbitError>,
     f: impl FnOnce() -> T,
 ) -> T {
     DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {
@@ -141,7 +141,7 @@ fn with_doc_semantic_override<T>(
 }
 
 fn with_task_semantic_override<T>(
-    result: Result<Vec<SemanticHit>, String>,
+    result: Result<Vec<SemanticHit>, orbit_common::OrbitError>,
     f: impl FnOnce() -> T,
 ) -> T {
     TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| {

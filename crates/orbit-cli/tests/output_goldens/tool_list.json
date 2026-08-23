@@ -665,12 +665,12 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Fetch a single Orbit task as JSON. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: \"orchestrator\"`. The `crew` field selects execution, while `orchestrator` records orchestration attribution.",
+    "description": "Fetch a single Orbit task as JSON. `id` is a globally unique primary key resolved through the host task registry by default; cwd, MCP initialize metadata, and linked-worktree runtime identities are not used as filters. An optional `workspace` argument is an explicit fail-closed filter only. Use the optional `fields` projection (or single-field alias `field`) to retrieve only specific task fields, such as `field: \"orchestrator\"`. The `crew` field selects execution, while `orchestrator` records orchestration attribution.",
     "enabled": true,
     "name": "orbit.task.show",
     "parameters": [
       {
-        "description": "task ID",
+        "description": "Globally unique task ID. Resolved through the host task registry by default; a workspace argument is not required.",
         "name": "id",
         "param_type": "string",
         "required": true
@@ -688,7 +688,7 @@
         "required": false
       },
       {
-        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution.",
+        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution.",
         "name": "fields",
         "param_type": "string_list",
         "required": false
@@ -709,6 +709,12 @@
         "description": "Optional cap for `related_docs` when `with_context` is true. Defaults to 5.",
         "name": "max_docs",
         "param_type": "integer",
+        "required": false
+      },
+      {
+        "description": "Optional explicit workspace filter. `id` is resolved globally by default; do not pass cwd, MCP session/initialize metadata, or a linked-worktree runtime identity (for example `orbit-5c61b3`). When supplied, a registered workspace name, logical workspace ID (`ws_*`), or absolute local checkout path is fail-closed: a valid workspace that does not own the task returns not-found, and an unknown selector is rejected by name.",
+        "name": "workspace",
+        "param_type": "string",
         "required": false
       }
     ],

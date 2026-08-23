@@ -212,7 +212,21 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
     top = "tasks";
   }
   ctx.setTab(top);
+  // ORB-10972: the topbar breadcrumb names the active destination, since the
+  // rail no longer sits above the content where the tab strip used to.
+  const crumb = $("topbar-crumb");
+  if (crumb) {
+    crumb.textContent = top === "run-detail"
+      ? "Run detail"
+      : top.charAt(0).toUpperCase() + top.slice(1);
+  }
   document.body.classList.toggle("operations-active", top === "operations");
+  // ORB-10972: the Diagnostics subtabs are permanently visible in the rail now,
+  // so the remembered-subtab highlight must be muted while another destination
+  // is active — otherwise the rail shows two things selected at once. The
+  // `.active` class itself is left alone; it is still the remembered choice.
+  const diagSubtabs = $("diag-subtabs");
+  if (diagSubtabs) diagSubtabs.classList.toggle("dimmed", top !== "diagnostics");
   if (top !== "diagnostics") {
     document.body.classList.remove("reliability-active");
     markWorkspaceSelectorScope(false);

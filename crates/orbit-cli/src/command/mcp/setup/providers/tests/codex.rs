@@ -2,6 +2,8 @@ use tempfile::tempdir;
 
 use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::super::super::dispatch::run_action;
+use super::super::common::ServerLaunch;
+use super::OPERATOR_LAUNCH;
 
 #[test]
 fn codex_workspace_scope_init_and_remove_preserve_unrelated_entries() {
@@ -17,7 +19,7 @@ fn codex_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Codex]),
@@ -80,7 +82,7 @@ fn workspace_scope_codex_init_is_idempotent() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Codex]),
@@ -92,7 +94,7 @@ fn workspace_scope_codex_init_is_idempotent() {
         .expect("read first config");
 
     run_action(
-        McpAction::Init,
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Codex]),
@@ -104,4 +106,41 @@ fn workspace_scope_codex_init_is_idempotent() {
         .expect("read second config");
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn codex_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+
+    let init = || {
+        run_action(
+            McpAction::Init(OPERATOR_LAUNCH),
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Codex]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init codex")
+    };
+    let assert_single_operator_entry = || {
+        let config = std::fs::read_to_string(repo.path().join(".codex").join("config.toml"))
+            .expect("read config");
+        let parsed: toml::Value = toml::from_str(&config).expect("parse config");
+        let args = parsed["mcp_servers"]["orbit"]["args"]
+            .as_array()
+            .expect("args array");
+        assert_eq!(args.len(), 3);
+        assert_eq!(args[0].as_str(), Some("mcp"));
+        assert_eq!(args[1].as_str(), Some("serve"));
+        assert_eq!(args[2].as_str(), Some("--operator"));
+    };
+
+    init();
+    assert_single_operator_entry();
+    init();
+    assert_single_operator_entry();
 }

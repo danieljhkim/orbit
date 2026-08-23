@@ -3,9 +3,13 @@ use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
 use orbit_core::{
-    OrbitError, OrbitRuntime, TaskStatus, resolve_task_dependencies, resolve_task_relations,
+    OrbitError, OrbitRuntime, TaskCrewRead, TaskStatus, resolve_task_dependencies,
+    resolve_task_relations,
 };
-use orbit_types::task::{ArtifactManifestFileV2, TaskArtifact};
+use orbit_types::task::{
+    ArtifactManifestFileV2, TaskArtifact, task_show_record_field_json,
+    unknown_task_show_field_message,
+};
 use serde_json::{Value, json};
 
 use crate::output::color::Domain;
@@ -102,18 +106,23 @@ pub(crate) fn task_to_json_with_sidecars(
     // This used to propagate, which was invisible while only `--json` built
     // this projection. Since ORB-10586 every mode does (the payload is the
     // same records in both), so propagating would mean `orbit task show`
-    // refusing to display a task whose crew is undefined here. The reason goes
-    // to stderr rather than being swallowed.
-    match runtime.resolved_crew_projection(task) {
-        Ok(Some(projection)) => {
+    // refusing to display a task whose crew is undefined here. ORB-10968 moved
+    // the rule itself into `OrbitRuntime::task_crew_read` so the tool host and
+    // MCP read the same contract; the reason still goes to stderr here rather
+    // than being swallowed.
+    match runtime.task_crew_read(task) {
+        TaskCrewRead::Resolved(projection) => {
             object.insert("resolved_crew".to_string(), Value::String(projection.name));
             object.insert("crew_model".to_string(), Value::String(projection.model));
         }
-        Ok(None) => {}
-        Err(error) => eprintln!(
-            "warning: crew for task {} could not be resolved: {error}",
-            task.id
-        ),
+        TaskCrewRead::Absent => {}
+        TaskCrewRead::Unresolved { reason } => {
+            object.insert("crew_unresolved".to_string(), Value::String(reason.clone()));
+            eprintln!(
+                "warning: crew for task {} could not be resolved: {reason}",
+                task.id
+            );
+        }
     }
     Ok(value)
 }
@@ -291,9 +300,8 @@ pub(super) fn task_field_to_json(
         "artifacts" => Ok(task_artifacts_to_json(
             &runtime.get_task_artifacts(&task.id)?,
         )),
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => task_show_record_field_json(task, other)
+            .ok_or_else(|| OrbitError::InvalidInput(unknown_task_show_field_message(other))),
     }
 }
 
@@ -461,9 +469,20 @@ pub(super) fn print_single_task_field(
             }
             Ok(())
         }
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => match task_show_record_field_json(task, other) {
+            Some(Value::String(text)) => {
+                print!("{text}");
+                Ok(())
+            }
+            Some(Value::Null) => Ok(()),
+            Some(value) => {
+                print!("{value}");
+                Ok(())
+            }
+            None => Err(OrbitError::InvalidInput(unknown_task_show_field_message(
+                other,
+            ))),
+        },
     }
 }
 

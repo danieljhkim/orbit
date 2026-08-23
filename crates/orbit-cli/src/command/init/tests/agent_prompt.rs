@@ -68,6 +68,22 @@ fn custom_provider_reprompts_for_blank_unknown_model() {
 }
 
 #[test]
+fn detected_agents_lists_every_family_when_only_copilot_is_present() {
+    let detected = DetectedAgents {
+        copilot_cli: true,
+        ..DetectedAgents::default()
+    };
+    let mut prompter = CannedPrompter::new([""]);
+
+    let result = collect_crew_setting(&detected, &mut prompter).expect("crew setting");
+
+    assert_eq!(result.provider.as_deref(), Some("copilot"));
+    assert!(prompter.transcript().contains(
+        "Detected agents:\n  Claude CLI         not found\n  Codex CLI          not found\n  Gemini CLI         not found\n  Grok CLI           not found\n  Copilot CLI        found\n  Cursor Agent CLI   not found\n  Ollama CLI         not found"
+    ));
+}
+
+#[test]
 fn system_crew_prompt_offers_only_detected_cheap_tier_options() {
     let detected = DetectedAgents {
         claude_cli: true,

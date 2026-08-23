@@ -10,6 +10,7 @@ mod tests;
 
 pub use crew::{
     ConfiguredCrewProjection, ConfiguredCrewRegistryProjection, ResolvedCrewProjection,
+    TaskCrewRead,
 };
 pub use invocation::{
     OrchestratorInvocationMetrics, OrchestratorInvocationMetricsBucket,

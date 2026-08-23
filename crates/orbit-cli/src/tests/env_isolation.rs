@@ -47,6 +47,7 @@ fn restore_var(key: &str, previous: Option<OsString>) {
 pub(crate) struct EnvGuard {
     home: Option<Option<OsString>>,
     userprofile: Option<Option<OsString>>,
+    orbit_root: Option<Option<OsString>>,
     cwd: Option<PathBuf>,
     // Declared last so it drops last: the lock is held until every restoration
     // in `Drop` has run.
@@ -65,6 +66,7 @@ impl EnvGuard {
         Self {
             home: None,
             userprofile: None,
+            orbit_root: None,
             cwd: None,
             _lock: lock,
         }
@@ -72,6 +74,13 @@ impl EnvGuard {
 
     /// Point `HOME` and `USERPROFILE` at `home`, capturing the prior values the
     /// first time either is set.
+    ///
+    /// Also clears `ORBIT_ROOT`, capturing its prior value: it is an explicit
+    /// escape hatch that outranks `HOME`/cwd-based root resolution (see
+    /// `orbit-core/src/runtime/resolve.rs`), so a process launched by Orbit's
+    /// own dispatch — which sets `ORBIT_ROOT` in the ambient environment for
+    /// audit bookkeeping — would otherwise resolve these tests' isolated
+    /// fixture root straight through to the real, non-isolated shared root.
     pub(crate) fn home(mut self, home: &Path) -> Self {
         if self.home.is_none() {
             self.home = Some(std::env::var_os("HOME"));
@@ -79,9 +88,13 @@ impl EnvGuard {
         if self.userprofile.is_none() {
             self.userprofile = Some(std::env::var_os("USERPROFILE"));
         }
+        if self.orbit_root.is_none() {
+            self.orbit_root = Some(std::env::var_os("ORBIT_ROOT"));
+        }
         unsafe {
             std::env::set_var("HOME", home);
             std::env::set_var("USERPROFILE", home);
+            std::env::remove_var("ORBIT_ROOT");
         }
         self
     }
@@ -121,6 +134,9 @@ impl Drop for EnvGuard {
         }
         if let Some(previous) = self.home.take() {
             restore_var("HOME", previous);
+        }
+        if let Some(previous) = self.orbit_root.take() {
+            restore_var("ORBIT_ROOT", previous);
         }
     }
 }

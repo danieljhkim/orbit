@@ -294,6 +294,14 @@ fn two_loose_tasks_and_one_epic_root_are_admissible_together() {
     // the same iteration: the drain ships the leaves and starts the epic.
     let first = classify(&runtime);
     assert_eq!(first["loose_task_ids"], json!([loose_one.id, loose_two.id]));
+    assert_eq!(
+        first["loose_task_dispatches"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        first["loose_task_dispatches"][0]["task_ids"],
+        json!([loose_one.id, loose_two.id])
+    );
     assert_eq!(first["has_leaves"], true);
     assert_eq!(first["epic_task_id"], epic.id);
     assert_eq!(first["has_epic"], true);
@@ -314,6 +322,106 @@ fn two_loose_tasks_and_one_epic_root_are_admissible_together() {
     assert_eq!(second["epic_task_id"], epic.id);
     assert_eq!(second["loose_task_ids"], json!([]));
     assert_eq!(second["has_leaves"], false);
+}
+
+#[test]
+fn loose_tasks_are_partitioned_by_effective_crew_in_priority_order() {
+    let root = tempfile::tempdir().expect("create tempdir");
+    let global = root.path().join("home/.orbit");
+    let workspace = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global orbit dir");
+    std::fs::create_dir_all(&workspace).expect("workspace orbit dir");
+    std::fs::write(
+        workspace.join("config.toml"),
+        r#"
+[workflow]
+default_crew = "sol"
+
+[crews.sol]
+provider = "codex"
+backend = "cli"
+model = "gpt-5.6-sol"
+
+[crews.terra]
+provider = "codex"
+backend = "cli"
+model = "gpt-5.6-terra"
+"#,
+    )
+    .expect("write crew fixture");
+    let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
+
+    let sol_high = runtime
+        .add_task(TaskAddParams {
+            title: "Sol high".to_string(),
+            description: "Crew partition fixture".to_string(),
+            priority: TaskPriority::High,
+            crew: Some("sol".to_string()),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed sol task");
+    let terra = runtime
+        .add_task(TaskAddParams {
+            title: "Terra medium".to_string(),
+            description: "Crew partition fixture".to_string(),
+            priority: TaskPriority::Medium,
+            crew: Some("terra".to_string()),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed terra task");
+    let sol_low = runtime
+        .add_task(TaskAddParams {
+            title: "Sol low".to_string(),
+            description: "Crew partition fixture".to_string(),
+            priority: TaskPriority::Low,
+            crew: Some("sol".to_string()),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed second sol task");
+
+    let output = classify(&runtime);
+    assert_eq!(
+        output["loose_task_ids"],
+        json!([sol_high.id, terra.id, sol_low.id])
+    );
+    assert_eq!(
+        output["loose_task_dispatches"],
+        json!([
+            { "crew": "sol", "task_ids": [sol_high.id, sol_low.id] },
+            { "crew": "terra", "task_ids": [terra.id] },
+        ])
+    );
+    for dispatch in output["loose_task_dispatches"]
+        .as_array()
+        .expect("dispatch partitions")
+    {
+        let input = json!({ "task_ids": dispatch["task_ids"] });
+        let run = runtime
+            .stores()
+            .jobs()
+            .insert_job_run(
+                "task_auto_pipeline",
+                1,
+                Utc::now(),
+                Some(input.clone()),
+                None,
+            )
+            .expect("insert homogeneous child");
+        runtime
+            .record_run_crew_from_input(&run.run_id, &input)
+            .expect("persist homogeneous child crew");
+        assert_eq!(
+            runtime
+                .show_job_run(&run.run_id)
+                .expect("show homogeneous child")
+                .resolved_crew
+                .as_deref(),
+            dispatch["crew"].as_str()
+        );
+    }
 }
 
 /// The `hold` decision this replaces froze every conflict-free chore for as

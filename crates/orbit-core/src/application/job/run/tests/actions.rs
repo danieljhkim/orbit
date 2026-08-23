@@ -447,3 +447,145 @@ fn cancellation_survivor_returns_typed_evidence_without_finalizing_run() {
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
+
+// ─── child-dispatch cancellation policy [ORB-10971] ───────────────────────
+
+use orbit_types::workflow::{ChildDispatch, ChildDispatchPhase, PipelineState};
+
+/// A parent parked in a blocking dispatch wait, plus the child it submitted.
+fn parent_waiting_on_child(
+    runtime: &OrbitRuntime,
+    parent_job: &str,
+    child_job: &str,
+    blocking: bool,
+) -> (JobRun, JobRun) {
+    let parent = insert_pending_run(runtime, parent_job);
+    let child = insert_pending_run(runtime, child_job);
+
+    let mut state = PipelineState::new(
+        parent.run_id.clone(),
+        parent_job.to_string(),
+        serde_json::json!({}),
+    );
+    let action = if blocking {
+        "invoke_and_wait"
+    } else {
+        "invoke_detached"
+    };
+    state.record_child_dispatch(
+        ChildDispatch::submitted(
+            child.run_id.clone(),
+            child_job.to_string(),
+            action.to_string(),
+            blocking,
+            false,
+            Utc::now(),
+        )
+        .with_parent_step_id(Some("ship_leaves".to_string())),
+    );
+    state.advance_child_dispatch(&child.run_id, ChildDispatchPhase::Waiting, None, None);
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(&parent.run_id, &state)
+        .expect("seed parent dispatch state");
+    (parent, child)
+}
+
+fn dispatch_after_cancel(runtime: &OrbitRuntime, parent_run_id: &str) -> ChildDispatch {
+    runtime
+        .read_run_state(parent_run_id)
+        .expect("read parent state")
+        .expect("parent state")
+        .child_dispatches
+        .into_iter()
+        .next()
+        .expect("the child link must survive cancellation")
+}
+
+#[test]
+fn cancelling_a_waiting_parent_cascades_to_its_blocking_child_and_keeps_the_link() {
+    let (_root, runtime) = test_runtime();
+    let (parent, child) = parent_waiting_on_child(
+        &runtime,
+        "workspace_auto_pipeline",
+        "task_auto_pipeline",
+        true,
+    );
+
+    runtime
+        .cancel_job_run_with_context(&parent.run_id, "operator", "cli")
+        .expect("cancel the waiting parent");
+
+    let dispatch = dispatch_after_cancel(&runtime, &parent.run_id);
+    assert_eq!(dispatch.child_run_id, child.run_id);
+    assert_eq!(dispatch.parent_step_id.as_deref(), Some("ship_leaves"));
+    assert_eq!(
+        dispatch.phase,
+        ChildDispatchPhase::Terminal,
+        "the wait step must not keep rendering as running"
+    );
+    let cancellation = dispatch.cancellation.expect("cancellation is recorded");
+    assert_eq!(cancellation.policy.as_str(), "cascade");
+    assert_eq!(cancellation.outcome, "cancelled");
+
+    assert_eq!(
+        runtime
+            .show_job_run(&child.run_id)
+            .expect("show child")
+            .state,
+        JobRunState::Cancelled,
+        "the parent's wait was the child's only consumer",
+    );
+}
+
+#[test]
+fn cancelling_a_parent_leaves_its_detached_child_running() {
+    let (_root, runtime) = test_runtime();
+    let (parent, child) =
+        parent_waiting_on_child(&runtime, "workspace_auto_pipeline", "epic_pipeline", false);
+
+    runtime
+        .cancel_job_run_with_context(&parent.run_id, "operator", "cli")
+        .expect("cancel the parent");
+
+    let dispatch = dispatch_after_cancel(&runtime, &parent.run_id);
+    assert_eq!(dispatch.child_run_id, child.run_id);
+    assert_eq!(dispatch.phase, ChildDispatchPhase::Terminal);
+    let cancellation = dispatch.cancellation.expect("cancellation is recorded");
+    assert_eq!(cancellation.policy.as_str(), "detach");
+    assert_eq!(cancellation.outcome, "detached");
+
+    assert_eq!(
+        runtime
+            .show_job_run(&child.run_id)
+            .expect("show child")
+            .state,
+        JobRunState::Pending,
+        "a detached child was dispatched to outlive the parent's step",
+    );
+}
+
+#[test]
+fn a_child_that_finished_first_is_recorded_rather_than_failing_the_parent_cancel() {
+    let (_root, runtime) = test_runtime();
+    let (parent, child) = parent_waiting_on_child(
+        &runtime,
+        "workspace_auto_pipeline",
+        "task_auto_pipeline",
+        true,
+    );
+    runtime
+        .cancel_job_run(&child.run_id)
+        .expect("child terminalizes on its own first");
+
+    runtime
+        .cancel_job_run_with_context(&parent.run_id, "operator", "cli")
+        .expect("losing the race to the child must not block the parent's cancel");
+
+    let cancellation = dispatch_after_cancel(&runtime, &parent.run_id)
+        .cancellation
+        .expect("cancellation is recorded");
+    assert_eq!(cancellation.outcome, "already_terminal");
+    assert!(cancellation.error.is_some(), "the reason is kept verbatim");
+}

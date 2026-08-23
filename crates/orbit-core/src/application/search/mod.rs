@@ -29,7 +29,8 @@ use self::filters::{
 };
 use self::hybrid::{
     DocHybridCandidate, blend_doc_hybrid_candidates, compare_global_hits_by_score,
-    doc_search_candidate_limit, lexical_doc_hits, push_skip_note, warn_doc_hybrid_fallback,
+    doc_search_candidate_limit, fallback_reason, lexical_doc_hits, push_skip_note,
+    warn_doc_hybrid_fallback,
 };
 
 const DEFAULT_LIMIT: usize = 10;
@@ -41,10 +42,10 @@ const DOC_SEARCH_MIN_CANDIDATES: usize = DEFAULT_LIMIT * DOC_SEARCH_OVERFETCH;
 #[cfg(test)]
 thread_local! {
     static DOC_SEMANTIC_SEARCH_OVERRIDE:
-        std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, String>>> =
+        std::cell::RefCell<Option<Result<Vec<DocSemanticHit>, OrbitError>>> =
         const { std::cell::RefCell::new(None) };
     static TASK_SEMANTIC_SEARCH_OVERRIDE:
-        std::cell::RefCell<Option<Result<Vec<orbit_search::SemanticHit>, String>>> =
+        std::cell::RefCell<Option<Result<Vec<orbit_search::SemanticHit>, OrbitError>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -212,7 +213,8 @@ impl OrbitRuntime {
                     self.lexical_task_candidates(query, limit)?
                 }
                 Err(error) => {
-                    hybrid::warn_task_hybrid_fallback(notes, &error.to_string());
+                    let reason = fallback_reason(&error);
+                    hybrid::warn_task_hybrid_fallback(notes, &reason);
                     self.lexical_task_candidates(query, limit)?
                 }
             }
@@ -324,8 +326,8 @@ impl OrbitRuntime {
         limit: usize,
     ) -> Result<Vec<orbit_search::SemanticHit>, OrbitError> {
         #[cfg(test)]
-        if let Some(result) = TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
-            return result.map_err(OrbitError::Execution);
+        if let Some(result) = TASK_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow_mut().take()) {
+            return result;
         }
 
         Ok(self
@@ -419,7 +421,7 @@ impl OrbitRuntime {
         notes: &mut Vec<String>,
     ) -> Result<Vec<GlobalSearchHit>, OrbitError> {
         let docs_limit = doc_search_candidate_limit(scope.limit);
-        let mut lexical_docs = BTreeMap::<String, orbit_search::DocSearchResult>::new();
+        let mut lexical_docs = Vec::<orbit_search::DocSearchResult>::new();
         for result in lexical_results {
             match result {
                 SearchResult::Doc(result) => {
@@ -434,10 +436,16 @@ impl OrbitRuntime {
                     {
                         continue;
                     }
-                    lexical_docs.insert(result.record.path.clone(), result);
+                    lexical_docs.push(result);
                 }
             }
         }
+
+        let lexical_doc_by_path = lexical_docs
+            .iter()
+            .cloned()
+            .map(|result| (result.record.path.clone(), result))
+            .collect::<BTreeMap<_, _>>();
 
         let semantic = match self.doc_semantic_hits(query, docs_limit) {
             Ok(result) if result.is_empty() => {
@@ -446,7 +454,8 @@ impl OrbitRuntime {
             }
             Ok(result) => result,
             Err(error) => {
-                warn_doc_hybrid_fallback(notes, &error.to_string());
+                let reason = fallback_reason(&error);
+                warn_doc_hybrid_fallback(notes, &reason);
                 return Ok(lexical_doc_hits(lexical_docs, scope.limit));
             }
         };
@@ -457,7 +466,7 @@ impl OrbitRuntime {
             .map(|record| (record.path.clone(), record))
             .collect::<BTreeMap<_, _>>();
         let mut candidates = BTreeMap::<String, DocHybridCandidate>::new();
-        for (path, result) in lexical_docs {
+        for (path, result) in lexical_doc_by_path {
             candidates.insert(
                 path,
                 DocHybridCandidate {
@@ -515,8 +524,8 @@ impl OrbitRuntime {
         limit: usize,
     ) -> Result<Vec<DocSemanticHit>, OrbitError> {
         #[cfg(test)]
-        if let Some(result) = DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow().clone()) {
-            return result.map_err(OrbitError::Execution);
+        if let Some(result) = DOC_SEMANTIC_SEARCH_OVERRIDE.with(|cell| cell.borrow_mut().take()) {
+            return result;
         }
 
         Ok(orbit_search::doc_semantic_search(

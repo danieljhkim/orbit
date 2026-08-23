@@ -3,6 +3,8 @@ use tempfile::tempdir;
 use super::super::super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::super::super::dispatch::run_action;
 use super::super::claude::*;
+use super::super::common::ServerLaunch;
+use super::OPERATOR_LAUNCH;
 
 #[test]
 fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
@@ -24,7 +26,7 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     std::fs::create_dir_all(&orbit_root).expect("create orbit root");
 
     let providers = run_action(
-        McpAction::Init,
+        McpAction::Init(ServerLaunch::default()),
         repo.path(),
         &orbit_root,
         ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),
@@ -95,6 +97,54 @@ fn claude_workspace_scope_init_and_remove_preserve_unrelated_entries() {
     .expect("parse mcp");
     assert!(mcp["mcpServers"]["orbit"].is_null());
     assert!(mcp["mcpServers"]["other"].is_object());
+}
+
+#[test]
+fn claude_operator_init_writes_single_operator_flag_and_refresh_is_idempotent() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    std::fs::create_dir_all(repo.path().join(".claude")).expect("create .claude");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+
+    let init = || {
+        run_action(
+            McpAction::Init(OPERATOR_LAUNCH),
+            repo.path(),
+            &orbit_root,
+            ProviderSelectionMode::Explicit(vec![McpProvider::Claude]),
+            Some(home.path().to_path_buf()),
+            ScopeArg::Workspace,
+        )
+        .expect("operator init claude")
+    };
+
+    let assert_single_operator_entry = || {
+        let mcp: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.path().join(".claude.json")).expect("read mcp"),
+        )
+        .expect("parse mcp");
+        let args = mcp["mcpServers"]["orbit"]["args"]
+            .as_array()
+            .expect("args array");
+        assert_eq!(
+            args,
+            &vec![
+                serde_json::json!("mcp"),
+                serde_json::json!("serve"),
+                serde_json::json!("--operator"),
+            ]
+        );
+    };
+
+    init();
+    assert_single_operator_entry();
+
+    // Re-running the operator-authorized init (as `orbit workspace init
+    // --force --mcp` does) must replace the entry with a single `--operator`
+    // argument, not duplicate it.
+    init();
+    assert_single_operator_entry();
 }
 
 #[test]

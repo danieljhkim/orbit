@@ -310,6 +310,7 @@ fn resume_reexecuted_pr_output_reaches_promotion_and_checkpoint() {
             "pr_number": "618",
             "pr_url": "https://github.example/pull/618",
             "run_id": "run-resume-pr-open",
+            "step_id": "promote_tasks",
         })],
         "fresh pr_open output retains its string type for downstream input",
     );
@@ -433,6 +434,7 @@ fn resume_starts_at_the_failed_push_and_reuses_checkpoints_idempotently() {
             "job_run_id": "jrun-source",
             "workspace_path": "/wt/jrun-source",
             "run_id": "jrun-resume-1",
+            "step_id": "push",
         })],
         "the delivery tail keeps the checkpointed batch id as its ownership id",
     );

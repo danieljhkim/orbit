@@ -100,11 +100,7 @@ fn seed_lock_task(
 ) -> orbit_core::Task {
     for selector in &context_files {
         if let Some(path) = selector.strip_prefix("file:") {
-            let path = runtime
-                .data_root()
-                .parent()
-                .expect("runtime data root has repo parent")
-                .join(path);
+            let path = runtime.data_root().join(path);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).expect("create context parent");
             }
@@ -117,7 +113,7 @@ fn seed_lock_task(
             description: format!("Fixture for {title}."),
             status: Some(status),
             context_files: context_files.into_iter().map(str::to_string).collect(),
-            workspace_path: Some(".".to_string()),
+            workspace_path: Some(runtime.data_root().to_string_lossy().into_owned()),
             ..Default::default()
         })
         .expect("create lock task");

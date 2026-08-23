@@ -59,8 +59,16 @@ pub fn import_workspace_frictions(
     source_root: &Path,
 ) -> Result<FrictionImportReport, OrbitError> {
     let source_key = source_key(source_root);
+    if let Some(report) =
+        store.with_read_connection(|conn| completed_marker(conn, workspace_id, &source_key))?
+    {
+        return Ok(report);
+    }
+
     store.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
         let conn = tx.connection();
+        // Re-check inside the writer transaction in case another process
+        // completed the import after the observational fast path.
         if let Some(report) = completed_marker(conn, workspace_id, &source_key)? {
             return Ok(report);
         }

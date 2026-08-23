@@ -1,0 +1,37 @@
+schemaVersion: 2
+kind: Executor
+metadata:
+  name: copilot
+spec:
+  executor_type: direct_agent
+  command: copilot
+  # Static flags only. The prompt is NOT passed here: `copilot` reads it from
+  # standard in when `-p` is absent ("provide a prompt with -p or via standard
+  # in" is the CLI's own message), which keeps the Orbit envelope out of argv
+  # and therefore out of process listings and audit records. [ORB-10946]
+  args:
+    # Unattended tool approval. Deliberately NOT `--allow-all` / `--yolo`:
+    # those also imply `--allow-all-paths` and `--allow-all-urls`, which would
+    # widen the filesystem and network reach beyond what Orbit's own activity
+    # sandbox granted. Tool auto-approval is what non-interactive mode needs;
+    # path and URL policy stay with the enclosing sandbox.
+    - --allow-all-tools
+    # No user prompts: disable the ask_user tool so the agent cannot block a
+    # headless run waiting on a human.
+    - --no-ask-user
+    # JSONL agent events, one JSON object per line.
+    - --output-format
+    - json
+    - --silent
+    # A sandboxed run must not rewrite its own binary mid-flight.
+    - --no-auto-update
+    # Keep the session on this host: no remote control, no session export.
+    - --no-remote
+    - --no-remote-export
+  stdout_format: envelope
+  sandbox: macos-sandbox-exec
+  model_pair_override:
+    strong: claude-sonnet-4.5
+    weak: claude-haiku-4.5
+  model_flag: "--model"
+  env: {}

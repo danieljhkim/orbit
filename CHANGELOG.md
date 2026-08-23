@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0
+
+### Breaking Changes
+
+- **Fresh installs no longer seed the legacy `qa` crew**: new `orbit init` workspaces use the supported `system` crew; update prompts that name the seeded `qa` crew. Existing user-authored `qa` configuration remains compatible. ([ORB-10955])
+- **`proc.spawn` activities now require an allowlist**: v2 activities that grant `proc.spawn` must declare `proc_allowed_programs`; add the allowed programs explicitly. ([ORB-10959])
+
+### Highlights
+
+- **Cursor Agent Plugin support**: Orbit now ships as a Cursor-compatible Agent Plugin alongside the Claude and Codex plugin formats. ([ORB-10943])
+- **More managed CLI executors**: GitHub Copilot CLI and Cursor Agent CLI are first-class workflow executors, with improved installed-agent detection. ([ORB-10946])
+- **Operator-authorized MCP setup**: `orbit workspace init --mcp` can generate MCP configuration for a workspace. ([ORB-10960])
+- **Dashboard workspace shell**: the dashboard gains a command rail, two-mode dock, and log status bar for faster operator navigation. ([ORB-10972])
+- **Security-review automation**: fresh workspaces include a disabled security-review auto-task that teams can enable when ready. ([ORB-10950])
+
 ## 0.13.0
 
 ### Breaking Changes

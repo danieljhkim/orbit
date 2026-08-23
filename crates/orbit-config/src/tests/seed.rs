@@ -51,38 +51,31 @@ fn no_seed_writes_the_static_template_and_keeps_built_in_crews() {
 }
 
 #[test]
-fn claude_only_seeds_the_claude_family_plus_qa_and_system() {
+fn claude_only_seeds_the_claude_family_and_system() {
     let contents = seed_contents(&seed_for(&["claude"]));
     let parsed = parsed_config(&contents);
 
     assert_eq!(
         crew_names(&parsed),
-        vec!["fable", "opus", "qa", "sonnet", "system"]
+        vec!["fable", "opus", "sonnet", "system"]
     );
     assert_crew(&parsed, "opus", "claude", "opus");
     assert_crew(&parsed, "sonnet", "claude", "sonnet");
     assert_crew(&parsed, "fable", "claude", "fable");
-    assert_crew(&parsed, "qa", "claude", "sonnet");
     assert_crew(&parsed, "system", "claude", "sonnet");
     assert_default_crew(&parsed, Some("opus"));
     assert!(!contents.contains("[duel"));
 }
 
 #[test]
-fn codex_only_seeds_the_codex_family_plus_qa_and_system() {
+fn codex_only_seeds_the_codex_family_and_system() {
     let contents = seed_contents(&seed_for(&["codex"]));
     let parsed = parsed_config(&contents);
 
-    assert_eq!(
-        crew_names(&parsed),
-        vec!["luna", "qa", "sol", "system", "terra"]
-    );
+    assert_eq!(crew_names(&parsed), vec!["luna", "sol", "system", "terra"]);
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
-    // `qa` keeps the family default it has always been seeded with; only the
-    // newer system lane drops to the cheapest tier.
-    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     assert_default_crew(&parsed, Some("sol"));
 }
@@ -109,6 +102,17 @@ fn grok_only_seeds_grok_and_a_system_crew() {
     assert_default_crew(&parsed, Some("grok"));
 }
 
+#[test]
+fn cursor_only_seeds_cursor_and_a_system_crew() {
+    let contents = seed_contents(&seed_for(&["cursor"]));
+    let parsed = parsed_config(&contents);
+
+    assert_eq!(crew_names(&parsed), vec!["cursor", "system"]);
+    assert_crew(&parsed, "cursor", "cursor", "gpt-5");
+    assert_crew(&parsed, "system", "cursor", "gpt-5");
+    assert_default_crew(&parsed, Some("cursor"));
+}
+
 /// Orbit ships no `ollama` crew, so a host whose only agent CLI is ollama
 /// seeds an explicitly empty registry rather than a dangling default.
 #[test]
@@ -132,7 +136,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_eq!(
         crew_names(&parsed),
         vec![
-            "fable", "grok", "luna", "opus", "qa", "sol", "sonnet", "system", "terra"
+            "fable", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
         ]
     );
     assert_default_crew(&parsed, Some("opus"));
@@ -143,7 +147,6 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
-    assert_crew(&parsed, "qa", "codex", "gpt-5.6-terra");
     // codex outranks claude and grok in the system-lane preference order.
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
     for crew in crews(&parsed).values() {
@@ -154,6 +157,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
             Some("gemini")
         );
     }
+    assert!(!crews(&parsed).contains_key("qa"));
 }
 
 #[test]
@@ -169,6 +173,10 @@ fn seeded_configs_round_trip_for_family_permutations() {
 
     for (name, families) in cases {
         let contents = seed_contents(&seed_for(families));
+        assert!(
+            !contents.contains("[crews.qa]"),
+            "{name} seed must not create the legacy QA crew"
+        );
         toml::from_str::<RawRuntimeConfig>(&contents)
             .unwrap_or_else(|err| panic!("{name} raw parse failed: {err}"));
         load_seeded_config(&contents);

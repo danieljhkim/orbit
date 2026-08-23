@@ -341,8 +341,12 @@ export function buildTasksHash(context) {
   const sp = new URLSearchParams();
   const order = statusOrder(context);
   const activeStatuses = activeStatusSet(context);
-  if (activeStatuses.size !== order.length) {
-    const selected = order.filter((s) => activeStatuses.has(s));
+  const selected = order.filter((s) => activeStatuses.has(s));
+  if (selected.length === order.length) {
+    // An explicit all-status selection must not collapse to the omitted
+    // status query, which means the default set and excludes someday.
+    sp.set("status", "all");
+  } else {
     sp.set("status", selected.length > 0 ? selected.join(",") : "none");
   }
   const q = searchQueryValue(context);
@@ -358,6 +362,8 @@ export function applyTasksHashQuery(query, context) {
     setActiveStatuses(context, new Set(defaultActiveStatuses(context)));
   } else if (statusParam === "none") {
     setActiveStatuses(context, new Set());
+  } else if (statusParam === "all") {
+    setActiveStatuses(context, new Set(order));
   } else {
     const wanted = new Set(statusParam.split(",").map((s) => s.trim()).filter(Boolean));
     setActiveStatuses(context, new Set(order.filter((s) => wanted.has(s))));
@@ -1208,6 +1214,10 @@ export function renderTasks(tasks, context) {
 
   const filtered = filterTasks(tasks, context);
   $("tasks-count").textContent = formatTaskCount(filtered.length, tasks.length, tasksMeta(context));
+  // ORB-10972: the rail shows the same filtered count the panel header does,
+  // so the Tasks entry reads correctly from any other tab.
+  const railCount = document.getElementById("rail-count-tasks");
+  if (railCount) railCount.textContent = String(filtered.length);
   renderFilterSummary(context);
   if (filtered.length === 0 && frag.children.length === 0) {
     const defaultText = tasks.length === 0 ? "No tasks available." : "No tasks match filter.";

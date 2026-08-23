@@ -401,8 +401,52 @@ fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
         .expect("task show fields parameter");
     assert!(fields.description.contains("crew"));
     assert!(fields.description.contains("orchestrator"));
+    for field in [
+        "status",
+        "id",
+        "title",
+        "type",
+        "priority",
+        "complexity",
+        "created_at",
+        "updated_at",
+    ] {
+        assert!(
+            fields.description.contains(field),
+            "task show fields schema must advertise `{field}`: {}",
+            fields.description
+        );
+    }
     assert!(schema.description.contains("execution"));
     assert!(schema.description.contains("orchestration attribution"));
+    assert!(
+        schema.description.contains("globally unique"),
+        "task show must advertise global id resolution: {}",
+        schema.description
+    );
+    let id = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "id")
+        .expect("task show id parameter");
+    assert!(
+        id.description.contains("Globally unique"),
+        "id help must not send callers through workspace selection: {}",
+        id.description
+    );
+    let workspace = schema
+        .parameters
+        .iter()
+        .find(|param| param.name == "workspace")
+        .expect("task show optional workspace filter");
+    assert!(!workspace.required);
+    assert!(
+        workspace
+            .description
+            .contains("resolved globally by default"),
+        "workspace help must stay an explicit filter: {}",
+        workspace.description
+    );
 }
 
 #[test]

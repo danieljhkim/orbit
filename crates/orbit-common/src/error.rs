@@ -207,6 +207,14 @@ pub enum OrbitError {
     WorkspaceClaimHeld(Box<WorkspaceClaimHeld>),
     #[error("invalid job run state transition: {0}")]
     JobRunStateTransition(String),
+    /// [ORB-10965] A duplicate `Start` was applied to a job run that a
+    /// *different* process already owns. Distinct from
+    /// [`OrbitError::JobRunStateTransition`] on purpose: at-least-once delivery
+    /// makes this an expected race whose loser must yield to the incumbent,
+    /// not a state-machine violation, so callers can tell the two apart
+    /// without matching on message text.
+    #[error("job run start conflict: {0}")]
+    JobRunStartConflict(String),
     #[error("workspace error: {0}")]
     WorkspaceError(String),
     #[error("io error: {0}")]
@@ -329,6 +337,24 @@ impl OrbitError {
             crate::fs::io::write_access_error_message(path, &err)
                 .unwrap_or_else(|| err.to_string()),
         )
+    }
+
+    /// Whether an operation failed because its persistence target is mounted
+    /// read-only or denies writes.
+    ///
+    /// Filesystem and SQLite adapters currently translate their native errors
+    /// at different crate boundaries. Keep the recognition here so passive
+    /// bootstrap, cache, and telemetry callers do not each grow a partial list
+    /// of platform and SQLite spellings.
+    pub fn is_readonly_or_access_failure(&self) -> bool {
+        let message = self.to_string().to_ascii_lowercase();
+        message.contains("read-only file system")
+            || message.contains("readonly filesystem")
+            || message.contains("permission denied")
+            || message.contains("attempt to write a readonly database")
+            || message.contains("database is read-only")
+            || message.contains("database is readonly")
+            || message.contains(" is not writable:")
     }
 }
 

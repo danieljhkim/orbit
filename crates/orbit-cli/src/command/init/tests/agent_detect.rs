@@ -43,6 +43,8 @@ fn seeded_crew_availability_requires_a_detected_cli() {
         ("codex", "codex"),
         ("gemini", "gemini"),
         ("grok", "grok"),
+        ("copilot", "copilot"),
+        ("cursor-agent", "cursor"),
     ] {
         let detected = detect(&MockAgentEnvProbe::new().with_binary(binary));
         assert_eq!(available_crew_families(&detected), vec![family]);
@@ -57,6 +59,8 @@ fn default_provider_prefers_cli_in_documented_order() {
         codex_cli: true,
         gemini_cli: true,
         grok_cli: true,
+        copilot_cli: true,
+        cursor_cli: true,
         ollama_cli: true,
     };
     assert_eq!(default_provider(&detected), "claude");
@@ -80,13 +84,31 @@ fn default_provider_prefers_cli_in_documented_order() {
     };
     assert_eq!(default_provider(&detected), "gemini");
 
-    // grok wins when claude/codex/gemini absent
+    // grok wins when claude/codex/gemini absent — and an installed copilot
+    // does not displace it. [ORB-10946]
     let detected = DetectedAgents {
         grok_cli: true,
+        copilot_cli: true,
         ollama_cli: true,
         ..DetectedAgents::default()
     };
     assert_eq!(default_provider(&detected), "grok");
+
+    // copilot wins over ollama when it is the only agent CLI present
+    let detected = DetectedAgents {
+        copilot_cli: true,
+        ollama_cli: true,
+        ..DetectedAgents::default()
+    };
+    assert_eq!(default_provider(&detected), "copilot");
+
+    // cursor wins over ollama when the earlier agent families are absent.
+    let detected = DetectedAgents {
+        cursor_cli: true,
+        ollama_cli: true,
+        ..DetectedAgents::default()
+    };
+    assert_eq!(default_provider(&detected), "cursor");
 
     // ollama wins when nothing else
     let detected = DetectedAgents {
@@ -104,12 +126,15 @@ fn default_provider_last_resort_is_claude() {
 #[test]
 fn model_registry_returns_expected_defaults() {
     use orbit_common::model_defaults::{
-        CLAUDE_DEFAULT_STRONG, CODEX_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL, GROK_DEFAULT_MODEL,
+        CLAUDE_DEFAULT_STRONG, CODEX_DEFAULT_MODEL, COPILOT_DEFAULT_MODEL, CURSOR_DEFAULT_MODEL,
+        GEMINI_DEFAULT_MODEL, GROK_DEFAULT_MODEL,
     };
     assert_eq!(default_model_for("claude"), Some(CLAUDE_DEFAULT_STRONG));
     assert_eq!(default_model_for("codex"), Some(CODEX_DEFAULT_MODEL));
     assert_eq!(default_model_for("gemini"), Some(GEMINI_DEFAULT_MODEL));
     assert_eq!(default_model_for("grok"), Some(GROK_DEFAULT_MODEL));
+    assert_eq!(default_model_for("copilot"), Some(COPILOT_DEFAULT_MODEL));
+    assert_eq!(default_model_for("cursor"), Some(CURSOR_DEFAULT_MODEL));
     assert_eq!(default_model_for("ollama"), None);
     assert_eq!(default_model_for("unknown"), None);
 }

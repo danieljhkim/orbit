@@ -50,7 +50,11 @@ pub struct WorkspaceInitArgs {
     /// a value below the current position is refused.
     #[arg(long, value_name = "N")]
     pub task_id_start: Option<u32>,
-    /// Set up MCP client integrations for auto-detected providers.
+    /// Set up MCP client integrations for auto-detected providers. The
+    /// registered server is granted OPERATOR authority: governed operations
+    /// such as `orbit.workflow.ship`, workflow run observation/resume, and
+    /// `orbit.command.exec` become reachable through it. Bare `orbit mcp
+    /// serve` and worker/agent MCP startup remain agent-only.
     #[arg(long)]
     pub mcp: bool,
     /// Inject (or refresh) an Orbit workflow-rules block in CLAUDE.md and AGENTS.md at the workspace root.
@@ -100,11 +104,15 @@ impl WorkspaceInitArgs {
             let providers = crate::command::mcp::init_auto_for_workspace(
                 &init_result.root,
                 &init_result.orbit_dir,
+                &init_result.id,
             )?;
             if providers.is_empty() {
                 println!("  mcp:       no providers auto-detected");
             } else {
-                println!("  mcp:       {}", providers.join(", "));
+                println!(
+                    "  mcp:       {} (operator-authorized: orbit.workflow.ship, run observe/resume, orbit.command.exec)",
+                    providers.join(", ")
+                );
             }
         } else {
             println!("  mcp:       skipped (pass --mcp to set up integrations)");
@@ -341,11 +349,25 @@ impl WorkspaceInitArgs {
                 }
             }
         }
+        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
+        // A first checkout for this data dir must land in sqlite before the
+        // JSON catalog is saved. Shared-root follow-on checkouts reuse one
+        // orbit_dir (UNIQUE) and must not steal that row. `--force` rebinds
+        // a leftover synthetic parent(data-dir) mint.
+        if !registered_shared_root {
+            orbit_core::adapter::HubCoordinationExecutor::bind_checkout(
+                global_root,
+                &id,
+                &name,
+                cwd,
+                orbit_dir,
+                self.force,
+            )?;
+        }
         workspace_registry::save_registry_to(&registry, registry_path)?;
         if !reconciling_existing && !registered_shared_root {
             write_workspace_identity(orbit_dir, &id)?;
         }
-        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
 
         Ok(WorkspaceInitResult {
             id,

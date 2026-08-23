@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 
 use super::OrbitToolServer;
 use super::name_map::{ToolNameCollision, build_name_map};
-use super::schema::{ensure_workspace_selector, schema_to_tool};
+use super::schema::{WorkspaceBinding, ensure_workspace_selector, schema_to_tool};
 use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
@@ -59,14 +59,54 @@ impl OrbitToolServer {
             &definition.schema.name,
             &definition.schema.parameters,
         );
-        ensure_workspace_selector(&mut schema, definition);
+        ensure_workspace_selector(&mut schema, definition, self.session_workspace_binding());
         Ok(schema)
+    }
+
+    /// Whether this session already carries a workspace selector, and can
+    /// therefore route a workspace-scoped call that omits one.
+    ///
+    /// `tools/list` is answered per session, so the advertised selector
+    /// documents the session the caller is actually in rather than a generic
+    /// "it depends".
+    fn session_workspace_binding(&self) -> WorkspaceBinding {
+        if self.session_context().workspace.is_some() {
+            WorkspaceBinding::Bound
+        } else {
+            WorkspaceBinding::Unbound
+        }
     }
 
     pub(crate) fn replace_session_context(&self, session_context: ToolSessionContext) {
         if let Ok(mut guard) = self.session_context.write() {
             *guard = session_context;
         }
+    }
+
+    /// Fold one client's `initialize` claims into the trusted session envelope.
+    ///
+    /// Initialize controls only the workspace selector and the caller's claim
+    /// about itself. Caller, process, transport, and correlation facts remain
+    /// server-owned.
+    pub(crate) fn adopt_announced_session(&self, announced: ToolSessionContext) {
+        let mut trusted = self.session_context();
+        // A client that announces no workspace falls back to the one this
+        // server was launched for, rather than clearing the selector: most MCP
+        // clients cannot put `_meta.orbit.workspace` on their initialize at
+        // all, so a managed integration would otherwise have to repeat the
+        // selector on every workspace-scoped call. An announced workspace
+        // still wins, and the fallback is the immutable launch value, so a
+        // re-initialize never inherits the previous client's claim.
+        trusted.workspace = announced
+            .workspace
+            .or_else(|| self.launch_workspace.clone());
+        // ORB-10890: recorded as untrusted evidence beside the trusted role,
+        // never merged into it. A re-initialize replaces the claim outright so
+        // one session can never accumulate two identities; `None` here means
+        // this session is anonymous, not that the previous claim still holds.
+        trusted.self_reported_actor = announced.self_reported_actor;
+        trusted.trace_id = None;
+        self.replace_session_context(trusted);
     }
 
     pub(crate) fn session_context(&self) -> ToolSessionContext {
@@ -147,19 +187,7 @@ impl ServerHandler for OrbitToolServer {
         request: InitializeRequestParams,
         context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<InitializeResult, McpError>> + Send + '_ {
-        let announced = session_context_from_initialize(&request, &context.meta);
-        let mut trusted = self.session_context();
-        // Initialize controls only the legacy workspace selector and the
-        // caller's claim about itself. Caller, process, transport, and
-        // correlation facts remain server-owned.
-        trusted.workspace = announced.workspace;
-        // ORB-10890: recorded as untrusted evidence beside the trusted role,
-        // never merged into it. A re-initialize replaces the claim outright so
-        // one session can never accumulate two identities; `None` here means
-        // this session is anonymous, not that the previous claim still holds.
-        trusted.self_reported_actor = announced.self_reported_actor;
-        trusted.trace_id = None;
-        self.replace_session_context(trusted);
+        self.adopt_announced_session(session_context_from_initialize(&request, &context.meta));
         if context.peer.peer_info().is_none() {
             context.peer.set_peer_info(request);
         }

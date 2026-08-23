@@ -3,11 +3,12 @@ use std::collections::BTreeMap;
 use orbit_common::OrbitError;
 use orbit_types::task::{
     Task, TaskArtifact, TaskComment, TaskHistoryEntry, TaskStatus, resolve_task_dependencies,
-    resolve_task_relations,
+    resolve_task_relations, task_show_record_field_json, unknown_task_show_field_message,
 };
 use serde_json::{Map, Value, json};
 
 use crate::OrbitRuntime;
+use crate::TaskCrewRead;
 use crate::application::task::TaskLintReport;
 
 pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {
@@ -59,21 +60,30 @@ pub(super) fn serialize_task(runtime: &OrbitRuntime, task: &Task) -> Result<Valu
         "history".to_string(),
         serialize_history(&runtime.get_task_history(&task.id)?)?,
     );
-    insert_resolved_crew(runtime, task, object)?;
+    insert_resolved_crew(runtime, task, object);
     Ok(value)
 }
 
-fn insert_resolved_crew(
-    runtime: &OrbitRuntime,
-    task: &Task,
-    object: &mut Map<String, Value>,
-) -> Result<(), OrbitError> {
-    let Some(projection) = runtime.resolved_crew_projection(task)? else {
-        return Ok(());
-    };
-    object.insert("resolved_crew".to_string(), Value::String(projection.name));
-    object.insert("crew_model".to_string(), Value::String(projection.model));
-    Ok(())
+/// Enrich a task projection with its resolved crew, when this host can resolve
+/// one.
+///
+/// `crew` (the stored value) is part of the record; `resolved_crew` /
+/// `crew_model` only annotate it. A host whose `[crews.*]` table has no entry
+/// for the stored crew — a task authored elsewhere, or a config edited since —
+/// still owes the caller the task, so an unresolvable crew is reported as
+/// `crew_unresolved` rather than failing the whole readout (ORB-10968). The
+/// tolerance lives in `OrbitRuntime::task_crew_read`, shared with the CLI.
+fn insert_resolved_crew(runtime: &OrbitRuntime, task: &Task, object: &mut Map<String, Value>) {
+    match runtime.task_crew_read(task) {
+        TaskCrewRead::Absent => {}
+        TaskCrewRead::Resolved(projection) => {
+            object.insert("resolved_crew".to_string(), Value::String(projection.name));
+            object.insert("crew_model".to_string(), Value::String(projection.model));
+        }
+        TaskCrewRead::Unresolved { reason } => {
+            object.insert("crew_unresolved".to_string(), Value::String(reason));
+        }
+    }
 }
 
 pub(super) fn serialize_task_lint_report(report: &TaskLintReport) -> Result<Value, OrbitError> {
@@ -144,9 +154,8 @@ fn task_field_to_json(
         "artifacts" => Ok(serialize_task_artifacts(
             &runtime.get_task_artifacts(&task.id)?,
         )),
-        other => Err(OrbitError::InvalidInput(format!(
-            "unknown field selector `{other}`. Valid values: comments, plan, execution_summary, description, acceptance_criteria, dependencies, resolved_dependencies, tags, history, context_files, crew, orchestrator, artifacts"
-        ))),
+        other => task_show_record_field_json(task, other)
+            .ok_or_else(|| OrbitError::InvalidInput(unknown_task_show_field_message(other))),
     }
 }
 

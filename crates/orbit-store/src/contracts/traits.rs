@@ -8,7 +8,9 @@ use orbit_types::task::{
 };
 use orbit_types::telemetry::AuditEvent;
 use orbit_types::tool::StoredTool;
-use orbit_types::workflow::{ExecutorDef, JobRun, JobRunState, KnowledgeRunMetrics, PipelineState};
+use orbit_types::workflow::{
+    ExecutorDef, JobRun, JobRunStartOutcome, JobRunState, KnowledgeRunMetrics, PipelineState,
+};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -324,12 +326,27 @@ pub trait JobRunStoreBackend: Send + Sync {
         input: Option<serde_json::Value>,
         retry_source_run_id: Option<String>,
     ) -> Result<JobRun, OrbitError>;
+    /// [ORB-10965] Apply a `Start` event to a run, atomically and idempotently.
+    ///
+    /// Scheduling is at-least-once, so this is the single point that decides
+    /// which of several competing or repeated deliveries owns execution. The
+    /// read of the current state and the write of the new one happen in one
+    /// immediate transaction, so exactly one caller can observe
+    /// [`JobRunStartOutcome::Started`].
+    ///
+    /// A redelivery from the owner already recorded on the run is a no-op:
+    /// [`JobRunStartOutcome::AlreadyStarted`], with `started_at`, the owner
+    /// identity, and every checkpoint left untouched. A delivery from a
+    /// *different* owner loses to the incumbent and fails with
+    /// [`OrbitError::JobRunStartConflict`]. Genuinely illegal transitions (a
+    /// `Start` from any state other than `pending`, `running`, or terminal)
+    /// still fail with [`OrbitError::JobRunStateTransition`].
     fn mark_job_run_running(
         &self,
         run_id: &str,
         started_at: DateTime<Utc>,
         pid: u32,
-    ) -> Result<bool, OrbitError>;
+    ) -> Result<JobRunStartOutcome, OrbitError>;
     /// [ORB-10070] Record `pid` (+ its start-time identity token) as the owner
     /// of a still-`pending` run so orphan reconciliation can distinguish a
     /// queued run with a live worker from one whose worker died. Returns

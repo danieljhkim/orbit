@@ -18,7 +18,8 @@ use super::queries::{
     workspace_checkout_by_paths, write_task_index_rows,
 };
 use super::schema::{
-    apply_schema, assert_registry_user_version, reject_unsupported_registry_schema,
+    apply_schema, assert_registry_user_version, registry_user_version,
+    reject_unsupported_registry_schema,
 };
 use super::util::{
     normalize_path, now_string, parse_relation_type_name, path_to_string, relation_type_name,
@@ -46,8 +47,14 @@ impl TaskRegistryStore {
         fs::create_dir_all(&registry_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
         fs::create_dir_all(&workspaces_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
 
-        let conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
+        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
+        let pragmas = orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
+        let read_only =
+            pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)?;
+        if read_only {
+            drop(conn);
+            conn = orbit_common::storage::sqlite::open_immutable(path)?;
+        }
         // The registry is the commit point that makes a created task official, so
         // its writes must be durable against power loss the moment they ack. WAL's
         // synchronous=NORMAL default only fsyncs the WAL at checkpoint, leaving an
@@ -56,10 +63,23 @@ impl TaskRegistryStore {
         // low-write (≈one commit per task create/bind/unregister), so the extra
         // fsync cost is negligible. Scoped to this connection only — the shared
         // Store::open stays at NORMAL for higher-write stores.
-        conn.pragma_update(None, "synchronous", "FULL")
-            .map_err(|e| OrbitError::Store(format!("failed to set synchronous=FULL: {e}")))?;
+        if !read_only && let Err(error) = conn.pragma_update(None, "synchronous", "FULL") {
+            let mapped = OrbitError::Store(format!("failed to set synchronous=FULL: {error}"));
+            if mapped.is_readonly_or_access_failure() {
+                orbit_common::tracing::warn!(
+                    target: "orbit.store.task_registry",
+                    path = %path.display(),
+                    error = %error,
+                    "could not set synchronous=FULL on a read-only task registry; continuing for reads"
+                );
+            } else {
+                return Err(mapped);
+            }
+        }
         reject_unsupported_registry_schema(&conn)?;
-        apply_schema(&conn)?;
+        if registry_user_version(&conn)? < super::REGISTRY_SCHEMA_VERSION {
+            apply_schema(&conn)?;
+        }
         assert_registry_user_version(&conn)?;
 
         Ok(Self {
@@ -81,6 +101,30 @@ impl TaskRegistryStore {
             .as_deref()
             .map(validate_workspace_id)
             .transpose()?;
+
+        // Runtime construction asks for the same binding on every command.
+        // Satisfy that observational fast path without opening a write
+        // transaction; a read-only mount must only fail when a real rebind is
+        // required.
+        {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+            if let Some(existing) = workspace_by_orbit_dir(&conn, &orbit_dir)? {
+                if let Some(requested) = &requested_workspace_id
+                    && requested != &existing.workspace_id
+                {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "orbit dir '{}' is already bound to workspace '{}', not '{}'",
+                        orbit_dir.display(),
+                        existing.workspace_id,
+                        requested
+                    )));
+                }
+                return Ok(existing);
+            }
+        }
 
         let mut conn = self
             .conn
@@ -172,6 +216,93 @@ impl TaskRegistryStore {
 
         let binding = workspace_checkout_by_id(&tx, &workspace_id)?.ok_or_else(|| {
             OrbitError::Store("failed to read inserted workspace checkout binding".into())
+        })?;
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
+        Ok(binding)
+    }
+
+    /// Move `orbit_dir` onto `params.workspace_id`, replacing any checkout
+    /// currently bound to that directory.
+    ///
+    /// `bind_workspace` fails closed when the orbit dir already belongs to a
+    /// different workspace. Workspace `--force` reconciliation uses this to
+    /// finish a split-brain bind: a read-only command that minted a synthetic
+    /// checkout for `parent(data-dir)`, then `workspace init --force` claiming
+    /// the same data dir for a real git checkout.
+    pub fn rebind_checkout(
+        &self,
+        params: BindWorkspaceParams,
+    ) -> Result<WorkspaceCheckoutBinding, OrbitError> {
+        let repo_root = normalize_path(&params.repo_root);
+        let workspace_path = normalize_path(&params.workspace_path);
+        let orbit_dir = normalize_path(&params.orbit_dir);
+        let slug = sanitize_slug(&params.slug);
+        let workspace_id =
+            validate_workspace_id(params.workspace_id.as_deref().ok_or_else(|| {
+                OrbitError::InvalidInput("rebind_checkout requires an explicit workspace id".into())
+            })?)?;
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let now = now_string();
+
+        if workspace_by_id(&tx, &workspace_id)?.is_none() {
+            tx.execute(
+                "INSERT INTO workspace_bindings (
+                    workspace_id, slug, repo_fingerprint, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![workspace_id, slug, params.repo_fingerprint, now],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        if let Some(existing) = workspace_by_orbit_dir(&tx, &orbit_dir)?
+            && existing.workspace_id != workspace_id
+        {
+            tx.execute(
+                "DELETE FROM workspace_checkout_bindings WHERE orbit_dir = ?1",
+                [path_to_string(&orbit_dir)],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        if workspace_checkout_by_id(&tx, &workspace_id)?.is_some() {
+            tx.execute(
+                "UPDATE workspace_checkout_bindings
+                 SET repo_root = ?2, workspace_path = ?3, orbit_dir = ?4, updated_at = ?5
+                 WHERE workspace_id = ?1",
+                params![
+                    workspace_id,
+                    path_to_string(&repo_root),
+                    path_to_string(&workspace_path),
+                    path_to_string(&orbit_dir),
+                    now,
+                ],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        } else {
+            tx.execute(
+                "INSERT INTO workspace_checkout_bindings (
+                    workspace_id, repo_root, workspace_path, orbit_dir, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                params![
+                    workspace_id,
+                    path_to_string(&repo_root),
+                    path_to_string(&workspace_path),
+                    path_to_string(&orbit_dir),
+                    now,
+                ],
+            )
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        }
+
+        let binding = workspace_checkout_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read rebound workspace checkout binding".into())
         })?;
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))?;
         Ok(binding)
@@ -1061,6 +1192,23 @@ impl TaskRegistryStore {
             .lock()
             .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
         workspace_checkout_by_id(&conn, &workspace_id)
+    }
+
+    /// Look up the checkout bound to an orbit dir, if one is bound.
+    ///
+    /// `orbit_dir` is UNIQUE in `workspace_checkout_bindings`, so this answers
+    /// "which partition does task state under this directory already live in?"
+    /// without attempting a bind.
+    pub fn find_checkout_by_orbit_dir(
+        &self,
+        orbit_dir: &Path,
+    ) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
+        let orbit_dir = normalize_path(orbit_dir);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        workspace_by_orbit_dir(&conn, &orbit_dir)
     }
 
     /// Resolve a checkout before a task operation touches checkout-local files.
