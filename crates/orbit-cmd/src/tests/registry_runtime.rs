@@ -235,13 +235,34 @@ fn replica_runtime_refuses_task_writes_and_hides_coordination_reads() {
             ..Default::default()
         })
         .expect_err("replica task write must fail closed");
-    assert!(error.to_string().contains("hm_owner"), "{error}");
+    // A catalog-role refusal, not a malformed call: federated routing has to
+    // report `capability_refused` rather than `invalid_input` [ORB-11012].
+    assert!(
+        matches!(&error, OrbitError::CapabilityRefused(message) if message.contains("hm_owner")),
+        "{error}"
+    );
     assert!(
         runtime
             .list_tasks()
             .expect("empty replica task list")
             .is_empty()
     );
+
+    // The gate covers control-plane coordination only. A replica is the
+    // execution binding, so execute-class tools pass it and are judged on
+    // their own terms — here the operator-capability axis, which stays a
+    // distinct `capability_denied` rather than a catalog-role refusal.
+    for (name, input) in [
+        ("orbit.workflow.run.show", json!({"run_id": "jrun-missing"})),
+        ("orbit.command.exec", json!({"command": "true"})),
+    ] {
+        let error = execute_cli_tool(&runtime, name, input)
+            .expect_err("both execute-class tools are operator surfaces");
+        assert!(
+            matches!(&error, OrbitError::CapabilityDenied(message) if message.contains("operator")),
+            "{name} must clear the catalog-role gate: {error}"
+        );
+    }
 }
 
 struct DualWorkspaceFixture {

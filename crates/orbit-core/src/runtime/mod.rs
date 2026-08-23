@@ -183,12 +183,18 @@ impl OrbitRuntime {
         self
     }
 
+    /// Refuse control-plane work in a replica checkout.
+    ///
+    /// The refusal is a catalog-role capability outcome, not a malformed call:
+    /// federated routing has to tell "this destination will not run that class"
+    /// apart from "that request was invalid", so this reports
+    /// `CapabilityRefused` [ORB-11012].
     pub(crate) fn ensure_coordination_task_write_permitted(&self) -> Result<(), OrbitError> {
         let Some(owner_machine_id) = self.coordination_write_owner.as_deref() else {
             return Ok(());
         };
-        Err(OrbitError::InvalidInput(format!(
-            "coordination writes are refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
+        Err(OrbitError::CapabilityRefused(format!(
+            "control_plane coordination writes are refused in this replica checkout; workspace is owned by machine '{owner_machine_id}'"
         )))
     }
 

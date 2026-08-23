@@ -11,6 +11,7 @@
 //! the operator's [`DESTINATIONS_FILE`], never from this machine's workspace
 //! registry, and no destination's answer is cached between calls.
 
+mod capability;
 mod config;
 mod descriptor;
 mod host;
@@ -19,6 +20,9 @@ mod probe;
 #[cfg(test)]
 mod tests;
 
+pub use self::capability::{
+    CapabilityClasses, McpToolClass, ensure_tool_class_held, mcp_tool_class,
+};
 pub use self::config::{
     DESTINATIONS_FILE, Destination, DestinationsFile, HostQualifiedSelector, destinations_path,
     load_destinations,

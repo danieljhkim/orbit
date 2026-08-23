@@ -68,7 +68,20 @@ impl McpWorkspace {
         Self::init_with_workspace_name("mcp-roundtrip")
     }
 
+    /// A checkout registered as a replica of `owner_machine_id`, the shape a
+    /// `git clone` on a second machine produces.
+    fn init_replica_of(owner_machine_id: &str) -> Self {
+        Self::init_with_workspace_args(
+            "mcp-roundtrip",
+            &["--role", "replica", "--owner", owner_machine_id],
+        )
+    }
+
     fn init_with_workspace_name(workspace_name: &str) -> Self {
+        Self::init_with_workspace_args(workspace_name, &[])
+    }
+
+    fn init_with_workspace_args(workspace_name: &str, extra_workspace_args: &[&str]) -> Self {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
@@ -108,7 +121,8 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let workspace_init_args = vec!["workspace", "init", "--name", workspace_name];
+        let mut workspace_init_args = vec!["workspace", "init", "--name", workspace_name];
+        workspace_init_args.extend_from_slice(extra_workspace_args);
         let output = Self::orbit_command(&work, &home)
             .args(workspace_init_args)
             .output()
@@ -494,6 +508,57 @@ fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
     );
     assert_eq!(denied["code"], "capability_denied", "{denied}");
     assert!(!marker.exists(), "denied command reached domain execution");
+}
+
+/// A replica checkout is an execution binding, not the control plane. Over the
+/// real v1 MCP transport, a coordination write is refused with the named
+/// catalog-role code — not `invalid_input`, which would make a refusal
+/// indistinguishable from a malformed call, and not `capability_denied`, which
+/// is the separate operator-versus-agent axis [ORB-11012].
+#[test]
+fn a_replica_checkout_refuses_a_coordination_write_with_capability_refused() {
+    let workspace = McpWorkspace::init_replica_of("hm_remote_owner");
+
+    let mut client = workspace.serve();
+    // A well-formed call, so the refusal is the catalog role and nothing else.
+    let refused = client.call_tool_err(
+        "orbit_task_add",
+        json!({
+            "title": "must not fork",
+            "description": "A replica must not issue its own task ids",
+            "complexity": "low",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(refused["code"], "capability_refused", "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("hm_remote_owner")),
+        "the refusal names the declared owner: {refused}"
+    );
+
+    // The same refusal on the CLI, which fails closed on the same gate.
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "task",
+            "add",
+            "--json",
+            "--title",
+            "must not fork",
+            "--description",
+            "A replica must not issue its own task ids",
+            "--complexity",
+            "low",
+            "--model",
+            "codex",
+        ])
+        .output()
+        .expect("run task add on a replica");
+    assert!(!output.status.success(), "CLI replica task add: {output:?}");
+    let payload: Value =
+        serde_json::from_slice(&output.stderr).expect("JSON error payload on stderr");
+    assert_eq!(payload["code"], "capability_refused", "{payload}");
 }
 
 /// The operator MCP surface, over the real transport: a server an operator
