@@ -18,6 +18,8 @@
 
 mod adapter;
 mod error;
+#[doc(hidden)]
+pub mod federated;
 mod listener;
 mod remote;
 
