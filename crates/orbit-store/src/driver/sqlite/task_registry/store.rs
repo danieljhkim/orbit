@@ -1194,6 +1194,23 @@ impl TaskRegistryStore {
         workspace_checkout_by_id(&conn, &workspace_id)
     }
 
+    /// Look up the checkout bound to an orbit dir, if one is bound.
+    ///
+    /// `orbit_dir` is UNIQUE in `workspace_checkout_bindings`, so this answers
+    /// "which partition does task state under this directory already live in?"
+    /// without attempting a bind.
+    pub fn find_checkout_by_orbit_dir(
+        &self,
+        orbit_dir: &Path,
+    ) -> Result<Option<WorkspaceCheckoutBinding>, OrbitError> {
+        let orbit_dir = normalize_path(orbit_dir);
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        workspace_by_orbit_dir(&conn, &orbit_dir)
+    }
+
     /// Resolve a checkout before a task operation touches checkout-local files.
     pub fn require_workspace_checkout(
         &self,
