@@ -47,9 +47,6 @@ orbit.db
 orbit.db-shm
 orbit.db-wal
 
-# Benchmark run/task artifacts — regenerated per run, not committed
-benchmarks/**/runs/**
-benchmarks/**/tasks/**
 # Orbit runtime state stays workspace-local. Project-authored decisions live in
 # feature `docs/design/**/4_decisions.md` files.
 .orbit/*

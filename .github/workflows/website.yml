@@ -1,0 +1,43 @@
+name: Website
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - "docs/design/**"
+      - ".github/workflows/website.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  website:
+    name: Sync, check, and build
+    runs-on: ubuntu-latest
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync repository content
+        run: |
+          npm run sync:design
+          npm run sync:scoreboard
+
+      - name: Type-check website
+        run: npm exec -- astro check
+
+      - name: Build website
+        run: npm exec -- astro build

@@ -5,15 +5,14 @@
   "type": "module",
   "scripts": {
     "sync:design": "node ./scripts/sync-design-docs.mjs",
-    "sync:benchmarks": "node ./scripts/sync-benchmarks.mjs",
     "sync:scoreboard": "node ./scripts/sync-scoreboard.mjs",
-    "predev": "npm run sync:design && npm run sync:benchmarks && npm run sync:scoreboard",
+    "predev": "npm run sync:design && npm run sync:scoreboard",
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
-    "prebuild": "npm run sync:design && npm run sync:benchmarks && npm run sync:scoreboard",
+    "prebuild": "npm run sync:design && npm run sync:scoreboard",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
-    "prepreview": "npm run sync:design && npm run sync:benchmarks && npm run sync:scoreboard",
+    "prepreview": "npm run sync:design && npm run sync:scoreboard",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
-    "precheck": "npm run sync:design && npm run sync:benchmarks && npm run sync:scoreboard",
+    "precheck": "npm run sync:design && npm run sync:scoreboard",
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check"
   },
   "dependencies": {
