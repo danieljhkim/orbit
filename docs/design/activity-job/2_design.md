@@ -4,7 +4,7 @@ type: design
 title: "Activity / Job — Design"
 owner: codex
 last_updated: 2026-08-15
-last_validated: 2026-07-26
+last_validated: 2026-08-23
 status: Draft
 feature: activity-job
 doc_role: design
@@ -13,7 +13,7 @@ tags: ["activity-job"]
 
 # Activity / Job — Design
 
-This document describes the shipped Activity / Job substrate across `orbit-common`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
+This document describes the shipped Activity / Job substrate across `orbit-types`, `orbit-engine`, `orbit-core`, and `orbit-cli`: asset shape, normalization, dispatch boundaries, DAG execution, audit, and retained legacy edges. See [1_overview.md](./1_overview.md) for purpose and [3_vision.md](./3_vision.md) for open questions.
 
 ---
 
@@ -25,7 +25,7 @@ Activity / Job assets are `schemaVersion: 2` YAML envelopes with:
 - `metadata.name`
 - typed `spec`
 
-The loader in `crates/orbit-common/src/types/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`; that shape arrived in [T20260418-2010]. `schemaVersion: 1` is retired after [T20260419-2156], and `kind` mismatches are structural errors, so an activity cannot dispatch as a job or vice versa.
+The loader in `crates/orbit-engine/src/activity_job/asset_loader.rs` reads the schema header first, then parses the full envelope into `ActivityV2` or `JobV2`; that shape arrived in [T20260418-2010]. `schemaVersion: 1` is retired after [T20260419-2156], and `kind` mismatches are structural errors, so an activity cannot dispatch as a job or vice versa.
 
 ---
 
@@ -208,7 +208,7 @@ The target-ref pass was added in [T20260418-2019] and `run-v2` entrypoints in [T
 
 The public CLI now executes activity assets through jobs rather than exposing a standalone `orbit activity run` subcommand. `orbit activity` is an inspection/catalog surface; `orbit job run` and workflow aliases under `orbit run` are the public execution surfaces after [T20260426-0047].
 
-Some module comments still describe older phase ordering; the authoritative behavior is the orbit-core call path in `crates/orbit-core/src/command/job/exec.rs`.
+Some module comments still describe older phase ordering; the authoritative behavior is the orbit-core call path in `crates/orbit-core/src/application/job/exec.rs`.
 
 Seeded direct shipment workflows (`task_local_pipeline` and `task_pr_pipeline`) opt into `recovery_activity: step_failure_recovery` on specific steps after [T20260430-14]. Activity routing has one mechanism after [ORB-10622]: a rendered `crew` input selects that crew, and an activity without one uses the run's resolved crew. `step_failure_recovery` opts into `workflow.system_crew`; the executor renders that configured name into its activity input before resolution. Activity and job assets declaring the retired `role` key fail to load with guidance to use `crew`. The recovery agent receives only the executor-provided recovery keys, inspects the failed step, makes bounded repairs when safe, and returns before the executor's single post-recovery attempt. Higher-level orchestration workflows do not enable the hook because replaying child-run dispatch or planning orchestration is not a safe default recovery action.
 
@@ -230,7 +230,7 @@ After [ORB-10363], `JobV2.failure_activity` is a terminal, best-effort hook dist
 
 After [ORB-10385] / [The runtime reports its deterministic-action registry, and job validation gates on it](./4_decisions.md#the-runtime-reports-its-deterministic-action-registry-and-job-validation-gates-on-it), a job's reachable deterministic actions are checked against the executing runtime before its first step runs. `RuntimeHost::has_deterministic_action` reports the shared typed registry; `validate_job_deterministic_actions` walks the job's `recovery_activity`, `failure_activity`, every step's `recovery_activity`, and every resolved deterministic target (recursing through `parallel:`, `fan_out:`, and `loop:`) and fails the run with `DeterministicActionUnavailable` naming both the activity and the action. Because the check runs inside `execute_job_with_resume` ahead of step one, the run never reaches `worktree_setup`, so no task is admitted and no worktree is created. Unknown actions are never skipped, and the default trait implementation reports `true`, so a host that cannot enumerate its registry keeps surfacing the miss at dispatch. The gate does not weaken the failure hook: an action that becomes unavailable after admission still leaves the original failed-step error authoritative.
 
-[ORB-10630] centralizes action names and core-versus-engine ownership in `orbit-common` ([Typed deterministic action declaration spans core and engine](./4_decisions.md#typed-deterministic-action-declaration-spans-core-and-engine), Proposed). The generated typed enums now derive core's advertised capability check and its engine forwarding path, while the engine matches its ownership-specific enum exhaustively. A declared action without its matching core or engine implementation therefore fails compilation rather than becoming runtime registry skew; an implementation cannot name an undeclared typed action. The duplicated dispatch-table assertion and standalone core asset scan were removed because they only compared duplicate lists. Catalog coverage remains: shipped YAML action strings are external inputs and must still be checked against the generated registry.
+[ORB-10630] centralizes action names and core-versus-engine ownership in `orbit-types` ([Typed deterministic action declaration spans core and engine](./4_decisions.md#typed-deterministic-action-declaration-spans-core-and-engine), Proposed). The generated typed enums now derive core's advertised capability check and its engine forwarding path, while the engine matches its ownership-specific enum exhaustively. A declared action without its matching core or engine implementation therefore fails compilation rather than becoming runtime registry skew; an implementation cannot name an undeclared typed action. The duplicated dispatch-table assertion and standalone core asset scan were removed because they only compared duplicate lists. Catalog coverage remains: shipped YAML action strings are external inputs and must still be checked against the generated registry.
 
 The linked-worktree boundary guard now treats a clean same-branch primary fast-forward as concurrent base movement, not provider escape. The assigned checkout retains its own HEAD, so the later `pr_prepare`/`git_rebase` checkpoints reconcile that movement. Primary resets, force-moves, and branch switches surface as `primary_checkout_drift`; inadmissible history or branch movement inside the assigned worktree surfaces as `worktree_content_conflict`. Conflict diagnostics report `run_changed_paths`, `primary_changed_paths`, and their `conflicting_paths` separately instead of presenting the primary's entire moved set as the task's conflict.
 

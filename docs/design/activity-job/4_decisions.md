@@ -4,7 +4,7 @@ type: design
 title: "Activity / Job — Decisions"
 owner: codex
 last_updated: 2026-08-15
-last_validated: 2026-07-26
+last_validated: 2026-08-23
 status: Draft
 feature: activity-job
 doc_role: decisions
@@ -70,7 +70,7 @@ Folded instances:
 The agent-loop path is where activity/job can most easily leak provider implementation details, mutable sessions, or role configuration across crate boundaries. The split ADRs all defended the same shape: shared types live low, orbit-core hosts primitive services, the engine dispatches concrete activity specs, and provider/backends remain explicit choices.
 
 ### Decision
-Keep activity/job types in `orbit-common`, keep orbit-core free of `orbit-agent` transport types, and route agent dispatch through retained provider CLI runtimes behind a host-resolved executor contract. Scope stateful agent features narrowly: Groundhog is its own activity kind, role config from `[agent.<role>]` overrides inline settings field-by-field, task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
+Keep activity/job types in `orbit-types`, keep orbit-core free of `orbit-agent` transport types, and route agent dispatch through retained provider CLI runtimes behind a host-resolved executor contract. Activity routing is crew-based; the retired Groundhog, HTTP, and role-based surfaces remain historical. Task-aware CLI envelopes carry durable run context, and provider static-arg fixups run before sandbox dispatch.
 
 Folded instances:
 
@@ -90,9 +90,9 @@ Folded instances:
 ### Consequences
 - Parsing, validation, dispatch, and CLI display share one Rust type family without making orbit-core depend on provider transport objects.
 - Agent dispatch has one path after [ORB-10801]; tool enforcement stays delegated to the provider harness.
-- First-run and per-role agent choices live in user config while YAML stays reusable across workspaces.
+- First-run and named-crew choices live in user config while YAML stays reusable across workspaces.
 - Costs retained from folded entries:
-- Cost: `orbit-common` now owns a wider slice of runtime vocabulary and has to stay disciplined about not accreting behavior.
+- Cost: `orbit-types` owns the shared runtime vocabulary and has to stay disciplined about not accreting behavior.
 - Cost: session reuse becomes a narrowly scoped feature instead of a general-purpose memory layer.
 - Cost: the feature now has materially different semantics between HTTP and CLI, especially around tool enforcement.
 - Cost: ActivityV2 gains another sibling variant and the feature family becomes slightly broader.
@@ -533,7 +533,7 @@ Keep the public job-executor API stable, but organize the implementation as `job
 The v2 job executor sub-modules (`step.rs`, `parallel.rs`, `fan_out.rs`, `loop_block.rs`, `target.rs`, `recovery.rs`) own non-trivial concurrency, ordering, and audit invariants. Without test coverage co-located with each block, regressions to those invariants surface only as production failures or as audit-trace anomalies that are hard to reproduce.
 
 ### Decision
-Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a sibling `*_tests.rs` in `tests/` whose test function names name the specific invariant or failure mode each test guards. The current layout is `step_tests.rs`, `parallel_tests.rs`, `fanout_tests.rs`, `loop_tests.rs`, and `pipeline_durability_tests.rs`, alongside the pre-existing `audit_tests.rs`, `recovery_tests.rs`, and `target_tests.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox.rs#tests` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
+Every executor-block module under `crates/orbit-engine/src/activity_job/job_executor/` gets a sibling test module in `tests/` whose test function names name the specific invariant or failure mode each test guards. The current layout is `step.rs`, `parallel.rs`, `fanout.rs`, `loop.rs`, and `pipeline_durability.rs`, alongside the pre-existing `audit.rs`, `recovery.rs`, and `target.rs`. Shared scaffolding (`ScriptedHost`, `Action`, job/step builders) lives in `tests/mod.rs` so block modules stay focused on their own invariants and don't fork the host shape. Sandbox and policy boundary coverage lives next to the implementations they guard: `crates/orbit-exec/src/macos_sandbox.rs#tests` (read-deny enforcement and a realistic agent_loop profile boundary) and `crates/orbit-policy/src/engine.rs#tests` (global denyRead/denyModify last-match-wins, unknown-profile error, matched_rule observability).
 
 ### Consequences
 - Future refactors of an executor block must keep the matching invariant test alive in the same-named test file or update it to reflect the new contract.
@@ -1094,7 +1094,7 @@ The unattended triage agent (ORB-10129) normally returns advisory dispositions t
 ## CLI response envelopes are optional for artifact-backed activities
 
 **Recorded:** 2026-07-16 02:08:38.533091Z · [ORB-10231]
-**Paths:** `crates/orbit-common/src/types/activity_job/**`, `crates/orbit-engine/src/activity_job/cli_runner/**`, `crates/orbit-core/assets/activities/**`
+**Paths:** `crates/orbit-types/src/workflow/activity_job/**`, `crates/orbit-engine/src/activity_job/cli_runner/**`, `crates/orbit-core/assets/activities/**`
 
 ### Context
 CLI providers can exit successfully after persisting authoritative task, review, and git artifacts while emitting prose or provider wrapper JSON that lacks an Orbit response envelope. Treating every missing or malformed envelope as fatal strands completed work; treating every response as advisory would break activities whose downstream templates consume structured fields.
@@ -1136,7 +1136,7 @@ CLI agent-loop activities treat response envelopes as best-effort by default. Ex
 ## Terminal PR shipment uses a job-level failure handoff
 
 **Recorded:** 2026-07-25 02:34:08.643735Z · [ORB-10363]
-**Paths:** `crates/orbit-common/src/types/activity_job/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-core/assets/jobs/task_pr_pipeline.yaml`
+**Paths:** `crates/orbit-types/src/workflow/activity_job/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-core/assets/jobs/task_pr_pipeline.yaml`
 
 ### Context
 A task shipment can fail after an agent has produced coherent work but before the normal commit, rebase, push, and PR checkpoints finish. The real alternatives are to overload per-step recovery so it replays or impersonates later checkpoints, or give the workflow one explicit terminal failure hook that preserves the original failure while publishing any recoverable candidate.
@@ -1217,7 +1217,7 @@ Recognition is the entire change: no safety gate moved. Non-terminal run, `--old
 ## Step completion is a separate contract from response content
 
 **Recorded:** 2026-07-26 20:47:48.459433Z · [ORB-10449], [ORB-10454]
-**Paths:** `crates/orbit-common/src/types/activity_job/activity_v2.rs`, `crates/orbit-agent/src/types/response/envelope.rs`, `docs/design/activity-job/*`
+**Paths:** `crates/orbit-types/src/workflow/activity_job/activity_v2.rs`, `crates/orbit-agent/src/types/response/envelope.rs`, `docs/design/activity-job/*`
 
 **Context.** [CLI response envelopes are optional for artifact-backed activities](#cli-response-envelopes-are-optional-for-artifact-backed-activities) made CLI response envelopes best-effort for artifact-backed activities, leaving `require_response_envelope` as the only flag that reads an agent-loop invocation's stdout. That flag answers *"do downstream templates consume the response?"* — but it was silently also the only thing answering *"did the invocation finish at all?"*, and for artifact-backed activities (`require_response_envelope: false`) nobody was asking. Every `backend: cli` invocation is prompted with the response-envelope contract, so a provider that yields mid-turn still exits 0: `implement_one` in `task_pr_pipeline` checkpointed as success on work that stopped halfway, and the failure surfaced several steps later at whatever deterministic gate noticed first, attributed to the wrong step. Two real alternatives were rejected. Flipping `require_response_envelope: true` everywhere conflates the content question with the completion question and forces full content validation — exit alignment, `status: success`, object `result` — onto activities whose responses nothing reads, re-breaking exactly what [CLI response envelopes are optional for artifact-backed activities](#cli-response-envelopes-are-optional-for-artifact-backed-activities) fixed. Classifying the violation as a retryable `DispatchError` so `step_failure_recovery` fires inverts the fix: that hook exists to repair the delivery path for *completed* work, so it would publish a stalled implementer's partial candidate.
 
@@ -1315,7 +1315,7 @@ Providers may edit assigned worktree files but must not create commits or otherw
 ## Ship duplicate-dispatch guard lives in the shared submission path
 
 **Recorded:** 2026-08-01 21:00:01.786577Z · [ORB-10544]
-**Paths:** `crates/orbit-core/src/command/job/pipeline.rs`, `crates/orbit-dashboard/src/api/runs.rs`, `crates/orbit-core/src/runtime/orbit_tool_host/workflow_tools.rs`
+**Paths:** `crates/orbit-core/src/application/job/pipeline.rs`, `crates/orbit-dashboard/src/api/runs.rs`, `crates/orbit-core/src/adapter/tool_host/workflow_tools.rs`
 
 **Context.** [ORB-10444] added a duplicate-dispatch guard for explicitly-selected ship tasks and placed it inside `POST /api/workflows/ship`, whose ADR claimed the server-side check "covers every surface". It did not. [ORB-10540] added the MCP `orbit.workflow.ship` tool as a second front door onto the same `OrbitRuntime::submit_ship_run` service, and that tool bypassed the endpoint-local check entirely: two runs could be dispatched for one task and then contend for the same worktree and task reservation. The asymmetry was visible in the equivalence test itself, which had to call HTTP first because that was the only order in which both surfaces could dispatch the same ids.
 
@@ -1333,7 +1333,7 @@ Rejected alternative: enforce uniqueness at the store layer as a constraint on n
 ## Dispatch admission separates unmet dependencies from unsatisfiable ones
 
 **Recorded:** 2026-08-02 22:25:12.480309Z · [ORB-10593]
-**Paths:** `crates/orbit-common/src/types/task.rs`, `crates/orbit-core/src/runtime/v2_host/dispatch.rs`
+**Paths:** `crates/orbit-types/src/task/model.rs`, `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs`
 
 ### Context
 
@@ -1345,7 +1345,7 @@ That conflates two different situations. A dependency in `backlog` / `in-progres
 
 Admission classifies every non-satisfying dependency edge as either a wait or a dead end, and refuses dead ends immediately.
 
-`TaskStatus::dependency_dead_end()` returns `Some(DependencyDeadEnd)` for `archived` and `rejected` and `None` for every other status; a dependency ID that resolves to no task is `DependencyDeadEnd::Missing`. `unsatisfiable_task_dependencies()` in `orbit-common` applies this per task, and `reserve_locks` fails the activity before the first poll when the set is non-empty, with a `task.dependencies.unsatisfiable:` message naming each offending task/dependency pair, the dependency's status, and its remedy.
+`TaskStatus::dependency_dead_end()` returns `Some(DependencyDeadEnd)` for `archived` and `rejected` and `None` for every other status; a dependency ID that resolves to no task is `DependencyDeadEnd::Missing`. `unsatisfiable_task_dependencies()` in `orbit-types` applies this per task, and `reserve_locks` fails the activity before the first poll when the set is non-empty, with a `task.dependencies.unsatisfiable:` message naming each offending task/dependency pair, the dependency's status, and its remedy.
 
 What counts as *satisfied* is unchanged: `Done`-only. This decision makes an unsatisfiable edge fail loudly, and deliberately does not widen admission. `Archived` remains a soft-delete that does not satisfy a dependency.
 
@@ -1399,13 +1399,13 @@ Rejected alternatives: probing the base branch's own PR through GitHub (couples 
 ## Typed deterministic action declaration spans core and engine
 
 **Recorded:** 2026-08-09 06:46:48.177638Z · [ORB-10630]
-**Paths:** `crates/orbit-common/src/types/activity_job/mod.rs`, `crates/orbit-core/src/runtime/v2_host/dispatch.rs`, `crates/orbit-engine/src/executor/automation/mod.rs`
+**Paths:** `crates/orbit-types/src/workflow/activity_job/mod.rs`, `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs`, `crates/orbit-engine/src/executor/automation/mod.rs`
 
 ### Context
 Deterministic action names had independent core advertisement, core forwarding, engine constants, and engine dispatch lists. The resulting skew shipped asset actions that were not invocable.
 
 ### Decision
-Declare action names and their core-or-engine ownership once in `orbit-common`, generating typed core and engine action enums plus parsing and advertised names. Core dispatches exhaustively by the shared type, while engine implementation dispatch exhaustively matches the engine enum.
+Declare action names and their core-or-engine ownership once in `orbit-types`, generating typed core and engine action enums plus parsing and advertised names. Core dispatches exhaustively by the shared type, while engine implementation dispatch exhaustively matches the engine enum.
 
 ### Consequences
 - Adding a declared core or engine action without its respective dispatch arm fails compilation through a non-exhaustive match; implementations cannot name an undeclared typed action.
@@ -1416,7 +1416,7 @@ Declare action names and their core-or-engine ownership once in `orbit-common`, 
 ## Job execution crosses one RuntimeHost boundary
 
 **Recorded:** 2026-08-09 07:21:03.861806Z · [ORB-10633]
-**Paths:** `crates/orbit-engine/src/context/hosts.rs`, `crates/orbit-core/src/runtime/engine/runtime_host.rs`
+**Paths:** `crates/orbit-engine/src/context/hosts.rs`, `crates/orbit-core/src/adapter/engine_host/runtime_host.rs`
 
 ### Context
 The job executor depended on a dispatcher host and a separate deterministic/task/environment/run host family, both implemented by OrbitRuntime. Keeping both families with a documented ownership rule was a real alternative, but it would preserve two call graphs and let capabilities drift between them.
@@ -1432,7 +1432,7 @@ Declare one orbit-engine RuntimeHost capability boundary with one OrbitRuntime i
 ## Track bundled activity and job ownership by content digest before retirement
 
 **Recorded:** 2026-08-09 22:01:13.919070Z · [ORB-10684]
-**Paths:** `crates/orbit-core/src/command/mod.rs`, `crates/orbit-core/src/command/activity.rs`, `crates/orbit-core/src/command/job/catalog.rs`, `crates/orbit-core/src/command/init.rs`
+**Paths:** `crates/orbit-core/src/application/mod.rs`, `crates/orbit-core/src/bootstrap/activity.rs`, `crates/orbit-core/src/application/job/catalog.rs`, `crates/orbit-core/src/bootstrap/init.rs`
 
 ### Context
 Embedded activity and job assets are materialized into the global resource catalog, but an additive refresh cannot distinguish a retired bundled file from an operator-authored file by name alone. Filename-only pruning would deactivate stale shipped subsystems, but it could also destroy legitimate local resources on legacy installations.
@@ -1449,7 +1449,7 @@ Persist a per-resource-kind managed manifest containing the SHA-256 digest last 
 ## All five definition-artifact kinds carry managed provenance, and doctor reports it
 
 **Recorded:** 2026-08 · [ORB-10800]
-**Code anchors:** `crates/orbit-core/src/command/mod.rs::ManagedAssetLayout`, `crates/orbit-core/src/command/skill.rs::seed_default_skills`, `crates/orbit-core/src/command/routine.rs::seed_default_routines`, `crates/orbit-core/src/auto_tasks/mod.rs::seed_default_auto_tasks`, `crates/orbit-core/src/command/artifact_health.rs`
+**Code anchors:** `crates/orbit-core/src/application/mod.rs::ManagedAssetLayout`, `crates/orbit-core/src/application/skill.rs::seed_default_skills`, `crates/orbit-core/src/application/routine.rs::seed_default_routines`, `crates/orbit-core/src/auto_tasks/mod.rs::seed_default_auto_tasks`, `crates/orbit-core/src/application/artifact_health.rs`
 
 ### Context
 

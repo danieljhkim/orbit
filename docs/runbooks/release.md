@@ -4,6 +4,7 @@ summary: Cut and verify an Orbit release across Cargo, GitHub artifacts, Homebre
 tags: [operations, release, npm, signing]
 paths: [".github/workflows/release.yml", ".github/workflows/smoke-npm-install.yml", "npm/**", "scripts/release-check.sh"]
 related_features: [orbit-docs-plugin]
+last_validated: 2026-08-23
 ---
 
 # Release Orbit

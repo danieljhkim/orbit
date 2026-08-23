@@ -1,7 +1,7 @@
 ---
 type: context
 summary: Lessons Learned While Building Orbit
-last_validated: 2026-07-27
+last_validated: 2026-08-23
 ---
 
 # Lessons Learned While Building Orbit
