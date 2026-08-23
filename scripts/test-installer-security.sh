@@ -236,7 +236,7 @@ ROOT="$ROOT" \
   node <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
-const installer = require(path.join(process.env.ROOT, 'plugin/npm/scripts/install-binary.js'));
+const installer = require(path.join(process.env.ROOT, 'npm/scripts/install-binary.js'));
 
 function expectThrow(fn, pattern, label) {
   try {
@@ -342,7 +342,7 @@ NODE
 
 if ORBIT_RELEASE_PUBLIC_KEY_FILE="$PUBLIC_KEY" \
   ROOT="$ROOT" \
-  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
   > "$TMP_ROOT/npm-key-override-missing-ack.log" 2>&1; then
   echo "FAIL: npm installer accepted ORBIT_RELEASE_PUBLIC_KEY_FILE without acknowledgement" >&2
   exit 1
@@ -351,13 +351,13 @@ fi
 ORBIT_RELEASE_PUBLIC_KEY_FILE="$PUBLIC_KEY" \
   ORBIT_RELEASE_PUBLIC_KEY_FILE_ACKNOWLEDGE_TRUST_CHANGE=1 \
   ROOT="$ROOT" \
-  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "npm/scripts/install-binary.js")); installer.acknowledgeTrustedPublicKeyOverride();' \
   > "$TMP_ROOT/npm-key-override-ack.log" 2>&1
 grep -q "trusting replacement release signing key" "$TMP_ROOT/npm-key-override-ack.log"
 
 if ORBIT_RELEASE_TRUSTED_KEYS_FILE="$TRUSTED_KEYS_FILE" \
   ROOT="$ROOT" \
-  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedKeysOverride();' \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "npm/scripts/install-binary.js")); installer.acknowledgeTrustedKeysOverride();' \
   > "$TMP_ROOT/npm-keys-override-missing-ack.log" 2>&1; then
   echo "FAIL: npm installer accepted ORBIT_RELEASE_TRUSTED_KEYS_FILE without acknowledgement" >&2
   exit 1
@@ -366,7 +366,7 @@ fi
 ORBIT_RELEASE_TRUSTED_KEYS_FILE="$TRUSTED_KEYS_FILE" \
   ORBIT_RELEASE_TRUSTED_KEYS_FILE_ACKNOWLEDGE_TRUST_CHANGE=1 \
   ROOT="$ROOT" \
-  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "plugin/npm/scripts/install-binary.js")); installer.acknowledgeTrustedKeysOverride();' \
+  node -e 'const path = require("node:path"); const installer = require(path.join(process.env.ROOT, "npm/scripts/install-binary.js")); installer.acknowledgeTrustedKeysOverride();' \
   > "$TMP_ROOT/npm-keys-override-ack.log" 2>&1
 grep -q "trusting replacement release signing key set" "$TMP_ROOT/npm-keys-override-ack.log"
 

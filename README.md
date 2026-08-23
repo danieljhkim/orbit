@@ -48,16 +48,6 @@ One command gets you a released, signed build. Within your first fifteen minutes
 # install
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 # or: brew install danieljhkim/tap/orbit
-# or, in Claude Code:
-#   /plugin marketplace add danieljhkim/orbit
-#   /plugin install orbit
-# or, in Codex CLI:
-#   codex plugin marketplace add danieljhkim/orbit --ref main
-#   codex plugin add orbit@orbit
-# or, in Cursor (local Agent Plugin; marketplace publication is a human follow-up):
-#   mkdir -p ~/.cursor/plugins/local
-#   ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
-#   # then restart Cursor or run Developer: Reload Window
 ```
 
 <details>
@@ -136,7 +126,7 @@ Paste the prompt below into your agent (Claude Code, Codex CLI, or Gemini CLI) *
 > 5. From *this* repository (not the Orbit clone), run `orbit workspace init --mcp`. This creates `.orbit/` here and auto-registers Orbit's MCP server with installed agent CLIs (Claude Code, Codex, Gemini). The registered server is **operator-authorized**: it can dispatch workflows (`orbit.workflow.ship`, run observation/resume) and run `orbit.command.exec`. Tell me before running this if you'd rather it stay agent-only (`orbit mcp init` instead).
 > 6. Ask me whether to enable semantic search (**optional**). `orbit semantic install` downloads a small embedder companion plus the default bge-small model (lives under `~/.orbit/embed/`) and powers `orbit search <query> --hybrid` / `orbit search similar <task-id>` over tasks. It requires macOS arm64 or Linux x86_64/aarch64 with glibc >= 2.38; Intel macOS is unsupported for semantic search. Don't install without my OK. If I accept and tasks already exist in this workspace, also run `orbit semantic index` to backfill the corpus.
 > 7. Read the key documents so you actually understand the model:
->    - `README.md` — feature surface, install model, plugin vs CLI
+>    - `README.md` — feature surface and install model
 >    - `docs/POSITIONING.md` — what Orbit is for, what it isn't (especially "who this is for")
 >    - `CLAUDE.md` — agent operating rules (commit timing, task ID convention, lint constraints)
 >    - `ARCHITECTURE.md` — crate layering and dependency rules
@@ -212,47 +202,6 @@ After install, task writes are embedded automatically in the background; `orbit 
 
 ---
 
-## Agent Plugins vs CLI
-
-Orbit ships lightweight Claude Code, Codex, and Cursor (Agent Plugins 1.0) plugins. The CLI gives you the full power of Orbit; choose a plugin when you want Orbit's MCP tools and shared skills strapped onto one agent without installing `orbit` on your `$PATH`.
-
-```bash
-# Claude Code
-/plugin marketplace add danieljhkim/orbit
-/plugin install orbit
-
-# Codex CLI
-codex plugin marketplace add danieljhkim/orbit --ref main
-codex plugin add orbit@orbit
-
-# Cursor (local Agent Plugin)
-mkdir -p ~/.cursor/plugins/local
-ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
-# Restart Cursor or run Developer: Reload Window, then confirm the Orbit
-# skill and MCP server under Customize → Plugins.
-
-# Later, after an Orbit release:
-codex plugin marketplace upgrade orbit
-codex plugin add orbit@orbit
-```
-
-Cursor loads the same `plugin/skills/orbit` tree and `npx -y @orbit-tools/cli@latest mcp serve` contract through the root Agent Plugins 1.0 manifests (`plugin/plugin.json` and `plugin/mcp.json`). Public Cursor Marketplace submission, account setup, and publication are a human follow-up and are not part of this install path.
-
-<details>
-<summary><strong>Plugin vs. CLI</strong> — (click to expand)</summary>
-
-|   | **Claude Code plugin** | **Codex plugin** | **Cursor Agent Plugin** | **CLI (curl / brew)** |
-|---|---|---|---|---|
-| Install | `/plugin install orbit` after `/plugin marketplace add danieljhkim/orbit` | `codex plugin add orbit@orbit` after `codex plugin marketplace add danieljhkim/orbit --ref main` | Symlink `plugin/` to `~/.cursor/plugins/local/orbit`, then reload Cursor | `curl … \| sh` or `brew install danieljhkim/tap/orbit` |
-| Orbit binary | Lives inside the plugin sandbox (not on `$PATH`) | Lives inside the plugin cache (not on `$PATH`) | Launched via `npx -y @orbit-tools/cli@latest` (not on `$PATH`) | Installed on `$PATH` |
-| MCP registration | Automatic in Claude Code | Automatic in Codex | Automatic in Cursor from `plugin/mcp.json` | Manual: `orbit workspace init --mcp` per workspace |
-| Shared Orbit skills | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Bundled from `plugin/skills/` | Seeded by `orbit workspace init` |
-| Web dashboard (`orbit web serve`) | No | No | No | Yes |
-| Other agent CLIs | No, scoped to Claude Code | No, scoped to Codex | No, scoped to Cursor | Yes |
-| Workflows (ship, run show/list/resume) | Yes — same MCP surface | Yes — same MCP surface | Yes — same MCP surface | Yes — CLI or MCP |
-
-</details>
-
 > **Cowork users:** Orbit advertises its canonical MCP surface independently of the
 > server's launch directory. Workspace routing comes from the server's
 > `--workspace` binding, MCP initialize/session context, or an explicit registered
@@ -279,7 +228,7 @@ First-time onboarding (`.orbit/` absent) and "what is orbit" tour requests are h
 
 ## Orbit MCP Surface
 
-`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini), same as the plugin. The registered server launches as `orbit mcp serve --operator --workspace <ws_id>`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
+`orbit workspace init --mcp` registers the Orbit MCP server with the local agent CLI (Claude Code, Codex, Gemini). The registered server launches as `orbit mcp serve --operator --workspace <ws_id>`: it holds **operator authority**, so governed operations — dispatching a workflow (`orbit.workflow.ship`), observing/resuming a run, and `orbit.command.exec` — are authorized through it. Bare `orbit mcp serve` (and every worker/agent-launched MCP session) stays agent-only and is refused those governed tools; `orbit mcp init` also stays agent-only unless you pass `--operator` at the `orbit mcp serve` layer yourself.
 
 `--workspace` is the workspace binding: most MCP clients cannot announce one at initialize, so the generated integration names the workspace it was registered for and workspace-scoped tools route without repeating a selector on every call. An explicit `workspace` on a tool call still overrides it, and a server launched without a binding still refuses a workspace-scoped call that names no workspace.
 

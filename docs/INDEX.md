@@ -26,7 +26,7 @@ CLI behavior, state layout, or recovery semantics change.
 | [Recover a Corrupted Database](./runbooks/database-recovery.md) | Recover a corrupted Orbit SQLite database from backup, salvage, or regeneration. |
 | [Check Orbit Health](./runbooks/health-checks.md) | Check Orbit workspace, database, dashboard, log-sink, job-run, and routine-clock health. |
 | [Inspect and Retain Logs](./runbooks/logging.md) | Locate, filter, rotate, and retain Orbit process and routine-sweep logs. |
-| [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across plugin manifests, GitHub artifacts, Homebrew, and npm. |
+| [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across Cargo, GitHub artifacts, Homebrew, and npm. |
 | [Inventory and Protect Orbit State](./runbooks/state-and-backup.md) | Locate Orbit state and perform WAL-safe backups, restores, and task migrations. |
 | [Recover Stuck Job Runs](./runbooks/stuck-job-runs.md) | Diagnose, cancel, resume, or replay pending and running Orbit job runs. |
 | [Upgrade Orbit Safely](./runbooks/upgrades.md) | Review, apply, and verify Orbit workspace-layout and store-schema migrations safely. |

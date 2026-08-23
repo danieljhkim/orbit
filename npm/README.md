@@ -1,19 +1,11 @@
 # @orbit-tools/cli
 
-npm binary proxy for the [Orbit](https://github.com/danieljhkim/orbit) CLI and
-the supported Orbit plugins for Claude Code, Codex, and Cursor.
+npm binary proxy for the [Orbit](https://github.com/danieljhkim/orbit) CLI.
 
 On install, downloads the matching prebuilt `orbit` binary from
 [GitHub Releases](https://github.com/danieljhkim/orbit/releases), authenticates
 the signed `orbit-checksums.txt` with the package-pinned release trust set,
 verifies the archive SHA-256, and exposes it as the `orbit` command.
-
-The Claude Code, Codex, and Cursor Agent Plugin manifests all launch this
-package as `npx -y @orbit-tools/cli@latest mcp serve`. Their plugin managers
-install the appropriate manifests, shared skills, and client-specific
-integration assets; users do not need to copy files from this package or the
-Orbit repository. Installing `@orbit-tools/cli` by itself provides the native
-CLI proxy, not the agent plugin assets.
 
 ## Usage
 
@@ -22,7 +14,7 @@ CLI proxy, not the agent plugin assets.
 npm install -g @orbit-tools/cli
 orbit --version
 
-# One-shot via npx (used by the Orbit Claude Code, Codex, and Cursor plugins)
+# One-shot via npx
 npx -y @orbit-tools/cli mcp serve
 ```
 

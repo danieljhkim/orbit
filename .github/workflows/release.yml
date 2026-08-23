@@ -178,7 +178,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${ORBIT_RELEASE_SIGNING_KEY_PEM:-}" ]; then
-            echo "ORBIT_RELEASE_SIGNING_KEY_PEM must contain the private key matching plugin/npm/release-signing.pub" >&2
+            echo "ORBIT_RELEASE_SIGNING_KEY_PEM must contain the private key matching npm/release-signing.pub" >&2
             exit 1
           fi
 
@@ -192,7 +192,7 @@ jobs:
             -out dist/orbit-checksums.txt.sig \
             dist/orbit-checksums.txt
           openssl dgst -sha256 \
-            -verify plugin/npm/release-signing.pub \
+            -verify npm/release-signing.pub \
             -signature dist/orbit-checksums.txt.sig \
             dist/orbit-checksums.txt
 

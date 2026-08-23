@@ -29,9 +29,9 @@ Report all three before proposing any install.
 
 ## Step 2 — Install
 
-Three paths, all documented in the README: clone-and-build, the plugin package,
-or a prebuilt binary. Ask which the user wants rather than assuming. Follow the
-README's destructive-action confirmation rules exactly.
+Two paths, both documented in the README: clone-and-build or a prebuilt binary.
+Ask which the user wants rather than assuming. Follow the README's
+destructive-action confirmation rules exactly.
 
 ## Step 3 — Initialize the machine
 

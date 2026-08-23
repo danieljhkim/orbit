@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-canonical_key="$repo_root/plugin/npm/release-signing.pub"
+canonical_key="$repo_root/npm/release-signing.pub"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -43,7 +43,7 @@ assert_contains_canonical_key() {
       exit(index(extracted, canonical) ? 0 : 1)
     }
   ' "$canonical_key" "$extracted_keys" || {
-    echo "check-installer-pubkey: $label must include plugin/npm/release-signing.pub" >&2
+    echo "check-installer-pubkey: $label must include npm/release-signing.pub" >&2
     exit 1
   }
 }
@@ -55,7 +55,7 @@ extract_pem_blocks "$repo_root/install.sh" "$install_keys" || {
   echo "check-installer-pubkey: could not extract release signing public keys from install.sh" >&2
   exit 1
 }
-extract_pem_blocks "$repo_root/plugin/npm/scripts/install-binary.js" "$npm_keys" || {
+extract_pem_blocks "$repo_root/npm/scripts/install-binary.js" "$npm_keys" || {
   echo "check-installer-pubkey: could not extract release signing public keys from install-binary.js" >&2
   exit 1
 }
@@ -90,7 +90,7 @@ assert_contains_canonical_key "semantic install code" "$semantic_install_keys"
 # specific key IDs in the guardrail — every legitimate rotation that updates
 # both files in lockstep continues to pass, while a drift between the two
 # installers fails closed.
-npm_key_ids="$(awk "/id:[[:space:]]*'orbit-release-/ { match(\$0, /'[^']+'/); if (RSTART > 0) print substr(\$0, RSTART + 1, RLENGTH - 2) }" "$repo_root/plugin/npm/scripts/install-binary.js")"
+npm_key_ids="$(awk "/id:[[:space:]]*'orbit-release-/ { match(\$0, /'[^']+'/); if (RSTART > 0) print substr(\$0, RSTART + 1, RLENGTH - 2) }" "$repo_root/npm/scripts/install-binary.js")"
 if [ -z "$npm_key_ids" ]; then
   echo "check-installer-pubkey: could not extract any orbit-release-* key IDs from install-binary.js" >&2
   exit 1

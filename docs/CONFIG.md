@@ -311,12 +311,8 @@ rather than inferring success from the session control plane.
 
 ## Cursor Agent CLI
 
-Cursor's plugin integration and Cursor worker execution are separate surfaces.
-The plugin installed by ORB-10943 lets a user operate Orbit from Cursor through
-the Orbit skill and MCP server. It does **not** execute workflow work. The
-`cursor` provider described here launches the local `cursor-agent` binary as an
-Orbit-supervised worker; Cursor cloud agents and marketplace publication are
-not used.
+The `cursor` provider launches the local `cursor-agent` binary as an
+Orbit-supervised worker. Cursor cloud agents are not used.
 
 ### Installation and detection
 
