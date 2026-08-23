@@ -1,5 +1,7 @@
 //! Task CRUD and lifecycle handlers.
 
+use std::sync::Arc;
+
 use crate::state::Ws;
 use axum::body::Body;
 use axum::extract::{Path, RawQuery};
@@ -18,13 +20,57 @@ use orbit_types::task::validate_relative_artifact_path;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 
-use super::{bad_request, map_runtime_error, non_empty_string, server_error, validate_id};
+use super::{
+    bad_request, blocking, map_runtime_error, non_empty_string, server_error, validate_id,
+};
 use crate::projections::{task_locks_json, task_to_json_with_sidecars};
 
 /// Actor recorded for a dashboard-authored comment when the request supplies no
 /// usable human identity. The dashboard is a human-operated surface, so this is
 /// the floor — never the server process's ambient agent identity.
 const HUMAN_ACTOR_LABEL: &str = "human";
+
+/// Which half of [`task_mutation_response`] failed, so each keeps the status
+/// mapping it had when these handlers were written inline: a refused mutation
+/// is the caller's problem, a failed render is the server's.
+enum TaskMutationFailure {
+    Mutation(orbit_core::OrbitError),
+    Render(orbit_core::OrbitError),
+}
+
+/// Apply a task mutation and render its response payload, both on the blocking
+/// pool rather than on the tokio worker serving the request.
+///
+/// ORB-10988 / F2026-07-119: every mutation here descends into an exclusive,
+/// timeout-free `flock` on the task bundle, and the reads that build the
+/// response body hit the store too. Called inline, a burst of dashboard writes
+/// parks one async worker per request until the whole pool is blocked and the
+/// server stops accepting connections; moved here, the burst queues on the
+/// blocking pool and the async workers keep serving.
+async fn task_mutation_response<F>(
+    runtime: Arc<OrbitRuntime>,
+    label: &'static str,
+    mutate: F,
+) -> Response
+where
+    F: FnOnce(&OrbitRuntime) -> Result<Task, orbit_core::OrbitError> + Send + 'static,
+{
+    let rendered = tokio::task::spawn_blocking(move || {
+        let task = mutate(&runtime).map_err(TaskMutationFailure::Mutation)?;
+        let status_by_id = dashboard_status_index(&runtime).map_err(TaskMutationFailure::Render)?;
+        task_to_json_with_sidecars(&runtime, &task, &status_by_id)
+            .map_err(TaskMutationFailure::Render)
+    })
+    .await;
+    match rendered {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(TaskMutationFailure::Mutation(e))) => map_runtime_error(e),
+        Ok(Err(TaskMutationFailure::Render(e))) => server_error(e),
+        Err(join_err) => server_error(orbit_core::OrbitError::Execution(format!(
+            "{label} panicked: {join_err}"
+        ))),
+    }
+}
 
 struct ArtifactResponsePolicy {
     content_type: &'static str,
@@ -627,16 +673,10 @@ pub(super) async fn create_task_action(
         crew: body.crew,
         orchestrator: body.orchestrator,
     };
-    match runtime.add_task_with_identity(params, None, model) {
-        Ok(task) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
-                Ok(value) => Json(value).into_response(),
-                Err(e) => server_error(e),
-            },
-            Err(e) => server_error(e),
-        },
-        Err(e) => map_runtime_error(e),
-    }
+    task_mutation_response(runtime, "task creation", move |runtime| {
+        runtime.add_task_with_identity(params, None, model)
+    })
+    .await
 }
 
 /// `PATCH /tasks/:id` — apply a partial update to a task.
@@ -686,16 +726,11 @@ pub(super) async fn update_task_action(
         context_files: body.context_files,
         upsert_artifacts: Vec::new(),
     };
-    match runtime.update_task_with_identity(id, params, None, model) {
-        Ok(task) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
-                Ok(value) => Json(value).into_response(),
-                Err(e) => server_error(e),
-            },
-            Err(e) => server_error(e),
-        },
-        Err(e) => map_runtime_error(e),
-    }
+    let id = id.to_string();
+    task_mutation_response(runtime, "task update", move |runtime| {
+        runtime.update_task_with_identity(&id, params, None, model)
+    })
+    .await
 }
 
 /// `POST /tasks/:id/comments` — append a human comment to a task.
@@ -726,16 +761,11 @@ pub(super) async fn add_task_comment_action(
         comment: Some(message),
         ..TaskUpdateParams::default()
     };
-    match runtime.update_task_with_identity(id, params, Some(author), None) {
-        Ok(task) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
-                Ok(value) => Json(value).into_response(),
-                Err(e) => server_error(e),
-            },
-            Err(e) => server_error(e),
-        },
-        Err(e) => map_runtime_error(e),
-    }
+    let id = id.to_string();
+    task_mutation_response(runtime, "task comment", move |runtime| {
+        runtime.update_task_with_identity(&id, params, Some(author), None)
+    })
+    .await
 }
 
 /// Resolve the author label recorded for a dashboard comment.
@@ -772,16 +802,11 @@ pub(super) async fn approve_task_action(
         Err(message) => return bad_request(message),
     };
     let body = body.map(|Json(b)| b).unwrap_or_default();
-    match runtime.approve_task(id, body.note, body.comment) {
-        Ok(task) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
-                Ok(value) => Json(value).into_response(),
-                Err(e) => server_error(e),
-            },
-            Err(e) => server_error(e),
-        },
-        Err(e) => map_runtime_error(e),
-    }
+    let id = id.to_string();
+    task_mutation_response(runtime, "task approval", move |runtime| {
+        runtime.approve_task(&id, body.note, body.comment)
+    })
+    .await
 }
 
 pub(super) async fn reject_task_action(
@@ -793,16 +818,11 @@ pub(super) async fn reject_task_action(
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
-    match runtime.reject_task(id, body.note, body.comment) {
-        Ok(task) => match dashboard_status_index(&runtime) {
-            Ok(status_by_id) => match task_to_json_with_sidecars(&runtime, &task, &status_by_id) {
-                Ok(value) => Json(value).into_response(),
-                Err(e) => server_error(e),
-            },
-            Err(e) => server_error(e),
-        },
-        Err(e) => map_runtime_error(e),
-    }
+    let id = id.to_string();
+    task_mutation_response(runtime, "task rejection", move |runtime| {
+        runtime.reject_task(&id, body.note, body.comment)
+    })
+    .await
 }
 
 pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>) -> Response {
@@ -810,9 +830,15 @@ pub(super) async fn archive_task_action(Ws(runtime): Ws, Path(id): Path<String>)
         Ok(id) => id,
         Err(message) => return bad_request(message),
     };
-    match runtime.archive_task(id) {
+    let archived_id = id.to_string();
+    let runtime_clone = runtime.clone();
+    match blocking("task archival", move || {
+        runtime_clone.archive_task(&archived_id)
+    })
+    .await
+    {
         Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
-        Err(e) => map_runtime_error(e),
+        Err(response) => response,
     }
 }
 

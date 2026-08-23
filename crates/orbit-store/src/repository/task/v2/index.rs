@@ -49,6 +49,15 @@ impl TaskV2Store {
         self.tasks_from_ids(ids).map(Some)
     }
 
+    /// Decide whether the generated index still matches the bundles on disk.
+    ///
+    /// Two properties matter under concurrency (ORB-10988 / F2026-07-119).
+    /// First, this compares envelopes, not whole bundles: the index only
+    /// projects envelope fields, so assembling every task's seven-file bundle
+    /// on every list was pure cost. Second, a task whose bundle a concurrent
+    /// writer currently holds is *skipped* rather than propagated as an error —
+    /// validating the index for task B must not fail because task A is being
+    /// created or deleted at that instant.
     fn index_is_usable(&self) -> Result<bool, OrbitError> {
         let registered = self.registry.tasks_for_workspace(&self.workspace_id)?;
         let indexed = self
@@ -62,24 +71,32 @@ impl TaskV2Store {
             let Some(indexed_updated_at) = indexed.get(&binding.task_id) else {
                 return self.rebuild_index_best_effort("missing index row");
             };
-            let bundle = self.read_existing_bundle(&binding.task_id)?;
-            if bundle.envelope.updated_at.to_rfc3339() != *indexed_updated_at {
+            let Some(envelope) = self
+                .bundle_store
+                .read_envelope_if_settled(&binding.task_id)?
+            else {
+                continue;
+            };
+            if envelope.updated_at.to_rfc3339() != *indexed_updated_at {
                 return self.rebuild_index_best_effort("stale index row");
             }
         }
         Ok(true)
     }
 
+    /// Rebuild the generated index from the bundles, degrading to `false` (use
+    /// the bundle scan instead) on any failure. Every caller reaches this from
+    /// a *read*, so a rebuild that cannot run must not fail that read.
     fn rebuild_index_best_effort(&self, reason: &str) -> Result<bool, OrbitError> {
-        let bundles = self.bundle_store.list_bundles()?;
-        let envelopes = bundles
-            .into_iter()
-            .map(|bundle| bundle.envelope)
-            .collect::<Vec<_>>();
-        match self
-            .registry
-            .replace_workspace_task_indexes(&self.workspace_id, &envelopes)
-        {
+        let rebuilt = self.bundle_store.list_bundles().and_then(|bundles| {
+            let envelopes = bundles
+                .into_iter()
+                .map(|bundle| bundle.envelope)
+                .collect::<Vec<_>>();
+            self.registry
+                .replace_workspace_task_indexes(&self.workspace_id, &envelopes)
+        });
+        match rebuilt {
             Ok(()) => Ok(true),
             Err(err) => {
                 orbit_common::tracing::warn!(
@@ -94,13 +111,19 @@ impl TaskV2Store {
         }
     }
 
+    /// Materialize indexed ids into tasks, dropping any whose bundle a
+    /// concurrent writer is publishing or removing. An id that disappears
+    /// between the index query and the bundle read is a task that was deleted,
+    /// not a listing failure.
     fn tasks_from_ids(&self, ids: Vec<String>) -> Result<Vec<Task>, OrbitError> {
-        ids.into_iter()
-            .map(|id| {
-                let bundle = self.read_existing_bundle(&id)?;
-                self.task_from_bundle(bundle)
-            })
-            .collect()
+        let mut tasks = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(bundle) = self.bundle_store.read_bundle_if_settled(&id)? else {
+                continue;
+            };
+            tasks.push(self.task_from_bundle(bundle)?);
+        }
+        Ok(tasks)
     }
 
     pub(super) fn replace_index_best_effort(&self, envelope: &TaskEnvelopeV2, operation: &str) {
@@ -158,7 +181,7 @@ impl TaskV2Store {
         })
     }
 
-    pub(super) fn with_task_lock<T, F>(&self, id: &str, op: F) -> Result<T, OrbitError>
+    pub(crate) fn with_task_lock<T, F>(&self, id: &str, op: F) -> Result<T, OrbitError>
     where
         F: FnOnce() -> Result<T, OrbitError>,
     {
