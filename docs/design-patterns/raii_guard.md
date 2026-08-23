@@ -1,7 +1,7 @@
 ---
 type: pattern
 summary: "RAII Guard Pattern"
-last_validated: 2026-07-26
+last_validated: 2026-08-23
 ---
 # RAII Guard Pattern
 
@@ -60,7 +60,7 @@ Patterns to copy:
 
 ## Reference: `StagedTextFile` — `Drop` as rollback
 
-From `crates/orbit-common/src/utility/fs.rs:112`:
+From `crates/orbit-common/src/fs/io.rs:112`:
 
 ```rust
 pub struct StagedTextFile {
@@ -140,7 +140,7 @@ Patterns to copy:
 
 ## Reference: `FileLockGuard` — resource held until `Drop`
 
-From `crates/orbit-store/src/file_lock/mod.rs`:
+From `crates/orbit-store/src/fs/lock/mod.rs`:
 
 ```rust
 #[must_use = "the advisory lock is released as soon as the guard is dropped"]
