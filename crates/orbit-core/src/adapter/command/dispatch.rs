@@ -222,6 +222,9 @@ impl OrbitRuntime {
                 } else {
                     Vec::new()
                 };
+                let proc_spawn_activity_scoped = managed_run_context();
+                let proc_spawn_environment =
+                    Some(self.execution_env_policy().agent_subprocess_env(&[]));
                 let cwd = std::env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().into_owned());
@@ -233,6 +236,8 @@ impl OrbitRuntime {
                     model_name,
                     workspace_root: None,
                     proc_allowed_programs,
+                    proc_spawn_environment,
+                    proc_spawn_activity_scoped,
                     reservation_owner: reservation_owner_from_env(),
                     ..Default::default()
                 };

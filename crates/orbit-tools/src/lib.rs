@@ -201,6 +201,10 @@ pub struct ToolContext {
     /// `proc_spawn_activity_scoped` is `false`, an empty list preserves the
     /// legacy unrestricted behaviour for direct CLI / v1 callers.
     pub proc_allowed_programs: Vec<String>,
+    /// Complete environment for `proc.spawn`, resolved from the operator's
+    /// execution environment policy by the runtime. `None` uses Orbit's
+    /// credential-free child baseline.
+    pub proc_spawn_environment: Option<Vec<(String, String)>>,
     /// True when `proc.spawn` runs inside an activity-scoped context. Every v2
     /// activity context sets it, so an empty `proc_allowed_programs` denies
     /// every program (fail-closed) rather than degrading to allow-all when an
@@ -233,6 +237,10 @@ impl std::fmt::Debug for ToolContext {
             .field("agent_name", &self.agent_name)
             .field("model_name", &self.model_name)
             .field("proc_allowed_programs", &self.proc_allowed_programs)
+            .field(
+                "has_proc_spawn_environment",
+                &self.proc_spawn_environment.is_some(),
+            )
             .field(
                 "proc_spawn_activity_scoped",
                 &self.proc_spawn_activity_scoped,

@@ -1,6 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use orbit_common::OrbitError;
+use orbit_common::security::child_env::allowlisted_child_env;
 use orbit_common::tracing;
-use orbit_exec::{EnvironmentMode, ExecRequest, NoSandbox, StdinMode, run_process};
+use orbit_exec::{EnvironmentMode, ExecRequest, Sandbox, StdinMode, run_process};
+use orbit_types::policy::FsOperation;
 use orbit_types::tool::{ToolParam, ToolSchema};
 use serde_json::Value;
 
@@ -81,39 +85,111 @@ impl Tool for ProcSpawnTool {
 
         let timeout_ms = proc_spawn_timeout_ms(&input);
 
-        // Filter sensitive env vars instead of inheriting the full environment.
-        let env_pairs: Vec<(String, String)> = std::env::vars()
-            .filter(|(k, _)| !is_sensitive_env_name(k))
-            .collect();
+        // The runtime resolves `[execution.env]` once and hands the complete
+        // child environment to this authoritative spawn boundary. Contexts
+        // without a configuration layer receive Orbit's credential-free
+        // baseline rather than falling back to ambient inheritance.
+        let env_pairs = ctx
+            .proc_spawn_environment
+            .clone()
+            .unwrap_or_else(|| allowlisted_child_env(&[], &[]));
 
         let current_dir = ctx
             .workspace_root
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
 
-        let exec_result = run_process(
-            &ExecRequest {
-                program,
-                args,
-                current_dir,
-                timeout_ms: Some(timeout_ms),
-                stdin_mode: StdinMode::Inherit,
-                environment_mode: EnvironmentMode::ClearAndSet(env_pairs),
-                debug: false,
-            },
-            &NoSandbox,
-        )?;
+        let request = ExecRequest {
+            program,
+            args,
+            current_dir,
+            timeout_ms: Some(timeout_ms),
+            stdin_mode: StdinMode::Inherit,
+            environment_mode: EnvironmentMode::ClearAndSet(env_pairs),
+            debug: false,
+        };
+        let sandbox = ActivityFsSandbox { ctx };
+        let exec_result = run_process(&request, &sandbox)?;
 
         serde_json::to_value(exec_result)
             .map_err(|e| OrbitError::Execution(format!("serialize exec result: {e}")))
     }
 }
 
-/// Returns `true` if the environment variable name looks like it holds a secret.
-fn is_sensitive_env_name(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    let patterns = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"];
-    patterns.iter().any(|p| upper.contains(p))
+/// Request-time filesystem gate for activity-scoped subprocesses.
+///
+/// An allowed program does not grant access to a path that the owning
+/// activity cannot read. Existing path arguments (including `--key=path`)
+/// are resolved symlink-safely by the same policy engine used by filesystem
+/// tools before the child is created.
+struct ActivityFsSandbox<'a> {
+    ctx: &'a ToolContext,
+}
+
+impl Sandbox for ActivityFsSandbox<'_> {
+    fn validate(&self, request: &ExecRequest) -> Result<(), OrbitError> {
+        if !self.ctx.proc_spawn_activity_scoped {
+            return Ok(());
+        }
+        let (Some(policy), Some(profile), Some(workspace_root)) = (
+            self.ctx.policy_engine.as_ref(),
+            self.ctx.fs_profile.as_deref(),
+            self.ctx.workspace_root.as_deref(),
+        ) else {
+            return Err(OrbitError::PolicyDenied(
+                "activity-scoped proc.spawn is missing its resolved filesystem policy".to_string(),
+            ));
+        };
+        let cwd = request
+            .current_dir
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| workspace_root.to_path_buf());
+        for path in request
+            .args
+            .iter()
+            .filter_map(|arg| path_argument(arg, &cwd))
+        {
+            let evaluation =
+                policy.check_resolved(workspace_root, profile, FsOperation::Read, &path)?;
+            if evaluation.allowed {
+                continue;
+            }
+            tracing::warn!(
+                target: "orbit.policy.deny",
+                tool = "proc.spawn",
+                path = evaluation.path.as_str(),
+                profile = evaluation.profile.as_str(),
+                matched_rule = evaluation.matched_rule.as_str(),
+            );
+            return Err(OrbitError::PolicyDenied(format!(
+                "proc.spawn path '{}' is denied by fsProfile '{}' (matched rule: {})",
+                evaluation.path, evaluation.profile, evaluation.matched_rule
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn path_argument(argument: &str, cwd: &Path) -> Option<PathBuf> {
+    let candidate = argument
+        .strip_prefix('-')
+        .and_then(|option| option.split_once('=').map(|(_, value)| value))
+        .unwrap_or(argument);
+    if candidate.is_empty() || candidate == "-" {
+        return None;
+    }
+    let path = Path::new(candidate);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    (path.is_absolute()
+        || candidate.starts_with('.')
+        || resolved.exists()
+        || resolved.symlink_metadata().is_ok())
+    .then_some(resolved)
 }
 
 fn proc_spawn_timeout_ms(input: &Value) -> u64 {

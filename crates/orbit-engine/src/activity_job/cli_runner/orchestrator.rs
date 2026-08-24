@@ -217,6 +217,19 @@ pub fn run_cli_backend(
         agent_model: model.as_deref(),
         agent_task_id: task_id,
     });
+    dispatch_env.push(("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()));
+    if !spec.tools.is_empty() {
+        dispatch_env.push(("ORBIT_ACTIVITY_TOOLS".to_string(), spec.tools.join(",")));
+    }
+    if let Some(programs) = spec.proc_allowed_programs.as_deref() {
+        dispatch_env.push((
+            "ORBIT_PROC_ALLOWED_PROGRAMS".to_string(),
+            programs.join(","),
+        ));
+    }
+    if let Some(profile) = fs_profile {
+        dispatch_env.push(("ORBIT_ACTIVITY_FS_PROFILE".to_string(), profile.to_string()));
+    }
     dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );

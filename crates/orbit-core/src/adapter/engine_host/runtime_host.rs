@@ -516,6 +516,7 @@ impl RuntimeHost for OrbitRuntime {
         let proc_allowed_programs = proc_allowed_programs
             .map(|programs| programs.to_vec())
             .unwrap_or_default();
+        let proc_spawn_environment = Some(self.execution_env_policy().agent_subprocess_env(&[]));
 
         ToolContext {
             cwd: std::env::current_dir()
@@ -526,6 +527,7 @@ impl RuntimeHost for OrbitRuntime {
             fs_profile: Some(fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE).to_string()),
             fs_audit,
             proc_allowed_programs,
+            proc_spawn_environment,
             proc_spawn_activity_scoped,
             reservation_owner: run_id.map(str::trim).filter(|value| !value.is_empty()).map(
                 |owner_run_id| ReservationOwnerContext {
