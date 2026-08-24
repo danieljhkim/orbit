@@ -9,7 +9,9 @@ use orbit_types::workspace::{
 };
 use serde_json::json;
 
-use super::super::discovery::{discovery_tool_definitions, execute_discovery_tool};
+use super::super::discovery::{
+    discovery_tool_definitions, execute_discovery_tool, execute_federated_workspace_discovery,
+};
 use super::super::surface::canonical_mcp_tool_definitions;
 
 #[test]
@@ -118,6 +120,19 @@ fn discovery_projects_active_workspaces_with_a_local_checkout() {
             .map(|workspace| workspace["id"].as_str().expect("workspace id"))
             .collect::<Vec<_>>(),
         ["ws_local", "ws_replica"]
+    );
+
+    let federated = execute_federated_workspace_discovery(&registry, "hm_local");
+    assert_eq!(federated["machine_id"], "hm_local");
+    assert_eq!(
+        federated["workspaces"]
+            .as_array()
+            .expect("federated rows")
+            .iter()
+            .map(|workspace| workspace["id"].as_str().expect("workspace id"))
+            .collect::<Vec<_>>(),
+        ["ws_local", "ws_replica", "ws_invalid"],
+        "the private destination path retains Invalid local checkouts",
     );
     assert!(matches!(
         execute_discovery_tool("orbit.host.future", &registry, "hm_local"),

@@ -1,14 +1,21 @@
 //! The mux against fake destinations: no SSH, no local registry, no cache.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use orbit_common::OrbitError;
 use orbit_types::tool::{McpToolScope, ToolSessionContext};
+use orbit_types::workspace::{
+    WorkspaceCheckout, WorkspaceCheckoutRole, WorkspaceRegistry, WorkspaceStatus,
+};
 use serde_json::Value;
 
+use super::super::config::Destination;
 use super::super::host::{FEDERATED_WORKSPACE_LIST_TOOL, FederatedMcpHost};
-use super::super::probe::DestinationSnapshot;
+use super::super::probe::{
+    DestinationProbe, DestinationSnapshot, RoutedSession, snapshot_from_discovery_content,
+};
 use super::fixtures::{OWNER_MACHINE, REPLICA_MACHINE, ScriptedProbe, destination, workspace};
 use crate::McpHost;
 
@@ -60,6 +67,24 @@ fn list(host: &FederatedMcpHost) -> Vec<Value> {
         .as_array()
         .expect("workspace rows")
         .clone()
+}
+
+struct RegistryBackedProbe {
+    registry: WorkspaceRegistry,
+}
+
+impl DestinationProbe for RegistryBackedProbe {
+    fn probe(&self, destination: &Destination) -> Result<DestinationSnapshot, OrbitError> {
+        let content =
+            crate::execute_federated_workspace_discovery(&self.registry, &destination.machine_id);
+        snapshot_from_discovery_content(destination, &content)
+    }
+
+    fn open_route(&self, _destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError> {
+        Err(OrbitError::Execution(
+            "registry-backed discovery fixture does not route tools".to_string(),
+        ))
+    }
 }
 
 #[test]
@@ -254,6 +279,72 @@ fn an_inactive_workspace_is_listed_rather_than_filtered_out() {
     assert_eq!(rows[0]["reachability"], "reachable");
     assert_eq!(rows[0]["checkout_health"], "invalid");
     assert_eq!(rows[0]["selector"], format!("{OWNER_MACHINE}/ws_broken"));
+}
+
+#[test]
+fn destination_registry_discovery_preserves_invalid_owner_and_replica_descriptors() {
+    let owner = workspace("ws_owner", Some(OWNER_MACHINE));
+    let replica = workspace("ws_replica", Some(REPLICA_MACHINE));
+    let mut invalid = workspace("ws_invalid", Some(OWNER_MACHINE));
+    invalid.status = WorkspaceStatus::Invalid;
+    let checkout = |workspace_id: &str, role| WorkspaceCheckout {
+        workspace_id: workspace_id.to_string(),
+        repo_root: PathBuf::from(format!("/tmp/{workspace_id}")),
+        orbit_dir: PathBuf::from(format!("/tmp/{workspace_id}/.orbit")),
+        role: Some(role),
+        owner_machine_id: None,
+        path_overrides: Vec::new(),
+    };
+    let registry = WorkspaceRegistry {
+        workspaces: vec![owner, replica, invalid],
+        checkouts: vec![
+            checkout("ws_owner", WorkspaceCheckoutRole::Owner),
+            checkout("ws_replica", WorkspaceCheckoutRole::Replica),
+            checkout("ws_invalid", WorkspaceCheckoutRole::Owner),
+        ],
+        ..WorkspaceRegistry::default()
+    };
+    let host = FederatedMcpHost::new(
+        vec![destination("orbit-owner", OWNER_MACHINE)],
+        Arc::new(RegistryBackedProbe { registry }),
+    );
+
+    let rows = list(&host);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["id"].as_str().expect("workspace id"))
+            .collect::<Vec<_>>(),
+        ["ws_owner", "ws_replica", "ws_invalid"],
+    );
+    assert_eq!(
+        rows[0]["capabilities"],
+        serde_json::json!(["control_plane", "execute"])
+    );
+    assert_eq!(rows[1]["capabilities"], serde_json::json!(["execute"]));
+    assert_eq!(rows[2]["reachability"], "reachable");
+    assert_eq!(rows[2]["checkout_health"], "invalid");
+
+    let pinned = BTreeSet::from([
+        "selector",
+        "host",
+        "machine_id",
+        "reachability",
+        "checkout_health",
+        "capabilities",
+    ]);
+    for row in rows {
+        let keys = row
+            .as_object()
+            .expect("descriptor object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert!(
+            pinned.is_subset(&keys),
+            "descriptor is missing pinned keys: {row}"
+        );
+    }
 }
 
 #[test]

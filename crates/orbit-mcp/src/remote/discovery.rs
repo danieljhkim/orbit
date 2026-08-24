@@ -7,8 +7,17 @@ use orbit_types::tool::{
     McpToolDefinition, McpToolDefinitionError, McpToolScope, ToolParam, ToolSchema,
     validate_mcp_tool_definitions,
 };
-use orbit_types::workspace::{WorkspaceRegistry, WorkspaceStatus};
+use orbit_types::workspace::{Workspace, WorkspaceRegistry, WorkspaceStatus};
 use serde_json::{Value, json};
+
+/// Private wire name used by the federated mux to inspect every local checkout.
+///
+/// This is deliberately absent from [`discovery_tool_definitions`]: direct v1
+/// clients continue to see and call only `orbit.workspace.list`, whose Active
+/// filter is part of that surface. The destination server recognizes this
+/// exact private request without adding it to the advertised tool surface.
+pub const FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL: &str =
+    "orbit_federated_destination_workspace_list";
 
 pub(super) fn discovery_tool_definitions() -> Result<Vec<McpToolDefinition>, McpToolDefinitionError>
 {
@@ -62,18 +71,9 @@ pub fn execute_discovery_tool(
 ) -> Result<Value, OrbitError> {
     match name {
         "orbit.workspace.list" => {
-            let local_workspace_ids = registry
-                .checkouts
-                .iter()
-                .map(|checkout| checkout.workspace_id.as_str())
-                .collect::<BTreeSet<_>>();
-            let workspaces = registry
-                .workspaces
-                .iter()
-                .filter(|workspace| {
-                    workspace.status == WorkspaceStatus::Active
-                        && local_workspace_ids.contains(workspace.id.as_str())
-                })
+            let workspaces = locally_bound_workspaces(registry)
+                .into_iter()
+                .filter(|workspace| workspace.status == WorkspaceStatus::Active)
                 .collect::<Vec<_>>();
             Ok(json!({
                 "machine_id": local_machine_id,
@@ -82,4 +82,33 @@ pub fn execute_discovery_tool(
         }
         _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
     }
+}
+
+/// Project every workspace with a checkout registered on this destination.
+///
+/// Unlike the public v1 discovery tool, this internal federated path retains
+/// Invalid rows so the mux can report their checkout health instead of
+/// silently dropping them.
+pub fn execute_federated_workspace_discovery(
+    registry: &WorkspaceRegistry,
+    local_machine_id: &str,
+) -> Value {
+    let workspaces = locally_bound_workspaces(registry);
+    json!({
+        "machine_id": local_machine_id,
+        "workspaces": workspaces,
+    })
+}
+
+fn locally_bound_workspaces(registry: &WorkspaceRegistry) -> Vec<&Workspace> {
+    let local_workspace_ids = registry
+        .checkouts
+        .iter()
+        .map(|checkout| checkout.workspace_id.as_str())
+        .collect::<BTreeSet<_>>();
+    registry
+        .workspaces
+        .iter()
+        .filter(|workspace| local_workspace_ids.contains(workspace.id.as_str()))
+        .collect()
 }

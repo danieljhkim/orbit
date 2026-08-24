@@ -35,8 +35,10 @@ use serde_json::Value;
 pub use adapter::OrbitToolServer;
 pub use listener::{DEFAULT_MCP_LISTEN_PORT, ListenerExposure, McpListener};
 pub use remote::{
-    McpServerIdentity, McpSessionAuthority, RemoteProxyArgs, canonical_mcp_tool_definitions,
-    execute_discovery_tool, mcp_server_identity, safe_mcp_tool_names, serve_mcp_remote_proxy,
+    FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL, McpServerIdentity, McpSessionAuthority,
+    RemoteProxyArgs, canonical_mcp_tool_definitions, execute_discovery_tool,
+    execute_federated_workspace_discovery, mcp_server_identity, safe_mcp_tool_names,
+    serve_mcp_remote_proxy,
 };
 
 /// Back-end for the complete MCP tool surface.
