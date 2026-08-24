@@ -18,7 +18,9 @@ use serde_json::{Map, Value};
 
 use super::OrbitToolServer;
 use super::name_map::{ToolNameCollision, build_name_map};
-use super::schema::{WorkspaceBinding, ensure_workspace_selector, schema_to_tool};
+use super::schema::{
+    SelectorAdvertisement, WorkspaceBinding, ensure_workspace_selector, schema_to_tool,
+};
 use super::structured::mcp_structured_content;
 use crate::error::tool_error_result;
 
@@ -59,7 +61,7 @@ impl OrbitToolServer {
             &definition.schema.name,
             &definition.schema.parameters,
         );
-        ensure_workspace_selector(&mut schema, definition, self.session_workspace_binding());
+        ensure_workspace_selector(&mut schema, definition, self.selector_advertisement());
         Ok(schema)
     }
 
@@ -68,7 +70,16 @@ impl OrbitToolServer {
     ///
     /// `tools/list` is answered per session, so the advertised selector
     /// documents the session the caller is actually in rather than a generic
-    /// "it depends".
+    /// "it depends". Federated mux sessions always advertise the host-qualified
+    /// copy-from-list form, even if initialize bound a v1 `ws_*`.
+    fn selector_advertisement(&self) -> SelectorAdvertisement {
+        if self.host.federated_workspace_selectors() {
+            SelectorAdvertisement::Federated
+        } else {
+            SelectorAdvertisement::Authoritative(self.session_workspace_binding())
+        }
+    }
+
     fn session_workspace_binding(&self) -> WorkspaceBinding {
         if self.session_context().workspace.is_some() {
             WorkspaceBinding::Bound

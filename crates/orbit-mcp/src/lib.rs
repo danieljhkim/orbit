@@ -53,6 +53,18 @@ pub trait McpHost: Send + Sync + 'static {
         input: Value,
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
+
+    /// Whether workspace-scoped tools on this host take the federated
+    /// host-qualified selector rather than a v1 local selector.
+    ///
+    /// The default is the authoritative server: a registered name, a logical
+    /// `ws_*`, or an absolute path. The federated mux overrides this so
+    /// `tools/list` tells callers to copy `selector` from federated
+    /// `orbit.workspace.list` and routing refuses anything else as
+    /// `unknown_selector`.
+    fn federated_workspace_selectors(&self) -> bool {
+        false
+    }
 }
 
 /// Serve the given host over MCP stdio with a default local context.

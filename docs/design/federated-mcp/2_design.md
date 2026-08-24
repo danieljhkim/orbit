@@ -11,7 +11,7 @@ summary: Federated MCP mux, selector, capability split, list schema, and fail-cl
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11017, ORB-11015, ORB-11014, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Design
@@ -37,7 +37,9 @@ Every workspace-scoped federated call carries a **structured, caller-uninterpret
 
 The stable key is `machine_id` (`hm_…`), not renameable `host_id`. Example form: `hm_<id>/ws_orbit`. A display host name such as `orbit-linux/ws_orbit` is not a valid selector.
 
-A token that is not uniquely host-qualified (a bare `ws_*`) is `unknown_selector`. Duplicate `machine_id` across configured destinations is config-load `ambiguous_destination`, not a per-call routing outcome.
+A token that is not uniquely host-qualified (a bare `ws_*`, including a v1 session-defaulted form) is `unknown_selector` before the mux opens a destination session. Duplicate `machine_id` across configured destinations is config-load `ambiguous_destination`, not a per-call routing outcome.
+
+Federated `tools/list` advertises that callers copy `selector` from federated `orbit.workspace.list`. It does not present cwd, a registered name, or a bare `ws_*` as valid. Federated `orbit.task.show` requires the host-qualified selector; the v1 id-only default does not apply in this namespace. `orbit mcp serve --mode federated` does not take `--workspace ws_*`. v1 bound sessions (`orbit mcp serve --workspace ws_orbit`) and the v1 `tools/list` snapshot stay unchanged.
 
 ## 3. Capabilities mapped onto owner and replica
 
@@ -136,5 +138,6 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 - [ORB-11010] — closed the PR #1139 review contract holes in this folder
 - [ORB-11014] — federated `orbit.workspace.list`
 - [ORB-11015] — fail-closed routing of host-qualified selectors
+- [ORB-11017] — federated workspace param is the host-qualified selector
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

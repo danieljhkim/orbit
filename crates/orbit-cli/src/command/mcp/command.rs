@@ -78,7 +78,9 @@ pub enum ServeMode {
     /// This mode serves no workspace of its own and binds to none. It lists
     /// each configured destination's workspaces as live descriptors, probing
     /// the destinations on every call, and includes destinations that are
-    /// unreachable right now rather than hiding them.
+    /// unreachable right now rather than hiding them. Workspace-scoped tools
+    /// take the host-qualified `selector` copied from that list; a registered
+    /// name, a bare `ws_*`, or `--workspace` is not a federated selector.
     Federated,
 }
 
