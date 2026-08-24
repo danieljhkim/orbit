@@ -8,12 +8,12 @@ status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, spec]
 related_features: [federated-mcp, host-registry, mcp-bridge]
-related_artifacts: [ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Federated workspace MCP
 
-The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. The federated list is implemented in [ORB-11014]; fail-closed routing of copied `hm_*/ws_*` selectors is implemented in [ORB-11015].
+The federated MCP surface is a **mux of operator-configured destinations**. It presents one caller-facing MCP namespace, lists every configured destination's workspaces as live descriptors, and routes a structured, caller-uninterpreted host-qualified selector to the encoded destination. It is **not** a host-registry evolution, **not** a fleet inventory, and **not** automatic owner discovery. Direct SSH stdio to one chosen host remains v1. The federated list is implemented in [ORB-11014]; fail-closed routing of copied `hm_*/ws_*` selectors is implemented in [ORB-11015]; federated `tools/list` workspace-param advertisement and `orbit.task.show` requiring that selector are implemented in [ORB-11017].
 
 ## Why This Exists
 
@@ -48,9 +48,10 @@ Each row has exactly two required keys: `ssh`, an SSH alias or `user@host` trans
 2. Callers must not parse the token and must not construct it from `host_id` or by concatenating remembered identifiers. The only caller-facing way to obtain a selector is to copy the `selector` field from federated `orbit_workspace_list`.
 3. Display names such as `orbit-linux/ws_orbit` are not selectors.
 4. The selector is addressing data, not a path, URL, logical-only workspace ID, or authorization credential. Possession of a selector is not authorization.
-5. Every workspace-scoped federated tool accepts the selector. The gateway routes that call to the encoded destination.
-6. A token that is not uniquely host-qualified (a bare `ws_*`, a display host name, or any other form that does not match the normative encoding) is `unknown_selector`, not `ambiguous_destination`.
+5. Every workspace-scoped federated tool accepts the selector. The gateway routes that call to the encoded destination. Federated `tools/list` advertises that callers must copy `selector` from federated `orbit.workspace.list` and must not treat cwd, a registered name, or a bare `ws_*` as valid. Federated `orbit.task.show` requires the host-qualified selector and does not inherit the v1 id-only default.
+6. A token that is not uniquely host-qualified (a bare `ws_*`, a display host name, a v1 session-defaulted `ws_*`, or any other form that does not match the normative encoding) is `unknown_selector` **before forwarding**, not `ambiguous_destination`.
 7. Duplicate `machine_id` across configured destinations is a **config-load** `ambiguous_destination`. The mux must not treat that collision as a per-call routing outcome.
+8. Federated serve does not take `--workspace ws_*`. A bound session, if any, may only hold a host-qualified selector. v1 `orbit mcp serve --workspace` and the v1 `tools/list` snapshot stay unchanged.
 
 ## Tool classes
 
@@ -195,4 +196,4 @@ A disconnected or failed host therefore removes the affected route from useful s
 
 ## Agent Signature
 
-Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014]; fail-closed routing of host-qualified selectors implemented in [ORB-11015].
+Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014]; fail-closed routing of host-qualified selectors implemented in [ORB-11015]; federated workspace-param advertisement implemented in [ORB-11017].

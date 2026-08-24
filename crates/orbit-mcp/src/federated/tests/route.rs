@@ -262,6 +262,55 @@ fn a_session_announced_selector_routes_like_a_call_argument() {
 }
 
 #[test]
+fn a_session_defaulted_bare_workspace_id_is_unknown_before_forwarding() {
+    let (host, log) = routed_mux();
+    let context = ToolSessionContext {
+        workspace: Some("ws_orbit".to_string()),
+        ..ToolSessionContext::default()
+    };
+
+    let error = host
+        .call_tool("orbit.crew.list", json!({}), context)
+        .expect_err("bare session default must not route");
+    assert!(
+        matches!(error, OrbitError::UnknownSelector(_)),
+        "session-defaulted v1 form is unknown_selector: {error}"
+    );
+    assert!(
+        log.calls().is_empty(),
+        "a bare ws_* must not touch a destination, including when initialize injected it"
+    );
+}
+
+#[test]
+fn federated_task_show_without_a_host_qualified_selector_is_refused() {
+    let (host, log) = routed_mux();
+
+    let omitted = host
+        .call_tool(
+            "orbit.task.show",
+            json!({ "id": "ORB-00001" }),
+            ToolSessionContext::default(),
+        )
+        .expect_err("federated task.show does not inherit id-only default");
+    assert!(
+        matches!(omitted, OrbitError::InvalidInput(_)),
+        "omitting the selector is refused: {omitted}"
+    );
+
+    let bare = call_err(&host, "orbit.task.show", "ws_orbit");
+    assert!(
+        matches!(bare, OrbitError::UnknownSelector(_)),
+        "a bare ws_* on task.show is unknown_selector: {bare}"
+    );
+    assert!(
+        log.calls().is_empty(),
+        "refused federated task.show must not forward: {calls:?}",
+        calls = log.calls()
+    );
+}
+
+#[test]
 fn an_identity_mismatch_on_the_live_route_is_unreachable() {
     let probe = ScriptedProbe::new()
         .answering(OWNER_MACHINE, owner_snapshot())

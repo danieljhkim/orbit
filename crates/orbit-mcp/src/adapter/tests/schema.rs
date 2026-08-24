@@ -151,7 +151,14 @@ fn definition_with_scope(
 }
 
 fn advertised_properties(definition: &McpToolDefinition) -> serde_json::Map<String, Value> {
-    let server = OrbitToolServer::new(Arc::new(SessionContextHost::default()));
+    advertised_properties_on(definition, SessionContextHost::default())
+}
+
+fn advertised_properties_on(
+    definition: &McpToolDefinition,
+    host: SessionContextHost,
+) -> serde_json::Map<String, Value> {
+    let server = OrbitToolServer::new(Arc::new(host));
     let schema = server
         .input_schema_for(definition)
         .expect("input schema resolves");
@@ -334,18 +341,119 @@ fn an_unbound_session_advertises_the_selector_as_required() {
 }
 
 fn selector_description(definition: &McpToolDefinition, launch_workspace: Option<&str>) -> String {
+    selector_description_on(definition, SessionContextHost::default(), launch_workspace)
+}
+
+fn selector_description_on(
+    definition: &McpToolDefinition,
+    host: SessionContextHost,
+    launch_workspace: Option<&str>,
+) -> String {
     let context = ToolSessionContext {
         workspace: launch_workspace.map(ToOwned::to_owned),
         ..ToolSessionContext::default()
     };
-    let server =
-        OrbitToolServer::new_with_context(Arc::new(SessionContextHost::default()), context);
+    let server = OrbitToolServer::new_with_context(Arc::new(host), context);
     server
         .input_schema_for(definition)
         .expect("input schema resolves")["properties"]["workspace"]["description"]
         .as_str()
         .expect("selector carries routing guidance")
         .to_string()
+}
+
+/// Federated `tools/list` must tell callers to copy the list token and must
+/// not present a v1 local form (cwd, registered name, bare `ws_*`) as valid.
+#[test]
+fn federated_workspace_scoped_tool_advertises_copy_from_list() {
+    let definition = definition_with_scope(
+        "orbit.task.list",
+        vec![param("limit")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties_on(&definition, SessionContextHost::federated());
+    let description = properties["workspace"]
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("federated selector carries routing guidance");
+
+    assert_federated_selector_description(description);
+}
+
+#[test]
+fn federated_task_show_requires_the_host_qualified_selector() {
+    let declared = ToolParam {
+        name: "workspace".to_string(),
+        description: "Optional explicit workspace filter. `id` is resolved globally by default"
+            .to_string(),
+        param_type: "string".to_string(),
+        required: false,
+    };
+    let definition = definition_with_scope(
+        "orbit.task.show",
+        vec![param("id"), declared],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let properties = advertised_properties_on(&definition, SessionContextHost::federated());
+    let description = properties["workspace"]
+        .get("description")
+        .and_then(Value::as_str)
+        .expect("federated task.show advertises the host-qualified selector");
+
+    assert_federated_selector_description(description);
+}
+
+/// A v1 `ws_*` initialize binding must not rewrite federated list copy as
+/// "optional in this session" with registered-name / bare-`ws_*` wording.
+#[test]
+fn federated_advertisement_ignores_a_v1_session_binding() {
+    let definition = definition_with_scope(
+        "orbit.task.update",
+        vec![param("id")],
+        McpToolScope::WorkspaceRequired,
+    );
+
+    let description = selector_description_on(
+        &definition,
+        SessionContextHost::federated(),
+        Some("ws_orbit"),
+    );
+
+    assert_federated_selector_description(&description);
+    assert!(
+        !description.contains("Optional in this session"),
+        "federated list must not inherit v1 bound-session wording: {description}"
+    );
+}
+
+fn assert_federated_selector_description(description: &str) {
+    assert!(
+        description.contains("selector") && description.contains("orbit.workspace.list"),
+        "federated selector must instruct copying from the federated list: {description}"
+    );
+    let lowered = description.to_ascii_lowercase();
+    assert!(
+        lowered.contains("copy"),
+        "federated selector must say to copy the list field: {description}"
+    );
+    assert!(
+        !description.contains("registered workspace name"),
+        "federated selector must not present a registered name as valid: {description}"
+    );
+    assert!(
+        !description.contains("ws_*"),
+        "federated selector must not present a bare ws_* as valid: {description}"
+    );
+    assert!(
+        !lowered.contains("cwd") && !description.contains("absolute path"),
+        "federated selector must not present cwd or an absolute path as valid: {description}"
+    );
+    assert!(
+        !description.contains("orbit mcp serve --workspace"),
+        "federated serve does not take --workspace: {description}"
+    );
 }
 
 /// The managed-executor shape: the server knows its workspace, the client

@@ -91,9 +91,17 @@ impl crate::McpHost for EchoArrayHost {
 #[derive(Default)]
 pub(super) struct SessionContextHost {
     calls: StdMutex<Vec<(String, Value, ToolSessionContext)>>,
+    federated: bool,
 }
 
 impl SessionContextHost {
+    pub(super) fn federated() -> Self {
+        Self {
+            federated: true,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn calls(&self) -> Vec<(String, Value, ToolSessionContext)> {
         self.calls.lock().expect("calls lock").clone()
     }
@@ -105,6 +113,10 @@ impl crate::McpHost for SessionContextHost {
             tool_schema("orbit.task.list"),
             tool_schema("orbit.task.add"),
         ])
+    }
+
+    fn federated_workspace_selectors(&self) -> bool {
+        self.federated
     }
 
     fn call_tool(

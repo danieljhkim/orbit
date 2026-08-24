@@ -119,10 +119,13 @@ impl FederatedMcpHost {
     ) -> Result<Value, OrbitError> {
         let token = workspace_selector(&input, &session_context).ok_or_else(|| {
             OrbitError::InvalidInput(format!(
-                "tool '{name}' requires a workspace selector; pass `workspace` in the tool call \
-                 or MCP initialize metadata"
+                "tool '{name}' requires a host-qualified workspace selector; copy `selector` from \
+                 federated orbit.workspace.list"
             ))
         })?;
+        // Parse before opening a destination session: a bare `ws_*`, display
+        // form, or any other non-host-qualified token is unknown_selector, even
+        // when initialize injected the v1 local default.
         let parsed = HostQualifiedSelector::from_str(token)?;
         let destination = self
             .destinations
@@ -198,6 +201,10 @@ impl crate::McpHost for FederatedMcpHost {
             return Ok(self.list_workspaces());
         }
         self.route_workspace_call(name, input, session_context)
+    }
+
+    fn federated_workspace_selectors(&self) -> bool {
+        true
     }
 }
 

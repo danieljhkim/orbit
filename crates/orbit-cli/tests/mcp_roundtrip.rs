@@ -1543,6 +1543,86 @@ fn managed_mcp_config_updates_a_task_without_a_workspace_argument() {
     );
 }
 
+/// ORB-11017: federated `tools/list` must tell callers to copy `selector` from
+/// the federated list. A bare `ws_*` — including a v1 session default — is
+/// `unknown_selector` before forwarding. `orbit.task.show` does not inherit
+/// the v1 id-only default in this namespace.
+#[test]
+fn federated_mcp_serve_requires_the_host_qualified_list_selector() {
+    let workspace = McpWorkspace::init();
+    std::fs::write(
+        workspace.home.join(".orbit").join("mcp-destinations.toml"),
+        "[[destinations]]\nssh = \"orbit-linux\"\nmachine_id = \"hm_alpha\"\n",
+    )
+    .expect("write federated destinations");
+
+    let child = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--mode", "federated"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn federated MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "federated-roundtrip", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    for tool_name in ["orbit_task_list", "orbit_task_show", "orbit_crew_list"] {
+        let description = tool_workspace_description(&listed, tool_name);
+        assert!(
+            description.contains("selector") && description.contains("orbit.workspace.list"),
+            "{tool_name} must instruct copying from the federated list: {description}"
+        );
+        assert!(
+            description.to_ascii_lowercase().contains("copy"),
+            "{tool_name} must say to copy the list field: {description}"
+        );
+        assert!(
+            !description.contains("registered workspace name")
+                && !description.contains("ws_*")
+                && !description.contains("absolute path")
+                && !description.to_ascii_lowercase().contains("cwd"),
+            "{tool_name} must not present a v1 local form as valid: {description}"
+        );
+    }
+
+    let omitted = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
+    assert_ne!(
+        omitted["code"], "unknown_selector",
+        "omitting the selector is a missing-argument refusal, not a minted token: {omitted}"
+    );
+    assert!(
+        omitted["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("host-qualified")
+                || message.contains("requires a workspace selector")),
+        "federated task.show without a selector is refused: {omitted}"
+    );
+
+    let bare_show = client.call_tool_err(
+        "orbit_task_show",
+        json!({ "id": "ORB-00001", "workspace": "ws_orbit" }),
+    );
+    assert_eq!(
+        bare_show["code"], "unknown_selector",
+        "a bare ws_* on federated task.show is unknown_selector: {bare_show}"
+    );
+
+    let bare_list = client.call_tool_err("orbit_crew_list", json!({ "workspace": "ws_orbit" }));
+    assert_eq!(
+        bare_list["code"], "unknown_selector",
+        "a bare ws_* is unknown_selector before forwarding: {bare_list}"
+    );
+}
+
 /// ORB-10967 / ORB-10961: the same contract from a linked job worktree whose
 /// checkout identity diverged from the logical `ws_*` the registry knows.
 ///
