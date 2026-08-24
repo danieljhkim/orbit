@@ -68,10 +68,12 @@ pub use orbit_tools::prepare_remote_task_artifact_put;
 pub use application::docs::{DocType, TaskRelatedDoc};
 pub use application::job::{PipelineInvokeResult, PipelineWaitEntry};
 pub use application::search::{
-    GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, task_selectors_contain_path,
+    GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, HitWorkspace, WorkspaceSearchReport,
+    task_selectors_contain_path,
 };
 pub use application::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
 pub use context::ActorIdentity;
+pub use runtime::workspace_catalog::{FederatedWorkspaceTarget, WorkspaceCatalog, WorkspaceScope};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
 pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};

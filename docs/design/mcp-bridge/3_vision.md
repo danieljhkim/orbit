@@ -1,16 +1,17 @@
 ---
 title: Orbit MCP — Vision
 owner: codex
-last_updated: 2026-08-15
+last_updated: 2026-08-23
 last_validated: 2026-08-15
 status: Draft
 feature: mcp-bridge
 doc_role: vision
 type: design
-summary: Evidence-gated extensions beyond the deliberately small direct-SSH MCP v1.
+summary: Evidence-gated extensions beyond the deliberately small direct-SSH MCP v1, including a federated-namespace-only mux exception.
 tags: [mcp, ssh, authorization, audit]
 paths: ["crates/orbit-mcp/**", "crates/orbit-core/**", "crates/orbit-registry/**"]
-related_features: [host-registry, mcp-session-context]
+related_features: [host-registry, mcp-session-context, federated-mcp]
+related_artifacts: [ORB-11009, ORB-11008]
 ---
 
 # Orbit MCP — Vision
@@ -58,10 +59,21 @@ merely to avoid launching SSH.
 
 ## 5. Multi-host routing
 
-The v1 client chooses one destination and that server answers only from its own
-state. Automatic owner discovery, relays, replication, or fleet placement should
-be considered separate products, not incremental proxy features. Each needs a
-measured use case strong enough to justify new authority and failure modes.
+V1 remains one chosen destination answering only from its own state. The
+client-side proxy stays byte-transparent and does not relay a call onward.
+That rule continues to describe **current behavior** in [`2_design.md`](./2_design.md);
+this section does not claim a mux is implemented.
+
+The proposed federated MCP surface is an **explicit exception** to those v1
+no-relay / byte-transparent rules, **for the federated namespace only**. A mux
+in front of operator-configured destinations may inspect a host-qualified
+selector and forward the call to the encoded destination. Direct SSH stdio to
+one chosen host is unchanged.
+
+The exception does **not** admit automatic owner discovery, replication,
+relays-as-product, or fleet placement. Those stay out. The contract is
+[federated-mcp](../federated-mcp/specs/federated-workspace-mcp.md)
+([ORB-11009], citing [ORB-11008]).
 
 ## 6. Evaluation gates
 
@@ -77,3 +89,10 @@ replaces them:
 
 Current behavior is described in [`2_design.md`](./2_design.md). The machine-
 readable contract is [`references/conformance-v1.yaml`](./references/conformance-v1.yaml).
+
+## Task References
+
+- [ORB-11008] recorded federated MCP policy that this vision now excepts from v1 no-relay
+- [ORB-11009] admitted the federated-namespace mux exception in §5 without claiming it is implemented
+
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

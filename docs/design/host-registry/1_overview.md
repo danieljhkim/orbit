@@ -3,22 +3,22 @@ summary: "Host Registry — Overview"
 type: design
 title: "Host Registry — Overview"
 owner: codex
-last_updated: 2026-08-15
+last_updated: 2026-08-23
 last_validated: 2026-08-15
 status: Accepted
 feature: host-registry
 doc_role: overview
 tags: [host-registry, machine-identity, workspace-catalog]
 paths: ["crates/orbit-common/src/types/host.rs", "crates/orbit-common/src/types/workspace.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-cli/src/command/init.rs", "crates/orbit-cli/src/command/host/**", "crates/orbit-cli/src/command/workspace/**", "crates/orbit-cli/src/command/mcp/**", "crates/orbit-web/src/lib.rs", "crates/orbit-web/src/state.rs", "crates/orbit-mcp/src/remote/identity.rs", "crates/orbit-mcp/src/remote/discovery.rs"]
-related_features: [host-registry, mcp-session-context, remote-access]
-related_artifacts: []
+related_features: [host-registry, mcp-session-context, remote-access, federated-mcp]
+related_artifacts: [ORB-11009]
 ---
 
 # Host Registry — Overview
 
 The live host-registry feature is a machine-local identity and workspace catalog. It tells an Orbit process who the accepting machine is, which logical workspaces this installation knows, and which local checkout may be opened for each workspace.
 
-It is not a fleet router. V1 has no host-registration, host-list, host-retirement, workspace-link, presence, placement, lease, or registry-cache workflow.
+It is not a fleet router. V1 has no host-registration, host-list, host-retirement, workspace-link, presence, placement, lease, or registry-cache workflow. A proposed federated MCP mux is specified separately in [federated-mcp](../federated-mcp/1_overview.md); that surface is not this catalog and is not current v1 behavior.
 
 ## Ownership
 

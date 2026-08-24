@@ -54,6 +54,15 @@ pub(crate) fn resolve_query_model(model: Option<&str>) -> Result<ModelSpec, Orbi
     parse_model(active.as_deref())
 }
 
+/// The `model_id` a query-side embedder will report for this host.
+///
+/// The companion stamps `model_id` with the model alias, so the alias is the
+/// same key the `embeddings` rows are written under. A federated read compares
+/// this against each workspace's indexed models [ORB-11027].
+pub fn query_model_id(model: Option<&str>) -> Result<String, OrbitError> {
+    resolve_query_model(model).map(|spec| spec.alias.to_string())
+}
+
 pub(crate) fn active_model(paths: &CompanionPaths) -> Option<String> {
     fs::read_to_string(&paths.active_model_path)
         .ok()

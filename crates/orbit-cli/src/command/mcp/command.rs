@@ -30,8 +30,10 @@ impl Execute for McpCommand {
 pub enum McpSubcommand {
     /// Initialize MCP client integration for the current workspace
     ///
-    /// Registers agent-only authority — the same as bare `orbit mcp serve`.
-    /// For the operator-authorized bootstrap integration (workflow dispatch,
+    /// By default, registers agent-only authority — the same as bare `orbit
+    /// mcp serve`. `--federated` instead adds a separate client entry for the
+    /// session-unbound mux and preserves the default v1 entry. For the
+    /// operator-authorized bootstrap integration (workflow dispatch,
     /// `orbit.command.exec`), use `orbit workspace init --mcp` instead.
     Init(InitArgs),
     /// Remove MCP client integration for the current workspace
@@ -72,14 +74,27 @@ pub enum ServeMode {
     /// Present stdio MCP locally and relay it directly to a remote Orbit over
     /// one non-PTY SSH process.
     Remote,
+    /// Present one stdio MCP surface over every destination configured in
+    /// `~/.orbit/mcp-destinations.toml`.
+    ///
+    /// This mode serves no workspace of its own and binds to none. It lists
+    /// each configured destination's workspaces as live descriptors, probing
+    /// the destinations on every call, and includes destinations that are
+    /// unreachable right now rather than hiding them. Workspace-scoped tools
+    /// take the host-qualified `selector` copied from that list; a registered
+    /// name, a bare `ws_*`, or `--workspace` is not a federated selector.
+    Federated,
 }
 
 #[derive(Args)]
 #[command(about = "Serve the Orbit tool registry over Model Context Protocol")]
 pub struct ServeArgs {
-    /// Run as a client-side proxy to a remote Orbit instead of serving this
-    /// machine. Requires an SSH destination.
-    #[arg(long, value_name = "MODE", requires = "ssh_host")]
+    /// Run as a client to other Orbit servers instead of serving this machine.
+    ///
+    /// `remote` proxies one chosen SSH destination and requires it as an
+    /// argument. `federated` muxes the destinations configured in
+    /// `~/.orbit/mcp-destinations.toml` and takes no argument.
+    #[arg(long, value_name = "MODE")]
     pub mode: Option<ServeMode>,
     /// SSH destination for `--mode remote`, such as a host, `user@host`, or a
     /// configured alias.
@@ -105,11 +120,12 @@ pub struct ServeArgs {
     ///
     /// Most MCP clients cannot announce `_meta.orbit.workspace` on their
     /// initialize, so without this a workspace-scoped tool must repeat the
-    /// selector on every call. `orbit mcp init` and `orbit workspace init
-    /// --mcp` write this into the integrations they generate. A client that
-    /// does announce a workspace, and any explicit per-call `workspace`,
-    /// still take precedence. The selector is resolved against the accepting
-    /// server's registry per call, never from the server process cwd.
+    /// selector on every call. Local `orbit mcp init` and `orbit workspace
+    /// init --mcp` write this into the integrations they generate; the
+    /// federated init path is session-unbound. A client that does announce a
+    /// workspace, and any explicit per-call `workspace`, still take
+    /// precedence. The selector is resolved against the accepting server's
+    /// registry per call, never from the server process cwd.
     #[arg(long, value_name = "SELECTOR", conflicts_with = "mode")]
     pub workspace: Option<String>,
 }
@@ -124,8 +140,9 @@ impl ServeArgs {
         }
         match self.mode {
             Some(ServeMode::Remote) => {
-                // Clap enforces the pairing; this keeps the invariant local
-                // rather than trusting a derive attribute at a distance.
+                // Each mode owns its own argument rule, so the pairing lives
+                // here rather than in a derive attribute that cannot express
+                // "required by one mode and refused by the other".
                 let ssh_host = self.ssh_host.ok_or_else(|| {
                     OrbitError::InvalidInput(
                         "`orbit mcp serve --mode remote` needs an SSH destination, e.g. \
@@ -134,6 +151,16 @@ impl ServeArgs {
                     )
                 })?;
                 orbit_mcp::serve_mcp_remote_proxy(RemoteProxyArgs { ssh_host })?
+            }
+            Some(ServeMode::Federated) => {
+                if let Some(ssh_host) = self.ssh_host {
+                    return Err(OrbitError::InvalidInput(format!(
+                        "`orbit mcp serve --mode federated` takes no SSH destination, but got \
+                         '{ssh_host}'; destinations are configured in \
+                         `~/.orbit/mcp-destinations.toml`"
+                    )));
+                }
+                super::server::serve_mcp_federated_stdio()?
             }
             None => super::server::serve_mcp_stdio(
                 self.remote_caller_machine_id,

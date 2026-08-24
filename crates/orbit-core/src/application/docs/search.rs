@@ -6,6 +6,7 @@ use orbit_common::fs::glob::{match_glob, normalize_glob_path};
 use orbit_common::fs::selector::anchor_path;
 use orbit_search::{DocEmbeddingSource, DocSearchSource};
 
+use super::config::DocsRoot;
 use super::frontmatter::parse_doc_tolerant;
 use super::path_util::{path_to_slash_string, repo_relative_path};
 use super::types::{DocRecord, DocShow, TaskRelatedDoc};
@@ -15,7 +16,7 @@ const DEFAULT_RELATED_DOC_LIMIT: usize = 5;
 
 pub(super) fn show_doc(
     repo_root: &Path,
-    roots: &[String],
+    roots: &[DocsRoot],
     requested: &str,
 ) -> Result<DocShow, OrbitError> {
     let requested_path = Path::new(requested.trim());
@@ -59,14 +60,14 @@ fn path_is_or_contains_dot_orbit(repo_root: &Path, path: &Path) -> bool {
 
 pub(super) fn path_is_under_configured_roots(
     repo_root: &Path,
-    roots: &[String],
+    roots: &[DocsRoot],
     path: &Path,
 ) -> Result<bool, OrbitError> {
     let canonical_path = path
         .canonicalize()
         .map_err(|error| OrbitError::Io(format!("canonicalize {}: {error}", path.display())))?;
     for root in roots {
-        for root_path in expand_root(repo_root, root)? {
+        for root_path in expand_root(repo_root, &root.path)? {
             if path_is_or_contains_dot_orbit(repo_root, &root_path) {
                 continue;
             }
@@ -110,7 +111,7 @@ pub(super) fn doc_search_source(record: DocRecord, body: String) -> DocSearchSou
 
 pub(super) fn doc_embedding_sources(
     repo_root: &Path,
-    roots: &[String],
+    roots: &[DocsRoot],
 ) -> Result<Vec<DocEmbeddingSource>, OrbitError> {
     let mut sources = Vec::new();
     for record in walk_docs_roots(repo_root, roots)? {
@@ -134,7 +135,7 @@ struct RelatedDocCandidate {
 
 pub(super) fn related_docs_for_context(
     repo_root: &Path,
-    roots: &[String],
+    roots: &[DocsRoot],
     context_files: &[String],
     related_features: &[String],
     limit: Option<usize>,

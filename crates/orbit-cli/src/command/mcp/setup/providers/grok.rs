@@ -1,11 +1,9 @@
 use orbit_core::OrbitError;
 use toml::{Table as TomlTable, Value as TomlValue};
 
-use crate::command::mcp::ORBIT_MCP_SERVER_ID;
-
 use super::super::dispatch::ConfigTarget;
 use super::super::format::*;
-use super::common::{ServerLaunch, server_args};
+use super::common::{ServerLaunch, server_args, server_id};
 
 pub(in crate::command::mcp::setup) fn apply_grok_init(
     target: &ConfigTarget,
@@ -14,7 +12,7 @@ pub(in crate::command::mcp::setup) fn apply_grok_init(
     let mut root = load_toml_table(&target.mcp_path)?;
     let mcp_servers = ensure_toml_table(&mut root, "mcp_servers")?;
     mcp_servers.insert(
-        ORBIT_MCP_SERVER_ID.to_string(),
+        server_id(launch).to_string(),
         TomlValue::Table(grok_mcp_server_table(launch)),
     );
     write_toml_table(&target.mcp_path, &root)
@@ -22,13 +20,14 @@ pub(in crate::command::mcp::setup) fn apply_grok_init(
 
 pub(in crate::command::mcp::setup) fn apply_grok_remove(
     target: &ConfigTarget,
+    server_id: &str,
 ) -> Result<(), OrbitError> {
     let mut root = load_toml_table(&target.mcp_path)?;
     if let Some(mcp_servers) = root
         .get_mut("mcp_servers")
         .and_then(TomlValue::as_table_mut)
     {
-        mcp_servers.remove(ORBIT_MCP_SERVER_ID);
+        mcp_servers.remove(server_id);
         if mcp_servers.is_empty() {
             root.remove("mcp_servers");
         }

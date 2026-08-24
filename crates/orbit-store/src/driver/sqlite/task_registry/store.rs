@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -44,16 +43,11 @@ impl TaskRegistryStore {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         let workspaces_dir = normalize_path(&registry_dir.join("workspaces"));
-        fs::create_dir_all(&registry_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
-        fs::create_dir_all(&workspaces_dir).map_err(|e| OrbitError::Store(e.to_string()))?;
-
-        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        let pragmas = orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
-        let read_only =
-            pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)?;
-        if read_only {
-            drop(conn);
-            conn = orbit_common::storage::sqlite::open_immutable(path)?;
+        let opened = orbit_common::storage::sqlite::open_private(path)?;
+        let conn = opened.connection;
+        let read_only = opened.read_only;
+        if !read_only {
+            orbit_common::storage::sqlite::create_private_dir_all(&workspaces_dir)?;
         }
         // The registry is the commit point that makes a created task official, so
         // its writes must be durable against power loss the moment they ack. WAL's

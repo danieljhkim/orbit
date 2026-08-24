@@ -12,12 +12,15 @@
 //!
 //! This crate owns protocol framing, advertised-name translation, structured
 //! responses, canonical tool discovery, server identity presentation, the TCP
-//! listener transport, and the direct SSH stdio proxy. Workspace resolution,
-//! domain validation, auditing, and authorization remain behind the injected
-//! [`McpHost`] boundary.
+//! listener transport, the direct SSH stdio proxy, and the federated mux over
+//! operator-configured destinations. Workspace resolution, domain validation,
+//! auditing, and authorization remain behind the injected [`McpHost`]
+//! boundary.
 
 mod adapter;
 mod error;
+#[doc(hidden)]
+pub mod federated;
 mod listener;
 mod remote;
 
@@ -32,8 +35,10 @@ use serde_json::Value;
 pub use adapter::OrbitToolServer;
 pub use listener::{DEFAULT_MCP_LISTEN_PORT, ListenerExposure, McpListener};
 pub use remote::{
-    McpServerIdentity, McpSessionAuthority, RemoteProxyArgs, canonical_mcp_tool_definitions,
-    execute_discovery_tool, mcp_server_identity, safe_mcp_tool_names, serve_mcp_remote_proxy,
+    FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL, McpServerIdentity, McpSessionAuthority,
+    RemoteProxyArgs, canonical_mcp_tool_definitions, execute_discovery_tool,
+    execute_federated_workspace_discovery, mcp_server_identity, safe_mcp_tool_names,
+    serve_mcp_remote_proxy,
 };
 
 /// Back-end for the complete MCP tool surface.
@@ -50,6 +55,18 @@ pub trait McpHost: Send + Sync + 'static {
         input: Value,
         session_context: ToolSessionContext,
     ) -> Result<Value, OrbitError>;
+
+    /// Whether workspace-scoped tools on this host take the federated
+    /// host-qualified selector rather than a v1 local selector.
+    ///
+    /// The default is the authoritative server: a registered name, a logical
+    /// `ws_*`, or an absolute path. The federated mux overrides this so
+    /// `tools/list` tells callers to copy `selector` from federated
+    /// `orbit.workspace.list` and routing refuses anything else as
+    /// `unknown_selector`.
+    fn federated_workspace_selectors(&self) -> bool {
+        false
+    }
 }
 
 /// Serve the given host over MCP stdio with a default local context.

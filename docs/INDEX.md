@@ -52,6 +52,7 @@ a conservative title/status fallback.
 | [Auditability](./design/auditability/1_overview.md) | Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? | Draft | codex |
 | [Auto-tasks](./design/auto-tasks/1_overview.md) | Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code. | Accepted | claude |
 | [Executors](./design/executors/4_decisions.md) | Decision log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
+| [Federated MCP](./design/federated-mcp/1_overview.md) | Mux that presents one MCP namespace over operator-configured destinations, keyed by machine_id, without becoming a fleet registry. | Draft | grok |
 | [Host Registry](./design/host-registry/1_overview.md) | The live host-registry feature is a machine-local identity and workspace catalog. | Accepted | codex |
 | [Orbit MCP](./design/mcp-bridge/1_overview.md) | One authoritative Orbit MCP server, reached by local stdio, a byte-transparent direct SSH stdio proxy, or a loopback-default TCP listener. | Draft | codex |
 | [MCP Session Context](./design/mcp-session-context/1_overview.md) | ToolSessionContext is Orbit's transport-to-Core invocation envelope. | Accepted | codex |

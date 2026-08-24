@@ -3,7 +3,7 @@ summary: "Semantic Search — Design"
 type: design
 title: "Semantic Search — Design"
 owner: claude
-last_updated: 2026-08-13
+last_updated: 2026-08-24
 last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
@@ -13,7 +13,7 @@ tags: ["orbit-search"]
 
 # Semantic Search — Design
 
-This document specifies the semantic-search implementation: the `orbit-search` crate and its optional companion binary, the companion-binary inference model, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
+This document specifies the semantic-search implementation: the `orbit-search` crate and its optional companion binary, the companion-binary inference model, the SQLite vector storage schema, the per-field embedding strategy, the hybrid (BM25 + cosine) retrieval pipeline, the MCP and CLI surface, cross-workspace federated read, the index-maintenance lifecycle, and the concerns the design deliberately leaves to follow-ups.
 
 ---
 
@@ -253,6 +253,7 @@ Either retriever alone has a failure mode the other doesn't. RRF resolves both a
 orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5] [--force]
 orbit semantic uninstall [--model MODEL] [--all]
 orbit search <query> [--hybrid] [--kind task|doc|all] [--limit N]
+                     [--workspace SELECTOR]... [--all-workspaces]
 orbit search similar <task-id> [--limit N]
 orbit search path <path> [--kind task|doc|all] [--limit N]
 orbit semantic index     [--force] [--model MODEL] [--kind tasks|docs|all]
@@ -268,9 +269,11 @@ orbit semantic stats
 
 If the companion is not installed, task-hybrid search, `orbit search similar <task-id>`, `orbit semantic index`, and `orbit docs index` exit non-zero with: `"Semantic search not enabled. Run \`orbit semantic install\` to download the inference companion."` Doc-hybrid search is softer: it emits a warning/note and falls back to lexical doc results.
 
+`--workspace` and `--all-workspaces` select the federated scope described in [§6.4](#64-cross-workspace-federated-search). They apply to the free-text form only; `similar` and `path` are single-workspace by construction.
+
 ### 6.2 MCP tools
 
-- `orbit.search` — `(query?, hybrid?, semantic?, kind?, limit?, tag?, all?, status?, path?)` → ranked results with snippets.
+- `orbit.search` — `(query?, hybrid?, semantic?, kind?, limit?, tag?, all?, status?, path?, workspaces?, all_workspaces?)` → ranked results with snippets.
 - `orbit.semantic.install`, `orbit.semantic.uninstall`, `orbit.semantic.stats`, `orbit.semantic.index` — companion lifecycle.
 - `orbit.docs.index` — docs-corpus embedding build and stale-source sweep.
 
@@ -295,6 +298,56 @@ If the companion is not installed, task-hybrid search, `orbit search similar <ta
 ```
 
 The score breakdown is deliberately exposed: agents can use it to decide whether a hit is "lexical exact match" vs. "semantic neighborhood" and adapt downstream behavior.
+
+### 6.4 Cross-workspace federated search
+
+Vectors and FTS rows stay workspace-local ([§3](#3-vector-storage)); only the *read* federates. One query may cover several registered checkouts, and Orbit opens each one's `semantic.db`, runs the ordinary single-workspace query there, and fuses the ranked lists. See [Federate the cross-workspace read; deny it inside a managed run](./4_decisions.md#federate-the-cross-workspace-read-deny-it-inside-a-managed-run) for why the index is not centralized instead.
+
+**Scope selector.** `WorkspaceScope` has three states: `Current` (default), `Selectors([..])`, and `AllRegistered`. `Current` takes the untouched single-workspace path, so an existing caller sees identical results and an identical JSON shape — the two federated fields are `skip_serializing_if` empty/`None`.
+
+**Layering.** `orbit-core` may not depend on `orbit-registry`, so the fan-out splits across two crates:
+
+| Owner | Responsibility |
+|-------|----------------|
+| `orbit-core` (`application/search/federated.rs`) | fan-out, fusion, attribution, notes, caps, the managed-run refusal |
+| `orbit-cmd` (`workspace_catalog.rs`) | `WorkspaceCatalog` impl: selector → registered checkout, and opening a runtime for one |
+
+`OrbitRuntime::with_workspace_catalog` attaches the implementation, mirroring `with_coordination_write_owner`. A runtime built without one still works and refuses any scope wider than its own checkout.
+
+**Fusion is by rank, not by score.** Per-workspace hits are interleaved by their position in their own workspace's ranked list, reusing the round-robin merge that already balances kinds. Lexical BM25 scores, blended hybrid scores, and `None` (frictions) are not commensurable across workspaces, so nothing compares them — and one large workspace cannot consume the whole `limit`.
+
+**Model compatibility.** Cosine scores only compare within one `model_id`. A workspace whose index was built under a different model has no rows the query embedder can score, so it degrades to lexical there; the response says so by name rather than emitting a ranking the caller cannot tell apart from a fused one:
+
+```
+[polaris] semantic index uses model(s) minilm-l6, not the query model bge-small;
+          cosine scores are not fused for this workspace and it contributes
+          lexical hits only
+```
+
+**Attribution is mandatory.** Every federated hit carries `workspace: {workspace_id, name, repo_root}`. Task IDs are globally unique and resolve through the host registry, but friction and job-run IDs are allocated per workspace, so the same ID names a different record in each. F2026-08-046 records a near-miss write to the wrong record from exactly that ambiguity in a merged result set.
+
+**Partial failure is normal.** A registered checkout can be stale, moved, or owned by another machine. Each such workspace contributes zero hits plus a note and appears in the `workspaces` report with `hits: 0`; the query still succeeds. Per-workspace notes are prefixed `[<name>]` so every note is attributed too.
+
+**No silent caps.** At most `MAX_FEDERATED_WORKSPACES` (16) checkouts are opened per query. Exceeding it adds a note naming both the cap and how many workspaces were dropped.
+
+**Sandbox posture.** A federated scope is refused inside an Orbit-managed run. Rationale in the decision record; the guard lives in `global_search` so CLI, MCP, `orbit tool run`, and the HTTP adapter all reach it through one rule.
+
+```jsonc
+{
+  "mode": "lexical",
+  "kind": "all",
+  "results": [
+    { "kind": "friction", "id": "F2026-07-013", "workspace":
+      { "workspace_id": "ws_orbit", "name": "orbit", "repo_root": "/…/orbit" } }
+  ],
+  "notes": ["[almanac] skipped: checkout for 'almanac' is gone"],
+  "workspaces": [
+    { "workspace_id": "ws_orbit", "name": "orbit", "hits": 4 },
+    { "workspace_id": "ws_almanac", "name": "almanac", "hits": 0,
+      "note": "skipped: checkout for 'almanac' is gone" }
+  ]
+}
+```
 
 ---
 

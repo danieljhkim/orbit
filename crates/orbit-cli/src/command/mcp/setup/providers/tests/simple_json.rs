@@ -31,6 +31,32 @@ fn server_value_builders_emit_mcp_serve_only() {
 }
 
 #[test]
+fn server_value_builders_emit_federated_mode_only_when_requested() {
+    let expected = ["mcp", "serve", "--mode", "federated"];
+
+    for (provider, args) in [
+        (
+            "claude",
+            json_args(&claude_mcp_server_value(ServerLaunch::Federated)),
+        ),
+        (
+            "gemini",
+            json_args(&simple_mcp_server_value(ServerLaunch::Federated)),
+        ),
+        (
+            "codex",
+            toml_args(&codex_mcp_server_table(ServerLaunch::Federated)),
+        ),
+        (
+            "grok",
+            toml_args(&grok_mcp_server_table(ServerLaunch::Federated)),
+        ),
+    ] {
+        assert_eq!(args, expected, "{provider} must launch the federated mux");
+    }
+}
+
+#[test]
 fn server_value_builders_append_operator_flag_when_authorized() {
     let claude = claude_mcp_server_value(OPERATOR_LAUNCH);
     let claude_args = claude["args"].as_array().expect("claude args");
@@ -92,10 +118,7 @@ fn toml_args(server: &toml::value::Table) -> Vec<String> {
 /// Authority and binding are independent: the bootstrap path emits both.
 #[test]
 fn server_value_builders_emit_authority_and_binding_together() {
-    let launch = ServerLaunch {
-        operator: true,
-        workspace: Some("ws_demo"),
-    };
+    let launch = ServerLaunch::local(true, Some("ws_demo"));
     assert_eq!(
         json_args(&claude_mcp_server_value(launch)),
         ["mcp", "serve", "--operator", "--workspace", "ws_demo"]

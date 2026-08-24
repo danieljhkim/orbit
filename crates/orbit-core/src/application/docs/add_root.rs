@@ -1,10 +1,8 @@
 use std::path::Path;
 
-use serde_json::json;
-
 use orbit_common::OrbitError;
 
-use super::config::parse_docs_roots_from_config_toml;
+use super::config::{DocsRoot, parse_docs_roots_from_config_toml};
 use super::path_util::path_to_slash_string;
 use super::types::DocAddOutcome;
 
@@ -25,15 +23,15 @@ pub(super) fn add_docs_root(
         return Ok(DocAddOutcome {
             path: normalized,
             added: false,
-            roots,
+            roots: roots.into_iter().map(|root| root.path).collect(),
         });
     }
-    roots.push(normalized.clone());
+    roots.push(DocsRoot::new(normalized.clone()));
     write_docs_roots_to_config(config_path, &raw, &roots)?;
     Ok(DocAddOutcome {
         path: normalized,
         added: true,
-        roots,
+        roots: roots.into_iter().map(|root| root.path).collect(),
     })
 }
 
@@ -79,11 +77,11 @@ fn normalize_docs_root_arg(repo_root: &Path, raw: &str) -> Result<String, OrbitE
     Ok(normalized)
 }
 
-fn roots_equal_contains(roots: &[String], candidate: &str) -> bool {
+fn roots_equal_contains(roots: &[DocsRoot], candidate: &str) -> bool {
     let candidate = comparable_root(candidate);
     roots
         .iter()
-        .any(|root| comparable_root(root.as_str()) == candidate)
+        .any(|root| comparable_root(root.path.as_str()) == candidate)
 }
 
 fn comparable_root(raw: &str) -> String {
@@ -93,43 +91,48 @@ fn comparable_root(raw: &str) -> String {
 fn write_docs_roots_to_config(
     config_path: &Path,
     raw: &str,
-    roots: &[String],
+    roots: &[DocsRoot],
 ) -> Result<(), OrbitError> {
-    let rendered = if raw.trim().is_empty() || !raw.contains("[docs]") {
-        let mut out = raw.trim_end().to_string();
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str("[docs]\nroots = ");
-        out.push_str(&json!(roots).to_string());
-        out.push('\n');
-        out
+    let mut value = if raw.trim().is_empty() {
+        toml::Value::Table(Default::default())
     } else {
-        let mut value = raw.parse::<toml::Value>().map_err(|error| {
+        raw.parse::<toml::Value>().map_err(|error| {
             OrbitError::InvalidInput(format!(
                 "invalid config.toml while updating [docs].roots: {error}"
             ))
-        })?;
-        let table = value.as_table_mut().ok_or_else(|| {
-            OrbitError::InvalidInput("config.toml must be a TOML table".to_string())
-        })?;
-        let docs = table
-            .entry("docs".to_string())
-            .or_insert_with(|| toml::Value::Table(Default::default()));
-        let docs_table = docs.as_table_mut().ok_or_else(|| {
-            OrbitError::InvalidInput("[docs] config must be a TOML table".to_string())
-        })?;
-        docs_table.insert(
-            "roots".to_string(),
-            toml::Value::Array(roots.iter().cloned().map(toml::Value::String).collect()),
-        );
-        toml::to_string_pretty(&value)
-            .map_err(|error| OrbitError::Execution(format!("serialize config.toml: {error}")))?
+        })?
     };
+    let table = value
+        .as_table_mut()
+        .ok_or_else(|| OrbitError::InvalidInput("config.toml must be a TOML table".to_string()))?;
+    let docs = table
+        .entry("docs".to_string())
+        .or_insert_with(|| toml::Value::Table(Default::default()));
+    let docs_table = docs.as_table_mut().ok_or_else(|| {
+        OrbitError::InvalidInput("[docs] config must be a TOML table".to_string())
+    })?;
+    docs_table.insert("roots".to_string(), docs_roots_to_toml_value(roots));
+    let rendered = toml::to_string_pretty(&value)
+        .map_err(|error| OrbitError::Execution(format!("serialize config.toml: {error}")))?;
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| OrbitError::Io(format!("create {}: {error}", parent.display())))?;
     }
     std::fs::write(config_path, rendered)
         .map_err(|error| OrbitError::Io(format!("write {}: {error}", config_path.display())))
+}
+
+fn docs_roots_to_toml_value(roots: &[DocsRoot]) -> toml::Value {
+    toml::Value::Array(roots.iter().map(docs_root_to_toml_value).collect())
+}
+
+fn docs_root_to_toml_value(root: &DocsRoot) -> toml::Value {
+    if root.respect_gitignore {
+        toml::Value::String(root.path.clone())
+    } else {
+        let mut table = toml::value::Table::new();
+        table.insert("path".to_string(), toml::Value::String(root.path.clone()));
+        table.insert("respect_gitignore".to_string(), toml::Value::Boolean(false));
+        toml::Value::Table(table)
+    }
 }

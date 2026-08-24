@@ -8,7 +8,9 @@
 //! store-specific overrides (e.g. the task registry's `synchronous=FULL`)
 //! on top.
 
-use std::path::Path;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -18,6 +20,121 @@ use crate::OrbitError;
 /// milliseconds. Writers under WAL still serialize; this bounds how long a
 /// contending connection spins before surfacing `database is locked`.
 pub const DEFAULT_BUSY_TIMEOUT_MS: u32 = 5_000;
+
+/// A file-backed SQLite connection opened under Orbit's filesystem policy.
+pub struct OpenedConnection {
+    /// The ready-to-use SQLite connection.
+    pub connection: Connection,
+    /// Whether the database was opened in immutable read-only mode.
+    pub read_only: bool,
+}
+
+/// Open an Orbit SQLite database without exposing its persisted state.
+///
+/// Writable databases are created or repaired to owner-only access on Unix.
+/// The database is hardened before SQLite can create WAL/SHM sidecars, and
+/// pre-existing sidecars are repaired as part of the same operation. Newly
+/// created parent directories are owner-only as well. An existing read-only
+/// database or database on a read-only filesystem is opened immutable before
+/// any directory creation or permission change is attempted.
+pub fn open_private(path: &Path) -> Result<OpenedConnection, OrbitError> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.permissions().readonly() || filesystem_is_read_only(path)? => {
+            return Ok(OpenedConnection {
+                connection: open_immutable(path)?,
+                read_only: true,
+            });
+        }
+        Ok(_) => harden_sqlite_files(path)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(sqlite_path_error("inspect", path, error)),
+    }
+
+    if let Some(parent) = path.parent() {
+        create_private_dir_all(parent)?;
+    }
+    prepare_private_database_file(path)?;
+
+    let connection = Connection::open(path).map_err(|error| {
+        OrbitError::Store(format!(
+            "cannot open SQLite database '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let pragmas = apply_default_pragmas(&connection)?;
+    if pragmas.write_denied || filesystem_is_read_only(path)? {
+        drop(connection);
+        return Ok(OpenedConnection {
+            connection: open_immutable(path)?,
+            read_only: true,
+        });
+    }
+    harden_sqlite_files(path)?;
+
+    Ok(OpenedConnection {
+        connection,
+        read_only: false,
+    })
+}
+
+/// Create a sensitive SQLite-adjacent state directory.
+///
+/// On Unix, directories created by this call are `0o700`; existing ancestors
+/// are deliberately left unchanged.
+pub fn create_private_dir_all(path: &Path) -> Result<(), OrbitError> {
+    crate::fs::io::create_private_dir_all(path)
+        .map_err(|error| sqlite_path_error("create private directory", path, error))
+}
+
+fn prepare_private_database_file(path: &Path) -> Result<(), OrbitError> {
+    match crate::fs::io::create_new_private_file(path) {
+        Ok(file) => {
+            drop(file);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            crate::fs::io::set_private_file_permissions(path)
+                .map_err(|error| sqlite_path_error("harden", path, error))
+        }
+        Err(error) => Err(sqlite_path_error("create", path, error)),
+    }
+}
+
+fn harden_sqlite_files(path: &Path) -> Result<(), OrbitError> {
+    harden_existing_file(path)?;
+    for sidecar in sqlite_sidecar_paths(path) {
+        harden_existing_file(&sidecar)?;
+    }
+    Ok(())
+}
+
+fn harden_existing_file(path: &Path) -> Result<(), OrbitError> {
+    match crate::fs::io::set_private_file_permissions(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(sqlite_path_error("harden", path, error)),
+    }
+}
+
+fn sqlite_sidecar_paths(path: &Path) -> [PathBuf; 2] {
+    [
+        path_with_suffix(path, "-wal"),
+        path_with_suffix(path, "-shm"),
+    ]
+}
+
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+fn sqlite_path_error(action: &str, path: &Path, error: io::Error) -> OrbitError {
+    OrbitError::Store(format!(
+        "failed to {action} SQLite state '{}': {error}",
+        path.display()
+    ))
+}
 
 /// Result of [`apply_default_pragmas`]: what SQLite actually settled on for
 /// the best-effort settings.

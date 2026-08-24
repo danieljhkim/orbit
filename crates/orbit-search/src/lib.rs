@@ -44,8 +44,9 @@ pub use commands::{
     SemanticIndexResult, SemanticInstallParams, SemanticInstallResult, SemanticReindexParams,
     SemanticReindexResult, SemanticRelatedParams, SemanticRelatedResult, SemanticSearchParams,
     SemanticSearchResult, SemanticStatsResult, SemanticUninstallParams, SemanticUninstallResult,
-    TaskIndexResult, doc_index, doc_semantic_search, semantic_index, semantic_install,
-    semantic_reindex, semantic_related, semantic_search, semantic_stats, semantic_uninstall,
+    TaskIndexResult, doc_index, doc_semantic_search, query_model_id, semantic_index,
+    semantic_install, semantic_reindex, semantic_related, semantic_search, semantic_stats,
+    semantic_uninstall,
 };
 pub use companion::{
     CompanionPaths, INSTALL_REMEDIATION, locate_companion, platform_companion_filename, platform_id,

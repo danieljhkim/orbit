@@ -10,6 +10,7 @@ use crate::OrbitRuntime;
 use crate::application::docs::SearchResult;
 
 mod convert;
+mod federated;
 mod filters;
 mod hybrid;
 mod path_match;
@@ -21,6 +22,7 @@ mod tests;
 pub use path_match::task_selectors_contain_path;
 pub use types::{
     GlobalSearchHit, GlobalSearchKind, GlobalSearchMode, GlobalSearchParams, GlobalSearchResponse,
+    HitWorkspace, WorkspaceSearchReport,
 };
 
 use self::convert::{doc_result_to_global, lexical_task_hit, semantic_hit_to_global};
@@ -56,7 +58,23 @@ struct HybridSearchScope<'a> {
 }
 
 impl OrbitRuntime {
+    /// Unified search entry point.
+    ///
+    /// A `Current` scope — the default — runs the single-workspace path
+    /// unchanged. Anything wider fans out through the workspace catalog and
+    /// fuses the per-workspace result sets [ORB-11027].
     pub fn global_search(
+        &self,
+        params: GlobalSearchParams,
+    ) -> Result<GlobalSearchResponse, OrbitError> {
+        if params.workspaces.is_federated() {
+            return self.federated_search(params);
+        }
+        self.workspace_search(params)
+    }
+
+    /// One workspace's answer: this runtime's own checkout, nothing else.
+    pub(super) fn workspace_search(
         &self,
         params: GlobalSearchParams,
     ) -> Result<GlobalSearchResponse, OrbitError> {
@@ -94,6 +112,7 @@ impl OrbitRuntime {
                 kind: params.kind,
                 results,
                 notes,
+                workspaces: Vec::new(),
             });
         }
 
@@ -182,6 +201,7 @@ impl OrbitRuntime {
             kind: params.kind,
             results,
             notes,
+            workspaces: Vec::new(),
         })
     }
 
@@ -302,6 +322,7 @@ impl OrbitRuntime {
                     score: None,
                     score_breakdown: None,
                     matched_by: None,
+                    workspace: None,
                 }
             })
             .collect())
@@ -375,6 +396,7 @@ impl OrbitRuntime {
                     score: None,
                     score_breakdown: None,
                     matched_by: Some(tag_filter.iter().map(|tag| format!("tag:{tag}")).collect()),
+                    workspace: None,
                 });
             }
             out.truncate(limit);
@@ -504,6 +526,7 @@ impl OrbitRuntime {
                         score: None,
                         score_breakdown: None,
                         matched_by: None,
+                        workspace: None,
                     },
                     lexical_score: None,
                     semantic_score: Some(hit.score),
@@ -540,7 +563,10 @@ impl OrbitRuntime {
     }
 }
 
-fn merge_round_robin(branches: Vec<Vec<GlobalSearchHit>>, limit: usize) -> Vec<GlobalSearchHit> {
+pub(super) fn merge_round_robin(
+    branches: Vec<Vec<GlobalSearchHit>>,
+    limit: usize,
+) -> Vec<GlobalSearchHit> {
     let mut queues = branches
         .into_iter()
         .filter(|branch| !branch.is_empty())

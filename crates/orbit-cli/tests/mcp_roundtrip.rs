@@ -68,7 +68,20 @@ impl McpWorkspace {
         Self::init_with_workspace_name("mcp-roundtrip")
     }
 
+    /// A checkout registered as a replica of `owner_machine_id`, the shape a
+    /// `git clone` on a second machine produces.
+    fn init_replica_of(owner_machine_id: &str) -> Self {
+        Self::init_with_workspace_args(
+            "mcp-roundtrip",
+            &["--role", "replica", "--owner", owner_machine_id],
+        )
+    }
+
     fn init_with_workspace_name(workspace_name: &str) -> Self {
+        Self::init_with_workspace_args(workspace_name, &[])
+    }
+
+    fn init_with_workspace_args(workspace_name: &str, extra_workspace_args: &[&str]) -> Self {
         let temp = tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let work = temp.path().join("work");
@@ -108,7 +121,8 @@ impl McpWorkspace {
             String::from_utf8_lossy(&output.stderr)
         );
 
-        let workspace_init_args = vec!["workspace", "init", "--name", workspace_name];
+        let mut workspace_init_args = vec!["workspace", "init", "--name", workspace_name];
+        workspace_init_args.extend_from_slice(extra_workspace_args);
         let output = Self::orbit_command(&work, &home)
             .args(workspace_init_args)
             .output()
@@ -496,6 +510,150 @@ fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
     assert!(!marker.exists(), "denied command reached domain execution");
 }
 
+/// A replica checkout is an execution binding, not the control plane. Over the
+/// real v1 MCP transport, a coordination write is refused with the named
+/// catalog-role code — not `invalid_input`, which would make a refusal
+/// indistinguishable from a malformed call, and not `capability_denied`, which
+/// is the separate operator-versus-agent axis [ORB-11012] [ORB-11021].
+#[test]
+fn a_replica_checkout_refuses_a_coordination_write_with_capability_refused() {
+    let workspace = McpWorkspace::init_replica_of("hm_remote_owner");
+
+    let mut client = workspace.serve();
+    // A well-formed call, so the refusal is the catalog role and nothing else.
+    let refused = client.call_tool_err(
+        "orbit_task_add",
+        json!({
+            "title": "must not fork",
+            "description": "A replica must not issue its own task ids",
+            "complexity": "low",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(refused["code"], "capability_refused", "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("control_plane")),
+        "MCP dispatch must refuse the capability class: {refused}"
+    );
+
+    // CLI task writes still fail closed on Core's coordination-write guard.
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "task",
+            "add",
+            "--json",
+            "--title",
+            "must not fork",
+            "--description",
+            "A replica must not issue its own task ids",
+            "--complexity",
+            "low",
+            "--model",
+            "codex",
+        ])
+        .output()
+        .expect("run task add on a replica");
+    assert!(!output.status.success(), "CLI replica task add: {output:?}");
+    let payload: Value =
+        serde_json::from_slice(&output.stderr).expect("JSON error payload on stderr");
+    assert_eq!(payload["code"], "capability_refused", "{payload}");
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("hm_remote_owner")),
+        "the CLI refusal names the declared owner: {payload}"
+    );
+}
+
+/// The destination MCP host must enforce checkout capability classes on the
+/// production dispatch path — including control-plane tools that never pass
+/// through Core's task-write guard [ORB-11021].
+#[test]
+fn a_replica_mcp_session_enforces_checkout_capability_classes() {
+    let workspace = McpWorkspace::init_replica_of("hm_remote_owner");
+    let mut client = workspace.serve();
+
+    for (name, arguments) in [
+        (
+            "orbit_friction_add",
+            json!({
+                "body": "must not fork a replica friction",
+                "model": "codex",
+            }),
+        ),
+        (
+            "orbit_search",
+            json!({
+                "query": "must not search replica coordination",
+                "model": "codex",
+            }),
+        ),
+        ("orbit_auto_task_list", json!({})),
+        ("orbit_friction_list", json!({})),
+    ] {
+        let refused = client.call_tool_err(name, arguments);
+        assert_eq!(refused["code"], "capability_refused", "{name}: {refused}");
+        assert!(
+            refused["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("control_plane")),
+            "{name} must name the refused class: {refused}"
+        );
+    }
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["friction", "list", "--json"])
+        .output()
+        .expect("list frictions on a replica via CLI");
+    assert!(
+        output.status.success(),
+        "CLI friction list failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listed: Value = serde_json::from_slice(&output.stdout).expect("friction list JSON");
+    let items = listed.as_array().or_else(|| {
+        listed
+            .get("items")
+            .and_then(Value::as_array)
+            .or_else(|| listed.get("frictions").and_then(Value::as_array))
+    });
+    assert!(
+        items.is_some_and(Vec::is_empty),
+        "refused friction.add must not mutate local coordination state: {listed}"
+    );
+
+    let crews = client.call_tool_ok("orbit_crew_list", json!({}));
+    assert!(
+        crews.get("crews").and_then(Value::as_array).is_some(),
+        "unclassified crew.list must remain permitted: {crews}"
+    );
+
+    let marker = workspace.work.join("replica-command-exec-must-not-run");
+    for (name, arguments) in [
+        ("orbit_workflow_run_list", json!({})),
+        (
+            "orbit_command_exec",
+            json!({
+                "argv": ["touch", marker.to_str().expect("utf8 marker")],
+                "working_directory": workspace.work,
+            }),
+        ),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(
+            denied["code"], "capability_denied",
+            "{name} must pass the catalog-role gate and hit its own auth: {denied}"
+        );
+    }
+    assert!(
+        !marker.exists(),
+        "execute-class command.exec must not run after its independent denial"
+    );
+}
+
 /// The operator MCP surface, over the real transport: a server an operator
 /// started deliberately performs governed tools, and one an agent started does
 /// not — however the launching environment was set up.
@@ -660,8 +818,11 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
     // is unbound and must stay fail-closed [ORB-10967].
     let unscoped = client.call_tool_err("orbit_task_list", json!({}));
     assert!(unscoped["message"].as_str().is_some_and(|message| {
-        message.contains("requires a workspace selector")
-            && message.contains("MCP initialize metadata")
+        message.contains("requires an explicit workspace selector")
+            && message.contains("orbit_workspace_list")
+            && message.contains("returned `ws_*` ID")
+            && message.contains("orbit workspace init")
+            && message.contains("never infers one from the server process cwd")
     }));
     let description = tool_workspace_description(&listed, "orbit_task_list");
     assert!(
@@ -707,6 +868,79 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
             .is_some_and(|id| id.starts_with("trace-"))
     );
     assert_eq!(audited.3, audited.4);
+}
+
+#[test]
+fn uninitialized_unbound_mcp_launch_gives_setup_guidance_without_operator_authority() {
+    let registry_metadata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../server.json");
+    let registry: Value = serde_json::from_str(
+        &std::fs::read_to_string(&registry_metadata).expect("read checked-in registry metadata"),
+    )
+    .expect("parse checked-in registry metadata");
+    assert_eq!(registry["name"], "io.github.danieljhkim/orbit");
+    assert_eq!(registry["packages"][0]["identifier"], "@orbit-tools/cli");
+    assert_eq!(
+        registry["packages"][0]["packageArguments"],
+        json!([
+            { "type": "positional", "value": "mcp" },
+            { "type": "positional", "value": "serve" }
+        ])
+    );
+    assert!(
+        !serde_json::to_string(&registry)
+            .expect("serialize registry metadata")
+            .contains("--operator"),
+        "the registry install path must not grant operator authority"
+    );
+
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let scratch = temp.path().join("scratch");
+    std::fs::create_dir_all(&home).expect("create clean home");
+    std::fs::create_dir_all(&scratch).expect("create non-workspace launch dir");
+
+    // This is the registry-launch shape: no workspace binding, no operator
+    // flag, and a cwd that cannot supply an ambient workspace.
+    let child = McpWorkspace::orbit_command(&scratch, &home)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn clean registry-style MCP server");
+    let mut client = McpClient::new(child);
+    let initialized = client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "registry-clean-launch", "version": "0" }
+        }),
+    );
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "orbit-mcp");
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| tools
+                .iter()
+                .any(|tool| tool["name"] == "orbit_workspace_list")),
+        "the first routing tool must be available from a clean launch: {listed}"
+    );
+
+    let unscoped = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(unscoped["message"].as_str().is_some_and(|message| {
+        message.contains("orbit_workspace_list")
+            && message.contains("returned `ws_*` ID")
+            && message.contains("orbit init")
+            && message.contains("orbit workspace init")
+            && message.contains("never infers one from the server process cwd")
+    }));
+
+    let workspaces = client.call_tool_ok("orbit_workspace_list", json!({}));
+    assert_eq!(workspaces["workspaces"], json!([]));
 }
 
 #[test]
@@ -1478,6 +1712,86 @@ fn managed_mcp_config_updates_a_task_without_a_workspace_argument() {
     );
 }
 
+/// ORB-11017: federated `tools/list` must tell callers to copy `selector` from
+/// the federated list. A bare `ws_*` — including a v1 session default — is
+/// `unknown_selector` before forwarding. `orbit.task.show` does not inherit
+/// the v1 id-only default in this namespace.
+#[test]
+fn federated_mcp_serve_requires_the_host_qualified_list_selector() {
+    let workspace = McpWorkspace::init();
+    std::fs::write(
+        workspace.home.join(".orbit").join("mcp-destinations.toml"),
+        "[[destinations]]\nssh = \"orbit-linux\"\nmachine_id = \"hm_alpha\"\n",
+    )
+    .expect("write federated destinations");
+
+    let child = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--mode", "federated"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn federated MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "federated-roundtrip", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    for tool_name in ["orbit_task_list", "orbit_task_show", "orbit_crew_list"] {
+        let description = tool_workspace_description(&listed, tool_name);
+        assert!(
+            description.contains("selector") && description.contains("orbit.workspace.list"),
+            "{tool_name} must instruct copying from the federated list: {description}"
+        );
+        assert!(
+            description.to_ascii_lowercase().contains("copy"),
+            "{tool_name} must say to copy the list field: {description}"
+        );
+        assert!(
+            !description.contains("registered workspace name")
+                && !description.contains("ws_*")
+                && !description.contains("absolute path")
+                && !description.to_ascii_lowercase().contains("cwd"),
+            "{tool_name} must not present a v1 local form as valid: {description}"
+        );
+    }
+
+    let omitted = client.call_tool_err("orbit_task_show", json!({ "id": "ORB-00001" }));
+    assert_ne!(
+        omitted["code"], "unknown_selector",
+        "omitting the selector is a missing-argument refusal, not a minted token: {omitted}"
+    );
+    assert!(
+        omitted["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("host-qualified")
+                || message.contains("requires a workspace selector")),
+        "federated task.show without a selector is refused: {omitted}"
+    );
+
+    let bare_show = client.call_tool_err(
+        "orbit_task_show",
+        json!({ "id": "ORB-00001", "workspace": "ws_orbit" }),
+    );
+    assert_eq!(
+        bare_show["code"], "unknown_selector",
+        "a bare ws_* on federated task.show is unknown_selector: {bare_show}"
+    );
+
+    let bare_list = client.call_tool_err("orbit_crew_list", json!({ "workspace": "ws_orbit" }));
+    assert_eq!(
+        bare_list["code"], "unknown_selector",
+        "a bare ws_* is unknown_selector before forwarding: {bare_list}"
+    );
+}
+
 /// ORB-10967 / ORB-10961: the same contract from a linked job worktree whose
 /// checkout identity diverged from the logical `ws_*` the registry knows.
 ///
@@ -1932,8 +2246,9 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     assert_eq!(shown["id"], json!(task_id));
     let unscoped = client.call_tool_err("orbit_task_list", json!({}));
     assert!(unscoped["message"].as_str().is_some_and(|message| {
-        message.contains("requires a workspace selector")
-            && message.contains("MCP initialize metadata")
+        message.contains("requires an explicit workspace selector")
+            && message.contains("orbit_workspace_list")
+            && message.contains("orbit workspace init")
     }));
     drop(client);
 

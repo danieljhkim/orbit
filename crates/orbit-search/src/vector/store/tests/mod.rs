@@ -37,4 +37,50 @@ mod open_pragmas {
         // synchronous=NORMAL reports as 1.
         assert_eq!(pragma_i64("synchronous"), 1);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_creates_private_vector_state_under_permissive_umask() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const CHILD_MARKER: &str = "ORBIT_TEST_PRIVATE_VECTOR_SQLITE";
+        if std::env::var_os(CHILD_MARKER).is_none() {
+            let status = std::process::Command::new("sh")
+                .args(["-c", "umask 000; exec \"$@\"", "sh"])
+                .arg(std::env::current_exe().expect("current test executable"))
+                .arg("open_creates_private_vector_state_under_permissive_umask")
+                .env(CHILD_MARKER, "1")
+                .status()
+                .expect("run test under permissive umask");
+            assert!(status.success(), "permissive-umask child failed");
+            return;
+        }
+
+        let root = tempfile::tempdir().expect("tempdir");
+        let state_dir = root.path().join("private/state");
+        let path = state_dir.join("semantic.db");
+        let store = VectorStore::open(&path).expect("open store");
+        let connection = store.connection();
+        let conn = connection.lock().expect("lock vector connection");
+        conn.execute_batch("BEGIN IMMEDIATE; COMMIT;")
+            .expect("touch vector WAL");
+
+        for directory in [state_dir.parent().expect("private parent"), &state_dir] {
+            let mode = std::fs::metadata(directory)
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700, "private directory {}", directory.display());
+        }
+        for suffix in ["", "-wal", "-shm"] {
+            let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+            let mode = std::fs::metadata(&file)
+                .expect("SQLite file metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "private SQLite file {}", file.display());
+        }
+    }
 }

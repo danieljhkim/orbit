@@ -179,6 +179,91 @@ fn open_creates_registry_parent_and_workspaces_dir() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn open_creates_private_registry_state_under_permissive_umask() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const CHILD_MARKER: &str = "ORBIT_TEST_PRIVATE_REGISTRY_SQLITE";
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let status = std::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "sh"])
+            .arg(std::env::current_exe().expect("current test executable"))
+            .arg("open_creates_private_registry_state_under_permissive_umask")
+            .env(CHILD_MARKER, "1")
+            .status()
+            .expect("run test under permissive umask");
+        assert!(status.success(), "permissive-umask child failed");
+        return;
+    }
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let path = root.path().join("private/tasks/index.sqlite");
+    let registry = TaskRegistryStore::open(&path).expect("open registry");
+    let conn = registry.conn.lock().expect("lock registry");
+    conn.execute_batch("BEGIN IMMEDIATE; COMMIT;")
+        .expect("touch registry WAL");
+
+    for directory in [
+        root.path().join("private"),
+        root.path().join("private/tasks"),
+        root.path().join("private/tasks/workspaces"),
+    ] {
+        let mode = fs::metadata(&directory)
+            .expect("directory metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700, "private directory {}", directory.display());
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let file = PathBuf::from(format!("{}{suffix}", path.display()));
+        let mode = fs::metadata(&file)
+            .expect("SQLite file metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "private SQLite file {}", file.display());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn immutable_registry_open_does_not_chmod_or_recreate_adjacent_state() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let path = root.path().join("tasks/index.sqlite");
+    drop(TaskRegistryStore::open(&path).expect("create registry"));
+    let workspaces = path.parent().expect("registry parent").join("workspaces");
+    fs::remove_dir(&workspaces).expect("remove empty workspace state");
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", path.display()));
+        if sidecar.exists() {
+            fs::remove_file(sidecar).expect("remove registry sidecar");
+        }
+    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).expect("make registry immutable");
+
+    drop(TaskRegistryStore::open(&path).expect("open immutable registry"));
+
+    assert!(
+        !workspaces.exists(),
+        "read-only open must not recreate state"
+    );
+    assert_eq!(
+        fs::metadata(&path)
+            .expect("registry metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o400,
+        "read-only database mode must remain unchanged"
+    );
+    assert!(!PathBuf::from(format!("{}-wal", path.display())).exists());
+    assert!(!PathBuf::from(format!("{}-shm", path.display())).exists());
+}
+
 #[test]
 fn open_migrates_existing_task_index_columns_before_creating_indexes() {
     let temp = TempDir::new().expect("tempdir");

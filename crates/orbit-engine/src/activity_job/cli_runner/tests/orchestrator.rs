@@ -3366,6 +3366,10 @@ fail() {{
 [ -n "$PATH" ] || fail path_missing
 [ "$ORBIT_RUN_ID" = "job-grok-registry-root" ] || fail run_id_missing
 [ "$ORBIT_MANAGED_RUN_CONTEXT" = "1" ] || fail managed_run_context_missing
+[ "$ORBIT_TASK_ACTOR_KIND" = "agent" ] || fail actor_kind_missing
+[ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn" ] || fail activity_tools_missing
+[ "$ORBIT_PROC_ALLOWED_PROGRAMS" = "git,rg" ] || fail proc_programs_missing
+[ "$ORBIT_ACTIVITY_FS_PROFILE" = "implementer" ] || fail fs_profile_missing
 [ "$ORBIT_ACTIVE_TASK_ID" = "ORB-10980" ] || fail active_task_missing
 printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"}},"error":null}}'
 "#,
@@ -3393,6 +3397,8 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
+    spec.tools = vec!["orbit.task.show".to_string(), "proc.spawn".to_string()];
+    spec.proc_allowed_programs = Some(vec!["git".to_string(), "rg".to_string()]);
 
     let outcome = run_cli_backend(
         &host,
@@ -3400,7 +3406,7 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         "job-grok-registry-root",
         audit,
         &serde_json::json!({"prompt": "hi", "task_id": "ORB-10980"}),
-        None,
+        Some("implementer"),
     )
     .expect("run succeeds");
 

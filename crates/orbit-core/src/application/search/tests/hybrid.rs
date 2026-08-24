@@ -269,6 +269,7 @@ fn hybrid_handles_single_candidate_side() {
         score: None,
         score_breakdown: None,
         matched_by: None,
+        workspace: None,
     };
     let out = blend_doc_hybrid_candidates(
         vec![DocHybridCandidate {

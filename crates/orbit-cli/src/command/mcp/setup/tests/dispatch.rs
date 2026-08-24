@@ -156,6 +156,146 @@ fn home_scope_writes_to_home_paths_and_skips_repo_files() {
 }
 
 #[test]
+fn federated_home_scope_preserves_v1_entries() {
+    let repo = tempdir().expect("repo tempdir");
+    let home = tempdir().expect("home tempdir");
+    let orbit_root = repo.path().join(".orbit");
+    std::fs::create_dir_all(&orbit_root).expect("create orbit root");
+
+    let providers = vec![
+        McpProvider::Claude,
+        McpProvider::Codex,
+        McpProvider::Gemini,
+        McpProvider::Grok,
+    ];
+    run_action(
+        McpAction::Init(ServerLaunch::default()),
+        repo.path(),
+        &orbit_root,
+        ProviderSelectionMode::Explicit(providers.clone()),
+        Some(home.path().to_path_buf()),
+        ScopeArg::Home,
+    )
+    .expect("init v1 home scope");
+    run_action(
+        McpAction::Init(ServerLaunch::Federated),
+        repo.path(),
+        &orbit_root,
+        ProviderSelectionMode::Explicit(providers.clone()),
+        Some(home.path().to_path_buf()),
+        ScopeArg::Home,
+    )
+    .expect("init federated home scope");
+
+    let claude: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".claude").join(".mcp.json"))
+            .expect("read claude mcp"),
+    )
+    .expect("parse claude mcp");
+    assert_eq!(
+        claude["mcpServers"]["orbit"]["args"],
+        serde_json::json!(["mcp", "serve"])
+    );
+    assert_eq!(
+        claude["mcpServers"]["orbit-federated"]["args"],
+        serde_json::json!(["mcp", "serve", "--mode", "federated"])
+    );
+    let claude_settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".claude").join("settings.json"))
+            .expect("read claude settings"),
+    )
+    .expect("parse claude settings");
+    assert!(
+        claude_settings["permissions"]["allow"]
+            .as_array()
+            .expect("claude allow list")
+            .iter()
+            .any(|permission| permission == "mcp__orbit-federated__orbit_task_show")
+    );
+
+    for (provider, path) in [
+        ("codex", home.path().join(".codex").join("config.toml")),
+        ("grok", home.path().join(".grok").join("config.toml")),
+    ] {
+        let config: toml::Value = toml::from_str(
+            &std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("read {provider}: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("parse {provider}: {error}"));
+        assert_eq!(
+            config["mcp_servers"]["orbit"]["args"]
+                .as_array()
+                .map(Vec::len),
+            Some(2),
+            "{provider} must retain v1"
+        );
+        assert_eq!(
+            config["mcp_servers"]["orbit-federated"]["args"]
+                .as_array()
+                .map(Vec::len),
+            Some(4),
+            "{provider} must add federated"
+        );
+    }
+
+    let gemini: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".gemini").join("settings.json"))
+            .expect("read gemini settings"),
+    )
+    .expect("parse gemini settings");
+    assert_eq!(
+        gemini["mcpServers"]["orbit"]["args"],
+        serde_json::json!(["mcp", "serve"])
+    );
+    assert_eq!(
+        gemini["mcpServers"]["orbit-federated"]["args"],
+        serde_json::json!(["mcp", "serve", "--mode", "federated"])
+    );
+
+    run_action(
+        McpAction::RemoveFederated,
+        repo.path(),
+        &orbit_root,
+        ProviderSelectionMode::Explicit(providers),
+        Some(home.path().to_path_buf()),
+        ScopeArg::Home,
+    )
+    .expect("remove federated home scope");
+
+    let claude: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".claude").join(".mcp.json"))
+            .expect("read claude after remove"),
+    )
+    .expect("parse claude after remove");
+    assert!(claude["mcpServers"]["orbit"].is_object());
+    assert!(claude["mcpServers"]["orbit-federated"].is_null());
+
+    let codex: toml::Value = toml::from_str(
+        &std::fs::read_to_string(home.path().join(".codex").join("config.toml"))
+            .expect("read codex after remove"),
+    )
+    .expect("parse codex after remove");
+    assert!(codex["mcp_servers"]["orbit"].is_table());
+    assert!(codex["mcp_servers"].get("orbit-federated").is_none());
+
+    let gemini: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.path().join(".gemini").join("settings.json"))
+            .expect("read gemini after remove"),
+    )
+    .expect("parse gemini after remove");
+    assert!(gemini["mcpServers"]["orbit"].is_object());
+    assert!(gemini["mcpServers"]["orbit-federated"].is_null());
+
+    let grok: toml::Value = toml::from_str(
+        &std::fs::read_to_string(home.path().join(".grok").join("config.toml"))
+            .expect("read grok after remove"),
+    )
+    .expect("parse grok after remove");
+    assert!(grok["mcp_servers"]["orbit"].is_table());
+    assert!(grok["mcp_servers"].get("orbit-federated").is_none());
+}
+
+#[test]
 fn home_scope_remove_strips_only_orbit_entries() {
     let repo = tempdir().expect("repo tempdir");
     let home = tempdir().expect("home tempdir");

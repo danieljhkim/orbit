@@ -6,25 +6,23 @@ use crate::command::mcp::{ORBIT_MCP_SERVER_ID, safe_mcp_tool_names};
 
 use super::super::dispatch::ConfigTarget;
 use super::super::format::*;
-use super::common::{ServerLaunch, server_args};
+use super::common::{ServerLaunch, server_args, server_id};
 
 pub(in crate::command::mcp::setup) fn apply_claude_init(
     target: &ConfigTarget,
     launch: ServerLaunch<'_>,
 ) -> Result<(), OrbitError> {
+    let server_id = server_id(launch);
     let mut root = load_json_object(&target.mcp_path)?;
     let mcp_servers = ensure_json_object(&mut root, "mcpServers")?;
-    mcp_servers.insert(
-        ORBIT_MCP_SERVER_ID.to_string(),
-        claude_mcp_server_value(launch),
-    );
+    mcp_servers.insert(server_id.to_string(), claude_mcp_server_value(launch));
     write_json_object(&target.mcp_path, &root)?;
 
     if let Some(settings_path) = &target.settings_path {
         let mut settings = load_json_object(settings_path)?;
         let permissions = ensure_json_object(&mut settings, "permissions")?;
         let allow = ensure_json_string_array(permissions, "allow")?;
-        merge_unique_strings(allow, claude_safe_permissions());
+        merge_unique_strings(allow, claude_safe_permissions(server_id));
         write_json_object(settings_path, &settings)?;
     }
     Ok(())
@@ -32,13 +30,14 @@ pub(in crate::command::mcp::setup) fn apply_claude_init(
 
 pub(in crate::command::mcp::setup) fn apply_claude_remove(
     target: &ConfigTarget,
+    server_id: &str,
 ) -> Result<(), OrbitError> {
     let mut root = load_json_object(&target.mcp_path)?;
     if let Some(mcp_servers) = root
         .get_mut("mcpServers")
         .and_then(JsonValue::as_object_mut)
     {
-        mcp_servers.remove(ORBIT_MCP_SERVER_ID);
+        mcp_servers.remove(server_id);
         if mcp_servers.is_empty() {
             root.remove("mcpServers");
         }
@@ -56,13 +55,15 @@ pub(in crate::command::mcp::setup) fn apply_claude_remove(
                 .get_mut("allow")
                 .and_then(JsonValue::as_array_mut)
             {
-                remove_known_strings(allow, &claude_safe_permissions());
+                remove_known_strings(allow, &claude_safe_permissions(server_id));
                 // Migration cleanup: prior `orbit mcp init --claude` runs wrote
                 // plugin-scoped names (`mcp__plugin_orbit_orbit__*`) that the
                 // current init no longer produces. Strip them here so a single
                 // `orbit mcp remove --claude` after upgrade leaves a clean
                 // settings.json instead of orphaning stale entries.
-                remove_known_strings(allow, &claude_legacy_safe_permissions());
+                if server_id == ORBIT_MCP_SERVER_ID {
+                    remove_known_strings(allow, &claude_legacy_safe_permissions());
+                }
                 if allow.is_empty() {
                     permissions.remove("allow");
                 }
@@ -97,20 +98,26 @@ pub(super) fn claude_mcp_server_value(launch: ServerLaunch<'_>) -> JsonValue {
     ]))
 }
 
-fn claude_safe_permissions() -> Vec<String> {
+fn claude_safe_permissions(server_id: &str) -> Vec<String> {
     safe_mcp_tool_names()
         .into_iter()
-        .map(|name| claude_permission_name(&name))
+        .map(|name| claude_permission_name_for_server(server_id, &name))
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn claude_permission_name(tool_name: &str) -> String {
+    claude_permission_name_for_server(ORBIT_MCP_SERVER_ID, tool_name)
+}
+
+fn claude_permission_name_for_server(server_id: &str, tool_name: &str) -> String {
     // pub(super) widened so providers/tests/claude.rs can call it
     // (sibling under providers per ORB-00221 layout).
     //
     // Claude derives MCP permission names from the connected server id in
-    // .mcp.json. The CLI registers under ORBIT_MCP_SERVER_ID = "orbit", so
-    // permission entries written here must be shaped `mcp__orbit__<tool>`.
+    // .mcp.json. The v1 server registers as `orbit`, while the opt-in mux uses
+    // `orbit-federated`; permission entries must follow the actual server id
+    // so the two integrations can coexist.
     // The plugin-scoped shape `mcp__plugin_<plugin>_<server>__<tool>` is
     // what Claude synthesized for Orbit's retired extension distribution.
     // That path did not run this code, so the plugin-scoped prefix is
@@ -119,7 +126,7 @@ pub(super) fn claude_permission_name(tool_name: &str) -> String {
     // stale plugin-prefixed entries left by pre-ORB-00286 CLI runs.
     format!(
         "mcp__{}__{}",
-        ORBIT_MCP_SERVER_ID,
+        server_id,
         mcp_advertised_tool_name(tool_name)
     )
 }
@@ -130,7 +137,7 @@ fn claude_legacy_safe_permissions() -> Vec<String> {
     // its *plugin* install path, not for bare `.mcp.json` registrations.
     // Existing users carry these stale entries in their settings.json;
     // `apply_claude_remove` strips them alongside the current
-    // `claude_safe_permissions()` so an upgrade + `orbit mcp remove
+    // `claude_safe_permissions(ORBIT_MCP_SERVER_ID)` so an upgrade + `orbit mcp remove
     // --claude` leaves a clean file. Keep the generator independent from
     // `claude_permission_name` so a future prefix change doesn't break
     // this migration.

@@ -77,6 +77,7 @@ The shipped index covers tasks plus explicitly indexed docs, including ADR desig
 | FTS5 + cosine + RRF hybrid pipeline | [2_design.md §5](./2_design.md), [Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one](./4_decisions.md#hybrid-retrieval-fts5-bm25-cosine-fused-via-rrf-from-day-one) | [T20260510-10] |
 | `orbit semantic install/uninstall` CLI | [2_design.md §6.1](./2_design.md) | [T20260510-9] |
 | `orbit search` CLI + MCP | [2_design.md §6](./2_design.md) | [T20260510-10] |
+| Cross-workspace federated read + scope selector | [2_design.md §6.4](./2_design.md), [Federate the cross-workspace read; deny it inside a managed run](./4_decisions.md#federate-the-cross-workspace-read-deny-it-inside-a-managed-run) | [ORB-11027] |
 | Index-on-mutation + index command | [2_design.md §7](./2_design.md) | [T20260510-9] |
 | Existing task store API | [crates/orbit-store/src/file/task_store/v2/](../../../crates/orbit-store/src/file/task_store/v2/) | — |
 | Concerns & honest limitations | [2_design.md §8](./2_design.md) | [T20260510-3] |
@@ -90,5 +91,6 @@ The shipped index covers tasks plus explicitly indexed docs, including ADR desig
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
 - [T20260510-9] — Phase-1 foundation: `orbit-embed` + `orbit-embed-companion` crates, indexing pipeline, install command.
 - [T20260510-10] — Phase-1 retrieval: hybrid query, CLI search/related, MCP tools.
+- [ORB-11027] — Cross-workspace federated search with a workspace scope selector.
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

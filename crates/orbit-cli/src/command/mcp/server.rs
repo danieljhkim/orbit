@@ -16,6 +16,7 @@ use orbit_common::{NotFoundKind, OrbitError};
 use orbit_core::OrbitRuntime;
 use orbit_core::adapter::command::{ToolEntryPoint, execute_global_in_process_tool_dispatch};
 use orbit_core::runtime::resolve_global_root;
+use orbit_mcp::federated;
 use orbit_mcp::{ListenerExposure, McpHost, McpListener, McpSessionAuthority};
 use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};
 use serde_json::Value;
@@ -32,6 +33,46 @@ pub(super) fn serve_mcp_stdio(
     let (host, session_context) =
         compose_server(remote_caller_machine_id, authority, bound_workspace)?;
     block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
+}
+
+/// Serve the federated mux: one stdio surface over the operator's configured
+/// destinations.
+///
+/// The mux serves no workspace of its own, so it composes no `ServerMcpHost`
+/// and never opens this machine's workspace registry — the list is built only
+/// from what destinations answer. Membership comes from the machine-global
+/// destinations file, whose duplicate-`machine_id` check runs here, before any
+/// tool is advertised.
+pub(super) fn serve_mcp_federated_stdio() -> Result<(), OrbitError> {
+    let global_root = resolve_global_root()?;
+    let destinations =
+        federated::load_destinations(&federated::destinations_path(&global_root))?.destinations;
+    // The mux is a client to each destination, and identifies itself with the
+    // same audit label the v1 proxy forwards.
+    let identity = orbit_mcp::mcp_server_identity(&global_root, None, McpSessionAuthority::Agent)?;
+    // Two budgets, not one: the probe timeout bounds the round trips that
+    // decide where a call goes, while the routed `tools/call` is stamped
+    // separately at dispatch so a remote run that legitimately takes minutes
+    // is not cut short by the time spent classifying its route [ORB-11023].
+    let probe = federated::SshDestinationProbe::new(
+        identity.process_machine_id.clone(),
+        federated::DEFAULT_PROBE_TIMEOUT,
+        federated::DEFAULT_ROUTED_DELIVERY_TIMEOUT,
+    );
+    let host: Arc<dyn McpHost> = Arc::new(federated::FederatedMcpHost::new(
+        destinations,
+        Arc::new(probe),
+    ));
+    tracing::info!(
+        machine_id = %identity.process_machine_id,
+        "serving the federated MCP mux"
+    );
+    // Session-unbound by construction: the federated list takes no workspace,
+    // and the mux has no local catalog to resolve one against.
+    block_on_server(orbit_mcp::serve_stdio_with_context(
+        host,
+        identity.session_context,
+    ))
 }
 
 pub(super) fn serve_mcp_listener(
@@ -135,7 +176,11 @@ impl ServerMcpHost {
 
     fn workspace_required(&self, name: &str) -> OrbitError {
         OrbitError::InvalidInput(format!(
-            "tool '{name}' requires a workspace selector; pass `workspace` in the tool call or MCP initialize metadata"
+            "tool '{name}' requires an explicit workspace selector; first call \
+             `orbit_workspace_list` and reuse a returned `ws_*` ID as `workspace`. \
+             If no workspace is listed, run `orbit init` and then `orbit workspace init` \
+             from the project directory. A selector may also be passed in MCP initialize \
+             metadata; Orbit never infers one from the server process cwd"
         ))
     }
 
@@ -148,6 +193,16 @@ impl ServerMcpHost {
             &registry,
             &self.process_machine_id,
         )
+    }
+
+    fn list_federated_workspaces(&self) -> Result<Value, OrbitError> {
+        let registry_path =
+            orbit_registry::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_registry::workspace_registry::load_registry_from(&registry_path)?;
+        Ok(orbit_mcp::execute_federated_workspace_discovery(
+            &registry,
+            &self.process_machine_id,
+        ))
     }
 
     fn call_global_tool(
@@ -164,6 +219,9 @@ impl ServerMcpHost {
             context,
             |_| match name {
                 "orbit.workspace.list" => self.list_workspaces(),
+                orbit_mcp::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL => {
+                    self.list_federated_workspaces()
+                }
                 _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
             },
         )
@@ -252,6 +310,23 @@ impl ServerMcpHost {
             object.insert("workspace".to_string(), Value::String(repo_root));
         }
 
+        // Destination catalog-role gate [ORB-11021]: refuse before the tool body
+        // runs. Unclassified and execute-class tools pass and keep their own auth.
+        if let Err(error) = federated::ensure_tool_class_held(
+            name,
+            federated::CapabilityClasses::for_checkout(&selected.workspace, &selected.checkout),
+        ) {
+            return runtime
+                .execute_in_process_tool_dispatch(
+                    name,
+                    input,
+                    ToolEntryPoint::Mcp,
+                    context,
+                    move |_| Err(error),
+                )
+                .map(|outcome| outcome.value);
+        }
+
         if name == "orbit.crew.list" {
             let workspace_id = selected.workspace.id.clone();
             let owner_machine_id = selected.workspace.owner_machine_id.clone();
@@ -290,6 +365,12 @@ impl McpHost for ServerMcpHost {
         input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
+        // The mux's destination-side discovery path is intentionally absent
+        // from tools/list. It retains Invalid local checkouts for descriptor
+        // health without changing direct v1 orbit.workspace.list behavior.
+        if name == orbit_mcp::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL {
+            return self.call_global_tool(name, input, context);
+        }
         let definition = match self.definition(name) {
             Ok(definition) => definition,
             Err(error) => return self.audit_global_failure(name, input, context, error),

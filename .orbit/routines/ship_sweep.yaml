@@ -13,11 +13,11 @@ description: >
   Ship this workspace's ready backlog through the normal gated task pipeline.
   Disabled by default; set enabled to true in this versioned definition to
   opt this workspace into scheduled shipment.
-enabled: true
+enabled: false
 hosts:
   - dk-server-1
 trigger:
-  cron: "*/30 * * * *"
+  cron: "30 * * * *"
   missed_run: skip
 target: job:workspace_ship_pipeline
 policy:
