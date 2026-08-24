@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.16.0
+
+### Breaking Changes
+
+- **Replica task writes report capability refusal**: `orbit.task.add` on a replica now returns `capability_refused` instead of `invalid_input`; update clients that branch on the old error code. ([ORB-11012])
+- **Replica MCP access is capability-gated**: workspace-scoped control-plane reads and writes now return `capability_refused` on replica checkouts; route those calls to the owner selector. ([ORB-11021])
+
+### Highlights
+
+- **Federated multi-host MCP**: register an opt-in federated server, discover remote workspaces over configured SSH destinations, and route workspace-scoped calls with host-qualified selectors. ([ORB-11016])
+- **Cross-workspace search**: one CLI or MCP search can query multiple registered workspaces, fuse ranked results, and attribute every hit to its source workspace. ([ORB-11027])
+- **Official MCP Registry launch**: versioned registry metadata and the npm proxy now provide a validated, fail-closed path from registry installation to an unbound Orbit MCP server. ([ORB-11029])
+- **Explicit docs-root overrides**: configured docs roots can opt out of gitignore filtering while retaining Orbit's `.git` and `.orbit` exclusions. ([ORB-11025])
+- **Policy-bound process spawning**: activity `proc.spawn` calls now honor the child-environment allowlist and the activity's filesystem sandbox. ([ORB-11031])
+- **Private SQLite state**: Orbit creates and repairs its state databases, WAL files, sidecars, and sensitive directories with private Unix permissions. ([ORB-11032])
+
 ## 0.15.0
 
 ### Breaking Changes
