@@ -11,7 +11,7 @@ summary: Federated MCP mux, selector, capability split, list schema, and fail-cl
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11016, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11012, ORB-11011, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11023, ORB-11016, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11012, ORB-11011, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Design
@@ -112,6 +112,14 @@ Caller-facing precedence when more than one class could apply:
 - `capability_refused` — destination holds the workspace but refuses the tool's class. Unclassified discovery/list tools are not subject to this error.
 
 It must not fall back to a local workspace, another host with a matching `ws_*`, a default workspace, or a cached host-local runtime.
+
+### Delivery budget and post-dispatch ambiguity
+
+The precedence above covers everything decidable **before** the destination sees the call. Two rules cover what happens after [ORB-11023].
+
+**Two budgets, not one.** SSH setup, the MCP handshake, discovery, and `tools/list` share one probe budget, because a caller cannot tell those phases apart. The routed `tools/call` gets its own, larger budget, stamped when its request is written. A single session-wide deadline would spend the tool's execution time on the round trips that merely chose the destination, and would cap every routed tool — including `orbit.command.exec` and `orbit.workflow.ship` — at whatever classification left over.
+
+**A lost answer after dispatch is `outcome_unknown`, not `unreachable_destination`.** Once the request is on the wire the destination may have run and committed it, and killing the SSH child does not undo remote work. `unreachable_destination` means a delivery miss, which invites a retry; retrying a possibly-committed `orbit.task.add` or `orbit.workflow.ship` duplicates it. A loss *before* the request is written — including a failed write — is still `unreachable_destination`, because nothing was delivered. `outcome_unknown` is a post-dispatch outcome and does not enter the precedence ladder.
 
 ## 7. Operator-configured control-plane uniqueness
 

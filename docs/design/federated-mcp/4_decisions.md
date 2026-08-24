@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Decisions
 owner: grok
-last_updated: 2026-08-23
-last_validated: 2026-08-23
+last_updated: 2026-08-24
+last_validated: 2026-08-24
 status: Draft
 feature: federated-mcp
 doc_role: decisions
@@ -11,7 +11,7 @@ summary: Standing rules for the proposed federated MCP mux: destinations are con
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access]
-related_artifacts: [ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11023, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Decisions
@@ -85,6 +85,25 @@ Federated `orbit_workspace_list` is a new session-unbound shape, not a compatibl
 
 - Callers can distinguish "host down" from "checkout missing" from "tool not advertised here."
 - Cost: the list is not a set of live, callable workspaces; clients must read reachability and capabilities before routing, and availability is bounded by the chosen destination.
+
+## Routed delivery has its own budget, and a lost answer after dispatch is `outcome_unknown`
+
+**Recorded:** 2026-08 · [ORB-11023]
+
+### Context
+
+Routing reused the discovery probe's single session-wide deadline, stamped once at session start. A routed call spends that budget on four remote round trips — SSH spawn plus `initialize`, discovery, `tools/list`, then `tools/call` — before the tool runs, so any routed tool slower than the residue could not complete over the mux at all. The mux advertises the whole canonical surface, including `orbit.command.exec` and `orbit.workflow.ship`. Worse, exhausting that deadline produced `unreachable_destination` for a destination that was healthy and actively executing, and killing the SSH child does not undo a write the destination already committed.
+
+### Decision
+
+Classification and delivery are budgeted separately. The probe budget bounds SSH setup, the handshake, discovery, and `tools/list`; the routed `tools/call` is stamped with its own, larger budget at the moment its request is written. A lost answer after that write — budget exceeded or session ended — is `OrbitError::OutcomeUnknown` (`outcome_unknown`), carrying the destination-facing request identity. A loss before the write, including a failed write, stays `unreachable_destination`. `outcome_unknown` is a post-dispatch outcome and does not join the fail-closed precedence ladder. Apply this to every new federated request: read-only classification phases are `unreachable`; anything that can commit on the destination is `outcome_unknown` once its bytes are on the wire.
+
+### Consequences
+
+- A caller can distinguish "the host never got it, retry" from "it may have run, reconcile before retrying," so a timed-out `orbit.task.add` is no longer an invitation to create a duplicate.
+- Long-running routed tools become usable over the mux; a slow destination no longer converts into a false unreachable.
+- Cost: both budgets are constants rather than per-destination configuration, so an operator still cannot tune one destination separately. Rejected for now because no second, differing use exists; a `Destination` timeout field can be added when one does.
+- Cost: `outcome_unknown` gives the caller no verdict. That is the honest report — the mux cannot learn one after the transport is gone — but it does move reconciliation to the caller.
 
 ## Single control-plane per repository is operator configuration
 

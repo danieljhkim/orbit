@@ -175,6 +175,30 @@ fn replica_task_add_returns_destination_capability_refused() {
 }
 
 #[test]
+fn a_dispatched_call_whose_answer_is_lost_is_outcome_unknown_not_unreachable() {
+    let probe = three_destination_probe().on_call(
+        OWNER_MACHINE,
+        "orbit.task.add",
+        ScriptedToolResult::PostDispatchTimeout,
+    );
+    let log = probe.call_log();
+    let host = FederatedMcpHost::new(destinations(), Arc::new(probe));
+
+    let error = call_err(&host, "orbit.task.add", "hm_owner/ws_orbit");
+    assert!(
+        matches!(error, OrbitError::OutcomeUnknown { .. }),
+        "the mux must not fold a possibly-committed remote write into the delivery-miss class \
+         a caller retries: {error}"
+    );
+    let calls = log.calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "the call was delivered once and is not retried here: {calls:?}"
+    );
+}
+
+#[test]
 fn a_copied_selector_round_trips_to_the_encoded_host() {
     let (host, log) = routed_mux();
 

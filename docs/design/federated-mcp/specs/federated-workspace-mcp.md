@@ -1,14 +1,14 @@
 ---
 type: design
 summary: "Spec: Federated workspace MCP mux, selector, capabilities, list schema, and fail-closed routing"
-last_validated: 2026-08-23
+last_validated: 2026-08-24
 title: Spec — Federated workspace MCP
 owner: grok
 status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, spec]
 related_features: [federated-mcp, host-registry, mcp-bridge]
-related_artifacts: [ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11023, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Federated workspace MCP
@@ -150,7 +150,7 @@ Routing decides on **live delivery**, not cached list health. Probe cadence and 
 |---|---|---|
 | unknown | `unknown_selector` | Token never valid: it does not uniquely name a configured destination+workspace, including a token that is not uniquely host-qualified (bare `ws_*`) |
 | ambiguous | `ambiguous_destination` | Duplicate `machine_id` among configured destinations, raised at **config load**, not per call |
-| unreachable | `unreachable_destination` | Configured destination does not answer a live delivery attempt |
+| unreachable | `unreachable_destination` | Configured destination does not answer, up to and including a `tools/call` request that could not be written |
 | stale-route | `stale_route` | Destination is configured; a live probe shows that workspace is absent |
 | unhealthy | `unhealthy_checkout` | Destination answers but the checkout is not usable (repo-root missing / invalid) |
 | tool not advertised | `tool_not_on_this_host` | Destination is identified; the tool is not on that host's advertised surface |
@@ -167,6 +167,16 @@ When more than one class could apply, return the first that matches:
 `unknown_selector` → `ambiguous_destination` (config) → `unreachable_destination` → `stale_route` → `unhealthy_checkout` → `tool_not_on_this_host` → `capability_refused`
 
 Unreachable wins over capability and stale because those are undecidable without the host. Cached list health must not reorder this list.
+
+### Delivery budget and post-dispatch outcome
+
+Classification and delivery are budgeted separately [ORB-11023]. SSH setup, the handshake, discovery, and `tools/list` share one probe budget; the routed `tools/call` is stamped with its own, larger budget when its request is written. Routed tools include long-running mutating ones, so the time spent choosing a destination must not be deducted from the time the tool gets to run.
+
+Once that request is written the call may already have executed and committed on the destination, and killing the transport does not undo it. A lost answer there is therefore `outcome_unknown`, never `unreachable_destination`: the latter means a delivery miss and invites the retry that would duplicate the write. This is a post-dispatch outcome and does **not** enter the precedence ladder above — everything in that ladder is decided before the destination sees the call.
+
+| Class | Error identity | When |
+|---|---|---|
+| outcome unknown | `outcome_unknown` | The routed `tools/call` request was written and its answer never arrived (budget exceeded, or the session ended mid-call) |
 
 ## mcp-bridge invariant exception
 

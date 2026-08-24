@@ -77,7 +77,13 @@ impl CallLog {
 /// `ws_*`.
 #[derive(Debug, Clone)]
 pub(super) enum ScriptedToolResult {
-    RemoteTool { code: String, message: String },
+    RemoteTool {
+        code: String,
+        message: String,
+    },
+    /// The destination took the `tools/call` and then stopped answering: the
+    /// mux wrote the request and never learned whether it ran.
+    PostDispatchTimeout,
 }
 
 /// A probe with one canned outcome per destination `machine_id`.
@@ -230,6 +236,12 @@ impl RoutedSession for ScriptedRoute {
             .or_else(|| self.calls.get(&mcp_advertised_tool_name(name)));
         match scripted {
             None => Ok(arguments),
+            Some(ScriptedToolResult::PostDispatchTimeout) => Err(OrbitError::OutcomeUnknown {
+                mcp_call_id: format!("{}/{name}", self.machine_id),
+                message: "timed out waiting for 'tools/call'; the destination may have completed \
+                          the call"
+                    .to_string(),
+            }),
             Some(ScriptedToolResult::RemoteTool { code, message }) => Err(OrbitError::RemoteTool {
                 code: code.clone(),
                 message: format!("{}: {message}", self.machine_id),
