@@ -514,7 +514,7 @@ fn mcp_server_advertises_governed_tools_but_denies_an_unprivileged_session() {
 /// real v1 MCP transport, a coordination write is refused with the named
 /// catalog-role code — not `invalid_input`, which would make a refusal
 /// indistinguishable from a malformed call, and not `capability_denied`, which
-/// is the separate operator-versus-agent axis [ORB-11012].
+/// is the separate operator-versus-agent axis [ORB-11012] [ORB-11021].
 #[test]
 fn a_replica_checkout_refuses_a_coordination_write_with_capability_refused() {
     let workspace = McpWorkspace::init_replica_of("hm_remote_owner");
@@ -534,11 +534,11 @@ fn a_replica_checkout_refuses_a_coordination_write_with_capability_refused() {
     assert!(
         refused["message"]
             .as_str()
-            .is_some_and(|message| message.contains("hm_remote_owner")),
-        "the refusal names the declared owner: {refused}"
+            .is_some_and(|message| message.contains("control_plane")),
+        "MCP dispatch must refuse the capability class: {refused}"
     );
 
-    // The same refusal on the CLI, which fails closed on the same gate.
+    // CLI task writes still fail closed on Core's coordination-write guard.
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
         .args([
             "task",
@@ -559,6 +559,99 @@ fn a_replica_checkout_refuses_a_coordination_write_with_capability_refused() {
     let payload: Value =
         serde_json::from_slice(&output.stderr).expect("JSON error payload on stderr");
     assert_eq!(payload["code"], "capability_refused", "{payload}");
+    assert!(
+        payload["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("hm_remote_owner")),
+        "the CLI refusal names the declared owner: {payload}"
+    );
+}
+
+/// The destination MCP host must enforce checkout capability classes on the
+/// production dispatch path — including control-plane tools that never pass
+/// through Core's task-write guard [ORB-11021].
+#[test]
+fn a_replica_mcp_session_enforces_checkout_capability_classes() {
+    let workspace = McpWorkspace::init_replica_of("hm_remote_owner");
+    let mut client = workspace.serve();
+
+    for (name, arguments) in [
+        (
+            "orbit_friction_add",
+            json!({
+                "body": "must not fork a replica friction",
+                "model": "codex",
+            }),
+        ),
+        (
+            "orbit_search",
+            json!({
+                "query": "must not search replica coordination",
+                "model": "codex",
+            }),
+        ),
+        ("orbit_auto_task_list", json!({})),
+        ("orbit_friction_list", json!({})),
+    ] {
+        let refused = client.call_tool_err(name, arguments);
+        assert_eq!(refused["code"], "capability_refused", "{name}: {refused}");
+        assert!(
+            refused["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("control_plane")),
+            "{name} must name the refused class: {refused}"
+        );
+    }
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["friction", "list", "--json"])
+        .output()
+        .expect("list frictions on a replica via CLI");
+    assert!(
+        output.status.success(),
+        "CLI friction list failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listed: Value = serde_json::from_slice(&output.stdout).expect("friction list JSON");
+    let items = listed.as_array().or_else(|| {
+        listed
+            .get("items")
+            .and_then(Value::as_array)
+            .or_else(|| listed.get("frictions").and_then(Value::as_array))
+    });
+    assert!(
+        items.is_some_and(Vec::is_empty),
+        "refused friction.add must not mutate local coordination state: {listed}"
+    );
+
+    let crews = client.call_tool_ok("orbit_crew_list", json!({}));
+    assert!(
+        crews.get("crews").and_then(Value::as_array).is_some(),
+        "unclassified crew.list must remain permitted: {crews}"
+    );
+
+    let marker = workspace.work.join("replica-command-exec-must-not-run");
+    for (name, arguments) in [
+        ("orbit_workflow_run_list", json!({})),
+        (
+            "orbit_command_exec",
+            json!({
+                "argv": ["touch", marker.to_str().expect("utf8 marker")],
+                "working_directory": workspace.work,
+            }),
+        ),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(
+            denied["code"], "capability_denied",
+            "{name} must pass the catalog-role gate and hit its own auth: {denied}"
+        );
+    }
+    assert!(
+        !marker.exists(),
+        "execute-class command.exec must not run after its independent denial"
+    );
 }
 
 /// The operator MCP surface, over the real transport: a server an operator

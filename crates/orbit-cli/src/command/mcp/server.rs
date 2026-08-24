@@ -288,6 +288,23 @@ impl ServerMcpHost {
             object.insert("workspace".to_string(), Value::String(repo_root));
         }
 
+        // Destination catalog-role gate [ORB-11021]: refuse before the tool body
+        // runs. Unclassified and execute-class tools pass and keep their own auth.
+        if let Err(error) = federated::ensure_tool_class_held(
+            name,
+            federated::CapabilityClasses::for_checkout(&selected.workspace, &selected.checkout),
+        ) {
+            return runtime
+                .execute_in_process_tool_dispatch(
+                    name,
+                    input,
+                    ToolEntryPoint::Mcp,
+                    context,
+                    move |_| Err(error),
+                )
+                .map(|outcome| outcome.value);
+        }
+
         if name == "orbit.crew.list" {
             let workspace_id = selected.workspace.id.clone();
             let owner_machine_id = selected.workspace.owner_machine_id.clone();
