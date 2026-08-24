@@ -7,7 +7,7 @@ use orbit_common::protocol::tool_input::{
 };
 use serde_json::Value;
 
-use crate::{GlobalSearchKind, GlobalSearchParams, OrbitRuntime};
+use crate::{GlobalSearchKind, GlobalSearchParams, OrbitRuntime, WorkspaceScope};
 
 use super::input::optional_bool_alias;
 
@@ -40,6 +40,15 @@ pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
         .transpose()?
         .unwrap_or_default();
 
+    // `workspaces` is the federated *scope*; `workspace` stays the reserved
+    // routing selector that binds a call to one registered checkout, so the two
+    // never collide [ORB-11027].
+    let workspaces = WorkspaceScope::from_inputs(
+        optional_csv_or_string_list_alias(&input, &["workspaces", "workspace_scope"])?
+            .unwrap_or_default(),
+        optional_bool_alias(&input, &["all_workspaces", "allWorkspaces"])?.unwrap_or(false),
+    );
+
     let result = runtime.global_search(GlobalSearchParams {
         query: optional_string_alias(&input, &["query"])?,
         hybrid,
@@ -53,6 +62,7 @@ pub(super) fn search(runtime: &OrbitRuntime, input: Value) -> Result<Value, Orbi
         status: optional_csv_or_string_list_alias(&input, &["status", "statuses"])?
             .unwrap_or_default(),
         path: optional_string_alias(&input, &["path"])?,
+        workspaces,
     })?;
     serde_json::to_value(result)
         .map_err(|error| OrbitError::Execution(format!("serialize search result: {error}")))

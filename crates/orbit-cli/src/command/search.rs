@@ -1,5 +1,7 @@
 use clap::{ArgAction, Args, Subcommand, ValueEnum};
-use orbit_core::{GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime};
+use orbit_core::{
+    GlobalSearchHit, GlobalSearchKind, GlobalSearchParams, OrbitError, OrbitRuntime, WorkspaceScope,
+};
 
 use crate::command::{CommandOut, Execute, Payload};
 
@@ -38,6 +40,17 @@ pub struct SearchCommand {
     /// Explicit per-kind status override, e.g. task:open,doc:active,friction:open.
     #[arg(long, value_delimiter = ',', global = true)]
     pub status: Vec<String>,
+    /// Search this registered workspace as well. Repeat or comma-separate to
+    /// federate across several; every hit is labelled with the workspace it
+    /// came from. Accepts a registered name, a `ws_*` ID, or an absolute
+    /// checkout path. Distinct from the top-level `orbit --workspace`, which
+    /// binds the whole invocation to one checkout.
+    #[arg(long = "workspace", action = ArgAction::Append, value_delimiter = ',', value_name = "SELECTOR")]
+    pub workspaces: Vec<String>,
+    /// Search every active workspace registered on this machine. Overrides
+    /// `--workspace`.
+    #[arg(long)]
+    pub all_workspaces: bool,
     /// Output as JSON.
     #[arg(long, global = true)]
     pub json: bool,
@@ -106,6 +119,7 @@ impl Execute for SearchCommand {
             all: self.all,
             status: self.status,
             path: input.path,
+            workspaces: WorkspaceScope::from_inputs(self.workspaces, self.all_workspaces),
         })?;
 
         for note in &response.notes {
@@ -196,20 +210,32 @@ struct SearchInput {
 
 fn search_table(results: &[GlobalSearchHit]) -> crate::output::table::Table {
     use crate::output::table::{Column, Table};
+    // A federated query labels every hit; a single-workspace one labels none,
+    // so the column appears exactly when it carries information [ORB-11027].
+    let federated = results.iter().any(|hit| hit.workspace.is_some());
     // Each hit's kind names its own detail command (`orbit task show`
     // or `orbit docs show`).
-    let mut table = Table::new(vec![
-        Column::new("KIND").fixed(),
-        Column::new("SOURCE").fixed(),
+    let mut columns = vec![Column::new("KIND").fixed(), Column::new("SOURCE").fixed()];
+    if federated {
+        columns.push(Column::new("WORKSPACE").fixed());
+    }
+    columns.extend([
         Column::new("ID/PATH").path(),
         Column::new("TITLE/SUMMARY"),
         Column::new("MATCH").fixed(),
-    ])
-    .empty_message("no results matching the query");
+    ]);
+    let mut table = Table::new(columns).empty_message("no results matching the query");
     for hit in results {
-        table.add_row(vec![
-            hit.kind.clone(),
-            hit.source.clone(),
+        let mut row = vec![hit.kind.clone(), hit.source.clone()];
+        if federated {
+            row.push(
+                hit.workspace
+                    .as_ref()
+                    .map(|workspace| workspace.name.clone())
+                    .unwrap_or_default(),
+            );
+        }
+        row.extend([
             hit.id.clone().or(hit.path.clone()).unwrap_or_default(),
             hit.title
                 .clone()
@@ -217,6 +243,7 @@ fn search_table(results: &[GlobalSearchHit]) -> crate::output::table::Table {
                 .unwrap_or_default(),
             match_text(hit),
         ]);
+        table.add_row(row);
     }
     table
 }

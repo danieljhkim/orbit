@@ -4,6 +4,8 @@ use serde::Serialize;
 
 use orbit_search::ScoreBreakdown;
 
+use crate::runtime::workspace_catalog::WorkspaceScope;
+
 use super::DEFAULT_LIMIT;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -83,6 +85,10 @@ pub struct GlobalSearchParams {
     /// Cross-kind applicability filter. Task: selector-mapping against
     /// `context_files`. Doc: out of scope (returns empty).
     pub path: Option<String>,
+    /// Which workspaces this query covers. Defaults to
+    /// [`WorkspaceScope::Current`], the untouched single-workspace path
+    /// [ORB-11027].
+    pub workspaces: WorkspaceScope,
 }
 
 impl GlobalSearchParams {
@@ -101,6 +107,38 @@ pub struct GlobalSearchResponse {
     pub kind: GlobalSearchKind,
     pub results: Vec<GlobalSearchHit>,
     pub notes: Vec<String>,
+    /// Per-workspace outcome of a federated query. Empty — and omitted from
+    /// JSON — for the default single-workspace scope, so an existing caller
+    /// sees the same response shape it always did.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<WorkspaceSearchReport>,
+}
+
+/// What one workspace contributed to a federated query.
+///
+/// A workspace that answered nothing still appears here with `hits: 0` and a
+/// `note`, so "returned no matches" is distinguishable from "was never asked".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceSearchReport {
+    pub workspace_id: String,
+    pub name: String,
+    pub hits: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Which workspace a hit came from.
+///
+/// Load-bearing, not decorative: task IDs are globally unique and resolve
+/// through the host registry, but friction and job-run IDs are allocated per
+/// workspace, so the same ID names a different record in each. F2026-08-046
+/// records a near-miss write to the wrong record from exactly that ambiguity
+/// in a merged result set [ORB-11027].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HitWorkspace {
+    pub workspace_id: String,
+    pub name: String,
+    pub repo_root: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,4 +165,8 @@ pub struct GlobalSearchHit {
     pub score_breakdown: Option<ScoreBreakdown>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_by: Option<Vec<String>>,
+    /// Set only on a federated query. `None` on the single-workspace path
+    /// keeps that response byte-identical to before [ORB-11027].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<HitWorkspace>,
 }

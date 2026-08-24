@@ -3,7 +3,7 @@ summary: "Semantic Search — Decisions"
 type: design
 title: "Semantic Search — Decisions"
 owner: claude
-last_updated: 2026-08-13
+last_updated: 2026-08-24
 last_validated: 2026-08-09
 status: Accepted
 feature: orbit-search
@@ -403,6 +403,47 @@ Phase 1 ships option C. Two new crates:
 
 ---
 
+## Federate the cross-workspace read; deny it inside a managed run
+
+**Recorded:** 2026-08-24 · [ORB-11027]
+**Paths:** `crates/orbit-core/src/application/search/federated.rs`, `crates/orbit-core/src/runtime/workspace_catalog.rs`, `crates/orbit-cmd/src/workspace_catalog.rs`
+
+### Context
+
+`orbit search` was single-workspace: `GlobalSearchKind` is global across *kinds*, not across workspaces, and vectors plus FTS live in one `<repo>/.orbit/state/semantic.db` per workspace ([Workspace-local semantic DB separate from global audit/tool DB](#workspace-local-semantic-db-separate-from-global-audittool-db)). Answering "have we thought about X before" across polaris, almanac, constellation, and the code workspaces meant running the same query N times by hand and merging by eye.
+
+Three shapes were available:
+
+1. **Centralize the store** — move the index to a host-global `~/.orbit/semantic.db`.
+2. **Federate the read** — keep per-workspace indexes; open the registered checkouts and fuse.
+3. **Leave it to the caller** — keep N calls, document the merge.
+
+Option 1 was assessed and rejected in ORB-11001. It breaks the sandbox boundary: the v2 host allow-lists `{workspace}/state/semantic.db*` per run, so a host-global index would hand every sandboxed agent run — including one scoped to an unrelated code workspace — a handle on a file containing the personal vault, degrading a filesystem-level guarantee into a query-time filter. It also does not replicate: a per-workspace index travels with its checkout, a host-global DB does not. Option 3 is what F2026-08-046 already shows failing — merged cross-workspace results without attribution led to a near-miss write to the wrong friction record, because friction IDs are allocated per workspace and the same ID names a different record in each.
+
+Federating the read raises the same sandbox question in a different place, because the fan-out is in-process rather than through the filesystem allow-list: should a sandboxed agent run be able to ask for a multi-workspace scope at all?
+
+### Decision
+
+Federate the read. Each workspace keeps owning and writing its own `semantic.db`; a `WorkspaceScope` selector (`Current` | `Selectors` | `AllRegistered`) widens only the query.
+
+1. **Layering.** `orbit-core` owns fan-out, fusion, attribution, notes, and caps; it takes a registry-neutral `WorkspaceCatalog` seam supplied by `orbit-cmd`, which already joins Core to Registry. No new crate edge.
+2. **Fuse by rank, never by raw score.** Per-workspace hits interleave by position in their own workspace's ranked list, reusing the round-robin merge that already balances kinds. Lexical, hybrid, and absent scores are not commensurable across workspaces.
+3. **Attribution is part of the hit.** Every federated hit carries `workspace: {workspace_id, name, repo_root}`, so the F2026-08-046 defect does not move in-tree along with the merge logic.
+4. **Model mismatch is a named note.** A workspace indexed under a different `model_id` contributes lexical hits only, and the response says so instead of emitting a ranking the caller cannot tell apart from a fused one.
+5. **Sandbox posture: deny.** A federated scope is refused inside an Orbit-managed run. Denying the *scope* rather than widening the per-run allow-list keeps the in-process read and the filesystem grant consistent: a run may read exactly the index it may write. The traded capability — an agent asking one question of the whole corpus mid-run — stays available to the human and operator surfaces that are not inside a run. The alternative, an enumerated allow-list of "safe" workspaces per run, was rejected as a second authorization system whose default would be wrong the first time a new personal workspace was registered.
+6. **Default is untouched.** `Current` takes the existing single-workspace path; both new response fields are omitted from JSON when empty.
+
+### Consequences
+
+- One `orbit search --all-workspaces` answers across the whole corpus, and each hit names the workspace a follow-up read or write should target.
+- Rank-interleaved fusion means a large workspace cannot consume the budget, and no cosine score is ever compared across a model boundary.
+- A missing, stale, or unreadable index degrades one workspace to zero hits with a note instead of failing the query — the normal case for a machine with several registered checkouts.
+- The `WorkspaceCatalog` seam gives any future cross-workspace read the same registry-neutral shape without pulling Registry under Core.
+- Cost: an agent inside a managed run cannot search other workspaces, so cross-workspace recall stays a human/orchestrator step. If that becomes load-bearing, the follow-up is an explicit per-run scope grant carried in the run's own record — not a widened default.
+- Cost: at most 16 workspaces are opened per query. The cap is announced in the response, so a machine that outgrows it sees the truncation rather than silently narrowed recall.
+- Cost: opening a target goes through the ordinary `RegisteredRuntimeFactory::open_registered_checkout`, which runs the same layout pre-flight any `orbit --workspace X` invocation does. A federated *read* can therefore apply a pending layout upgrade to another checkout. That is the established open path rather than a new one, and the managed-run denial keeps it out of agent runs; a genuinely read-only runtime open would be the fix if it ever matters.
+- Cost: `workspaces` and `all_workspaces` join the `orbit.search` parameter surface and the search response shape that [Expose unified search through a thin HTTP adapter](#expose-unified-search-through-a-thin-http-adapter) made a compatibility contract. `workspaces` is deliberately distinct from the reserved `workspace` routing selector; the two are easy to confuse and are documented against each other in both help texts.
+
 ## Task References
 
 - [T20260510-3] — Design semantic search over task artifacts and graph (v2). The task that produced this folder.
@@ -416,5 +457,6 @@ Phase 1 ships option C. Two new crates:
 - [ORB-00205] — Split `orbit search` into query / similar / path forms and require per-kind `--status` syntax. The task that accepted and implemented [Split orbit search modes and require per-kind statuses](#split-orbit-search-modes-and-require-per-kind-statuses).
 - [ORB-00206] — Add doc-corpus embeddings through `orbit docs index` and `orbit search --kind doc --hybrid`. The task that accepted and implemented [Doc corpus embeddings use `docs index` and opt-in hybrid search](#doc-corpus-embeddings-use-docs-index-and-opt-in-hybrid-search).
 - [ORB-10304] — Expose unified lexical, hybrid, and neighbor search through `GET /api/search`.
+- [ORB-11027] — Cross-workspace federated search with a workspace scope selector. The task that accepted and implemented [Federate the cross-workspace read; deny it inside a managed run](#federate-the-cross-workspace-read-deny-it-inside-a-managed-run).
 
 Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
