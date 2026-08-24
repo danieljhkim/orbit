@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use orbit_common::OrbitError;
-use orbit_common::storage::sqlite::apply_default_pragmas;
+use orbit_common::storage::sqlite::{apply_default_pragmas, open_private};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::driver::sqlite::migration;
@@ -71,18 +71,9 @@ impl Store {
         Ok(())
     }
     pub fn open(path: &Path) -> Result<Self, OrbitError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
-        }
-
-        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        let pragmas = apply_default_pragmas(&conn)?;
-        let read_only =
-            pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)?;
-        if read_only {
-            drop(conn);
-            conn = orbit_common::storage::sqlite::open_immutable(path)?;
-        }
+        let opened = open_private(path)?;
+        let conn = opened.connection;
+        let read_only = opened.read_only;
 
         if let Err(error) = migration::apply_schema(&conn) {
             if read_only && error.is_readonly_or_access_failure() {

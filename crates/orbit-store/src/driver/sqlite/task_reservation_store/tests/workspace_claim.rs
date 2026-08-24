@@ -297,3 +297,35 @@ fn claims_are_scoped_per_workspace() {
         "a claim binds one workspace, not the whole host"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn persisted_workspace_claim_is_not_group_or_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let path = root.path().join("state/orbit.db");
+    let store = Store::open(&path).expect("open file-backed store");
+    let granted = store
+        .acquire_workspace_claim(&acquire_params("operator-a"))
+        .expect("persist workspace claim");
+    assert!(
+        granted.claim_token.is_some(),
+        "claim persisted a bearer token"
+    );
+
+    for suffix in ["", "-wal", "-shm"] {
+        let file = std::path::PathBuf::from(format!("{}{suffix}", path.display()));
+        let mode = std::fs::metadata(&file)
+            .expect("SQLite file metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "{} must not grant group/other access (mode {mode:o})",
+            file.display()
+        );
+    }
+}
