@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.danieljhkim/orbit",
+  "description": "Orbit's local-first task and workflow registry for coding agents.",
+  "repository": {
+    "url": "https://github.com/danieljhkim/orbit",
+    "source": "github"
+  },
+  "version": "0.15.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@orbit-tools/cli",
+      "version": "0.15.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ]
+    }
+  ]
+}

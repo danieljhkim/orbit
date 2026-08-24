@@ -1,6 +1,7 @@
 {
   "name": "@orbit-tools/cli",
-  "version": "0.15.0",
+  "version": "0.15.1",
+  "mcpName": "io.github.danieljhkim/orbit",
   "description": "npm proxy for the Orbit CLI. Downloads the matching native binary from GitHub Releases on install and forwards all invocations.",
   "bin": {
     "orbit": "bin/orbit.js"

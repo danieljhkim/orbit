@@ -818,8 +818,11 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
     // is unbound and must stay fail-closed [ORB-10967].
     let unscoped = client.call_tool_err("orbit_task_list", json!({}));
     assert!(unscoped["message"].as_str().is_some_and(|message| {
-        message.contains("requires a workspace selector")
-            && message.contains("MCP initialize metadata")
+        message.contains("requires an explicit workspace selector")
+            && message.contains("orbit_workspace_list")
+            && message.contains("returned `ws_*` ID")
+            && message.contains("orbit workspace init")
+            && message.contains("never infers one from the server process cwd")
     }));
     let description = tool_workspace_description(&listed, "orbit_task_list");
     assert!(
@@ -865,6 +868,79 @@ fn mcp_serve_lists_the_canonical_surface_outside_any_checkout() {
             .is_some_and(|id| id.starts_with("trace-"))
     );
     assert_eq!(audited.3, audited.4);
+}
+
+#[test]
+fn uninitialized_unbound_mcp_launch_gives_setup_guidance_without_operator_authority() {
+    let registry_metadata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../server.json");
+    let registry: Value = serde_json::from_str(
+        &std::fs::read_to_string(&registry_metadata).expect("read checked-in registry metadata"),
+    )
+    .expect("parse checked-in registry metadata");
+    assert_eq!(registry["name"], "io.github.danieljhkim/orbit");
+    assert_eq!(registry["packages"][0]["identifier"], "@orbit-tools/cli");
+    assert_eq!(
+        registry["packages"][0]["packageArguments"],
+        json!([
+            { "type": "positional", "value": "mcp" },
+            { "type": "positional", "value": "serve" }
+        ])
+    );
+    assert!(
+        !serde_json::to_string(&registry)
+            .expect("serialize registry metadata")
+            .contains("--operator"),
+        "the registry install path must not grant operator authority"
+    );
+
+    let temp = tempdir().expect("tempdir");
+    let home = temp.path().join("home");
+    let scratch = temp.path().join("scratch");
+    std::fs::create_dir_all(&home).expect("create clean home");
+    std::fs::create_dir_all(&scratch).expect("create non-workspace launch dir");
+
+    // This is the registry-launch shape: no workspace binding, no operator
+    // flag, and a cwd that cannot supply an ambient workspace.
+    let child = McpWorkspace::orbit_command(&scratch, &home)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn clean registry-style MCP server");
+    let mut client = McpClient::new(child);
+    let initialized = client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "registry-clean-launch", "version": "0" }
+        }),
+    );
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "orbit-mcp");
+    client.notify("notifications/initialized");
+
+    let listed = client.request("tools/list", Value::Null);
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| tools
+                .iter()
+                .any(|tool| tool["name"] == "orbit_workspace_list")),
+        "the first routing tool must be available from a clean launch: {listed}"
+    );
+
+    let unscoped = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(unscoped["message"].as_str().is_some_and(|message| {
+        message.contains("orbit_workspace_list")
+            && message.contains("returned `ws_*` ID")
+            && message.contains("orbit init")
+            && message.contains("orbit workspace init")
+            && message.contains("never infers one from the server process cwd")
+    }));
+
+    let workspaces = client.call_tool_ok("orbit_workspace_list", json!({}));
+    assert_eq!(workspaces["workspaces"], json!([]));
 }
 
 #[test]
@@ -2170,8 +2246,9 @@ fn task_show_is_global_by_default_across_tool_run_and_mcp() {
     assert_eq!(shown["id"], json!(task_id));
     let unscoped = client.call_tool_err("orbit_task_list", json!({}));
     assert!(unscoped["message"].as_str().is_some_and(|message| {
-        message.contains("requires a workspace selector")
-            && message.contains("MCP initialize metadata")
+        message.contains("requires an explicit workspace selector")
+            && message.contains("orbit_workspace_list")
+            && message.contains("orbit workspace init")
     }));
     drop(client);
 

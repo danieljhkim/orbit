@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end smoke for the published npm install chain.
 #
-# Runs against the *published* @orbit-tools/cli@latest from npm (not the
-# local working tree) so it catches version drift between the npm proxy
-# and the GitHub Release binary it fetches.
+# Resolves the checked-in Official MCP Registry metadata, then runs its
+# published npm package (not the local working tree). This catches drift
+# between the registry contract, npm proxy, and GitHub Release binary.
 #
 # Steps:
-#   1. npx -y @orbit-tools/cli@latest --version
+#   1. resolve server.json and launch its versioned npm package
 #        -> exercises postinstall: tarball download + sha256 verification
 #   2. drive `orbit mcp serve` over stdio with a JSON-RPC handshake
 #      (initialize + tools/list) and assert at least one `orbit.*` tool
@@ -57,6 +57,39 @@ require_bin() {
 require_bin node
 require_bin npx
 require_bin npm
+
+REGISTRY_METADATA="server.json"
+NPM_PACKAGE_JSON="npm/package.json"
+if [[ ! -f "$REGISTRY_METADATA" || ! -f "$NPM_PACKAGE_JSON" ]]; then
+  echo "smoke-npm-install: expected $REGISTRY_METADATA and $NPM_PACKAGE_JSON at the repository root" >&2
+  exit 2
+fi
+
+registry_name="$(node -p "JSON.parse(require('fs').readFileSync('$REGISTRY_METADATA', 'utf8')).name")"
+npm_mcp_name="$(node -p "JSON.parse(require('fs').readFileSync('$NPM_PACKAGE_JSON', 'utf8')).mcpName")"
+NPM_PKG="$(node -p "JSON.parse(require('fs').readFileSync('$REGISTRY_METADATA', 'utf8')).packages?.[0]?.identifier ?? ''")"
+npm_package_version="$(node -p "JSON.parse(require('fs').readFileSync('$NPM_PACKAGE_JSON', 'utf8')).version")"
+registry_version="$(node -p "JSON.parse(require('fs').readFileSync('$REGISTRY_METADATA', 'utf8')).version")"
+registry_package_version="$(node -p "JSON.parse(require('fs').readFileSync('$REGISTRY_METADATA', 'utf8')).packages?.[0]?.version ?? ''")"
+
+if [[ "$registry_name" != "io.github.danieljhkim/orbit" || "$npm_mcp_name" != "$registry_name" ]]; then
+  echo "FAIL: registry name and npm mcpName must both be io.github.danieljhkim/orbit" >&2
+  exit 1
+fi
+if [[ -z "$NPM_PKG" || "$registry_version" != "$npm_package_version" || "$registry_package_version" != "$registry_version" ]]; then
+  echo "FAIL: registry package identity or versions do not match npm/package.json" >&2
+  exit 1
+fi
+if ! node -e "const s=require('./$REGISTRY_METADATA'); const p=s.packages?.[0]; process.exit(Number(p?.registryType !== 'npm' || p?.transport?.type !== 'stdio' || JSON.stringify((p?.packageArguments ?? []).map(a => [a.type, a.value])) !== JSON.stringify([['positional', 'mcp'], ['positional', 'serve']]) || JSON.stringify(s).includes('--operator')));"; then
+  echo "FAIL: registry metadata must declare the fixed non-operator npm stdio launch: mcp serve" >&2
+  exit 1
+fi
+
+NPM_SPEC="$NPM_PKG@$registry_package_version"
+PACKAGE_ARGUMENTS=()
+while IFS= read -r argument; do
+  PACKAGE_ARGUMENTS+=("$argument")
+done < <(node -e "for (const argument of require('./$REGISTRY_METADATA').packages[0].packageArguments) console.log(argument.value)")
 
 case "$(uname -s)" in
   Darwin|Linux) ;;
@@ -122,10 +155,10 @@ run_with_timeout() {
   esac
 }
 
-echo "--- step 1: npx -y $NPM_PKG@latest --version ---"
+echo "--- step 1: npx -y $NPM_SPEC --version (from $REGISTRY_METADATA) ---"
 VERSION_OUT="$TMPDIR_ROOT/version.txt"
-if ! npx -y "$NPM_PKG@latest" --version >"$VERSION_OUT" 2>"$TMPDIR_ROOT/version.err"; then
-  echo "FAIL: npx -y $NPM_PKG@latest --version exited non-zero" >&2
+if ! npx -y "$NPM_SPEC" --version >"$VERSION_OUT" 2>"$TMPDIR_ROOT/version.err"; then
+  echo "FAIL: npx -y $NPM_SPEC --version exited non-zero" >&2
   echo "--- stderr ---" >&2
   cat "$TMPDIR_ROOT/version.err" >&2
   exit 1
@@ -152,7 +185,7 @@ echo "--- step 2: orbit init + workspace init ---"
 # matches the documented binary-first installation flow.
 # Fresh-host non-interactive init requires host identity (ORB-10721): a
 # host name plus a 2-5 letter task prefix that is not ORB/ADR/L/F.
-if ! npx -y "$NPM_PKG@latest" init --non-interactive \
+if ! npx -y "$NPM_SPEC" init --non-interactive \
      --host-name smoke-npm-install --task-prefix SMK \
      >"$TMPDIR_ROOT/init.out" 2>"$TMPDIR_ROOT/init.err"; then
   echo "FAIL: orbit init exited non-zero" >&2
@@ -166,7 +199,7 @@ echo "orbit init => OK ($SMOKE_HOME/.orbit)"
 
 WORKSPACE_DIR="$TMPDIR_ROOT/workspace"
 mkdir -p "$WORKSPACE_DIR"
-if ! ( cd "$WORKSPACE_DIR" && npx -y "$NPM_PKG@latest" workspace init ) \
+if ! ( cd "$WORKSPACE_DIR" && npx -y "$NPM_SPEC" workspace init ) \
      >"$TMPDIR_ROOT/ws-init.out" 2>"$TMPDIR_ROOT/ws-init.err"; then
   echo "FAIL: orbit workspace init exited non-zero" >&2
   echo "--- stderr ---" >&2
@@ -175,24 +208,29 @@ if ! ( cd "$WORKSPACE_DIR" && npx -y "$NPM_PKG@latest" workspace init ) \
 fi
 echo "orbit workspace init => OK ($WORKSPACE_DIR/.orbit)"
 
+LAUNCH_DIR="$TMPDIR_ROOT/registry-launch"
+mkdir -p "$LAUNCH_DIR"
+
 echo "--- step 3: MCP handshake over stdio ---"
 RPC_IN="$TMPDIR_ROOT/rpc-in.txt"
 RPC_OUT="$TMPDIR_ROOT/rpc-out.txt"
 RPC_ERR="$TMPDIR_ROOT/rpc-err.txt"
 
-cat >"$RPC_IN" <<'EOF'
+cat >"$RPC_IN" <<EOF
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-npm-install","version":"0.0.1"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"orbit_workflow_run_list","arguments":{"workspace":"$WORKSPACE_DIR"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"orbit_task_list","arguments":{}}}
 EOF
 
 # Feed the requests, then keep stdin open briefly so the server has time
-# to flush its responses before EOF closes the channel. `mcp serve` runs
-# from inside the initialized workspace so it can discover `.orbit/`.
+# to flush its responses before EOF closes the channel. The registry launch
+# runs outside any workspace: it must not infer this initialized workspace.
 {
   cat "$RPC_IN"
   sleep 5
-} | ( cd "$WORKSPACE_DIR" && run_with_timeout 120 npx -y "$NPM_PKG@latest" mcp serve ) \
+} | ( cd "$LAUNCH_DIR" && run_with_timeout 120 npx -y "$NPM_SPEC" "${PACKAGE_ARGUMENTS[@]}" ) \
      >"$RPC_OUT" 2>"$RPC_ERR" || rc=$?
 rc="${rc:-0}"
 
@@ -229,6 +267,22 @@ if ! grep -q '"orbit_' "$RPC_OUT"; then
   cat "$RPC_OUT" >&2
   echo "--- stderr ---" >&2
   cat "$RPC_ERR" >&2
+  exit 1
+fi
+
+if ! node -e '
+const fs = require("fs");
+const frames = fs.readFileSync(process.argv[1], "utf8").trim().split(/\n+/).filter(Boolean).map(JSON.parse);
+const byId = Object.fromEntries(frames.filter(frame => frame.id !== undefined).map(frame => [frame.id, frame]));
+const tools = byId[2]?.result?.tools;
+const operatorMessage = byId[3]?.result?.structuredContent?.message ?? "";
+const workspaceMessage = byId[4]?.result?.structuredContent?.message ?? "";
+if (!byId[1]?.result?.serverInfo || !Array.isArray(tools) || !tools.some(tool => tool.name === "orbit_workspace_list")) process.exit(1);
+if (!/operator/i.test(operatorMessage)) process.exit(1);
+if (!workspaceMessage.includes("orbit_workspace_list") || !workspaceMessage.includes("returned `ws_*` ID") || !workspaceMessage.includes("orbit workspace init") || !workspaceMessage.includes("never infers one from the server process cwd")) process.exit(1);
+' "$RPC_OUT"; then
+  echo "FAIL: registry launch did not initialize, list tools, remain agent-only, and fail closed without a workspace" >&2
+  cat "$RPC_OUT" >&2
   exit 1
 fi
 

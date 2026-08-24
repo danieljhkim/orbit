@@ -176,7 +176,11 @@ impl ServerMcpHost {
 
     fn workspace_required(&self, name: &str) -> OrbitError {
         OrbitError::InvalidInput(format!(
-            "tool '{name}' requires a workspace selector; pass `workspace` in the tool call or MCP initialize metadata"
+            "tool '{name}' requires an explicit workspace selector; first call \
+             `orbit_workspace_list` and reuse a returned `ws_*` ID as `workspace`. \
+             If no workspace is listed, run `orbit init` and then `orbit workspace init` \
+             from the project directory. A selector may also be passed in MCP initialize \
+             metadata; Orbit never infers one from the server process cwd"
         ))
     }
 

@@ -105,13 +105,14 @@ Surface the breaking-change candidate list before drafting the final section. Sh
 
 ### 4. Bump versions
 
-Three files change every release:
+Four files change every release:
 
 | File | Field |
 |------|-------|
 | `Cargo.toml` | `[workspace.package].version` |
 | `Cargo.lock` | refresh via `cargo update --workspace` (no third-party drift) |
 | `npm/package.json` | `version` |
+| `server.json` | top-level `version` and `packages[0].version` |
 
 The other `0.X.Y` matches in the repo (install-script doc comments, the website task pages, the Node engine pin in `website/package-lock.json`) are intentional — leave them.
 
@@ -123,7 +124,7 @@ make build
 
 Must finish clean. `cargo update --workspace` should report only Orbit workspace members re-locked — investigate any third-party version movement before continuing.
 
-If this cycle changed any CLI the npm-install smoke drives (`orbit init`, `workspace init`, or `mcp serve`), update [`scripts/smoke-npm-install.sh`](scripts/smoke-npm-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and then runs `@orbit-tools/cli@latest` from npm — a post-tag script fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#npm-install-smoke-two-artifacts).
+If this cycle changed any CLI the npm-install smoke drives (`orbit init`, `workspace init`, or `mcp serve`), update [`scripts/smoke-npm-install.sh`](scripts/smoke-npm-install.sh) on the **same commit as the tag**. The on-tag workflow checks out that script and `server.json`, then runs the exact npm package version declared by the metadata — a post-tag script or metadata fix cannot green a tag-triggered run. Details and the post-npm triage live in [docs/runbooks/release.md](docs/runbooks/release.md#npm-install-smoke-two-artifacts).
 
 The tag-triggered npm-install smoke must be treated as a versioned check: it
 fails when the installed `@orbit-tools/cli` version does not equal the tag
@@ -148,10 +149,11 @@ context_files:
   - file:Cargo.toml
   - file:Cargo.lock
   - file:npm/package.json
+  - file:server.json
   - file:scripts/smoke-npm-install.sh
 ```
 
-Acceptance criteria: Cargo and npm report the new version, Cargo.lock is refreshed without third-party drift, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the npm-install smoke script still drives this cycle's CLI non-interactively.
+Acceptance criteria: Cargo, npm, and `server.json` report the new version, Cargo.lock is refreshed without third-party drift, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the npm-install smoke script still drives this cycle's CLI non-interactively.
 
 ### 7. Human approval
 
