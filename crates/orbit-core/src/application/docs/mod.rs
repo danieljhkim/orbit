@@ -24,7 +24,7 @@ use orbit_types::task::Task;
 
 use crate::OrbitRuntime;
 
-pub use config::DocsSearchConfig;
+pub use config::{DocsRoot, DocsSearchConfig};
 pub use types::{DocAddOutcome, DocMigrationReport, DocRecord, DocShow, DocType, TaskRelatedDoc};
 pub use walk::walk_docs_roots;
 
@@ -41,7 +41,7 @@ use self::search::{doc_embedding_sources, doc_search_source, related_docs_for_co
 // The original impl block (291-408) is preserved verbatim except for path adjustments
 // that are mechanical (use of super:: paths). All bodies delegate to submodules.
 impl OrbitRuntime {
-    pub fn docs_roots(&self) -> Result<Vec<String>, OrbitError> {
+    pub fn docs_roots(&self) -> Result<Vec<DocsRoot>, OrbitError> {
         read_docs_roots_from_config_path(&self.config_path())
     }
 

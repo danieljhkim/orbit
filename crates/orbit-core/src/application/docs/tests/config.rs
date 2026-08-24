@@ -1,21 +1,44 @@
 //! Config parsing (roots + search weights) tests migrated for ORB-00250.
 
 use super::super::config::{
-    parse_docs_roots_from_config_toml, parse_docs_search_config_from_config_toml,
+    DocsRoot, parse_docs_roots_from_config_toml, parse_docs_search_config_from_config_toml,
     parse_task_context_docs_roots_from_config_toml,
 };
+
+fn root_paths(roots: &[DocsRoot]) -> Vec<&str> {
+    roots.iter().map(|root| root.path.as_str()).collect()
+}
 
 #[test]
 fn config_roots_default_and_parse_explicit_values() {
     assert_eq!(
-        parse_docs_roots_from_config_toml("").unwrap(),
+        root_paths(&parse_docs_roots_from_config_toml("").unwrap()),
         vec!["docs/"]
     );
-    assert_eq!(
+    let parsed =
         parse_docs_roots_from_config_toml("[docs]\nroots = [\"docs/\", \"apps/*/docs/\"]\n")
-            .unwrap(),
-        vec!["docs/", "apps/*/docs/"]
-    );
+            .unwrap();
+    assert_eq!(root_paths(&parsed), vec!["docs/", "apps/*/docs/"]);
+    assert!(parsed.iter().all(|root| root.respect_gitignore));
+}
+
+#[test]
+fn config_roots_parse_explicit_override_table_entries() {
+    let parsed = parse_docs_roots_from_config_toml(
+        "[docs]\nroots = [\"docs/\", { path = \"external/docs/\", respect_gitignore = false }]\n",
+    )
+    .unwrap();
+    assert_eq!(root_paths(&parsed), vec!["docs/", "external/docs/"]);
+    assert!(parsed[0].respect_gitignore);
+    assert!(!parsed[1].respect_gitignore);
+}
+
+#[test]
+fn config_roots_table_entry_defaults_to_respecting_gitignore() {
+    let parsed =
+        parse_docs_roots_from_config_toml("[docs]\nroots = [{ path = \"docs/\" }]\n").unwrap();
+    assert_eq!(root_paths(&parsed), vec!["docs/"]);
+    assert!(parsed[0].respect_gitignore);
 }
 
 #[test]
@@ -49,15 +72,19 @@ fn docs_search_config_defaults_and_clamps_semantic_weight() {
 #[test]
 fn task_context_docs_roots_skip_explicit_empty_or_unset_roots() {
     assert_eq!(
-        parse_task_context_docs_roots_from_config_toml("[docs]\n").unwrap(),
-        Vec::<String>::new()
+        parse_task_context_docs_roots_from_config_toml("[docs]\n")
+            .unwrap()
+            .len(),
+        0
     );
     assert_eq!(
-        parse_task_context_docs_roots_from_config_toml("[docs]\nroots = []\n").unwrap(),
-        Vec::<String>::new()
+        parse_task_context_docs_roots_from_config_toml("[docs]\nroots = []\n")
+            .unwrap()
+            .len(),
+        0
     );
     assert_eq!(
-        parse_task_context_docs_roots_from_config_toml("").unwrap(),
+        root_paths(&parse_task_context_docs_roots_from_config_toml("").unwrap()),
         vec!["docs/"]
     );
 }

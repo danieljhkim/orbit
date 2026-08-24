@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use orbit_common::OrbitError;
 
+use super::config::DocsRoot;
 use super::frontmatter::parse_doc_tolerant;
 use super::path_util::{path_to_slash_string, repo_relative_path};
 use super::types::DocRecord;
@@ -36,27 +37,43 @@ pub(super) fn git_check_ignore_invocations() -> usize {
     GIT_CHECK_IGNORE_INVOCATIONS.with(std::cell::Cell::get)
 }
 
-pub fn walk_docs_roots(repo_root: &Path, roots: &[String]) -> Result<Vec<DocRecord>, OrbitError> {
-    let mut candidates = Vec::new();
+pub fn walk_docs_roots(repo_root: &Path, roots: &[DocsRoot]) -> Result<Vec<DocRecord>, OrbitError> {
+    // A path may be reachable from more than one configured root; if any
+    // contributing root names it explicitly (respect_gitignore = false),
+    // that override wins over a root that would still filter it.
+    let mut candidates: HashMap<PathBuf, bool> = HashMap::new();
     for root in roots {
-        for path in expand_root(repo_root, root)? {
+        let mut found = Vec::new();
+        for path in expand_root(repo_root, &root.path)? {
             if path_is_or_contains_dot_orbit(repo_root, &path) {
                 continue;
             }
             if path.is_file() {
-                maybe_push_doc_candidate(repo_root, &path, &mut candidates)?;
+                maybe_push_doc_candidate(repo_root, &path, &mut found)?;
             } else if path.is_dir() {
-                walk_dir(repo_root, &path, &mut candidates)?;
+                walk_dir(repo_root, &path, &mut found)?;
             }
         }
+        for relative in found {
+            candidates
+                .entry(relative)
+                .and_modify(|respect_gitignore| {
+                    *respect_gitignore = *respect_gitignore && root.respect_gitignore;
+                })
+                .or_insert(root.respect_gitignore);
+        }
     }
-    candidates.sort();
-    candidates.dedup();
 
-    let ignored = git_ignored_paths(repo_root, &candidates);
+    let gitignore_checked = candidates
+        .iter()
+        .filter(|(_, respect_gitignore)| **respect_gitignore)
+        .map(|(relative, _)| relative.clone())
+        .collect::<Vec<_>>();
+    let ignored = git_ignored_paths(repo_root, &gitignore_checked);
+
     let mut records = Vec::new();
-    for relative in candidates {
-        if ignored.contains(&relative) {
+    for (relative, respect_gitignore) in candidates {
+        if respect_gitignore && ignored.contains(&relative) {
             continue;
         }
         let path = repo_root.join(&relative);

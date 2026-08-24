@@ -4,6 +4,7 @@ use std::fs;
 
 use tempfile::tempdir;
 
+use super::super::config::DocsRoot;
 use super::super::search::related_docs_for_context;
 use super::super::types::DocType;
 
@@ -59,7 +60,7 @@ fn related_docs_match_context_files_against_doc_paths() {
 
     let related = related_docs_for_context(
         root,
-        &["docs/".to_string()],
+        &[DocsRoot::new("docs/")],
         &["file:crates/orbit-cli/src/command/docs.rs".to_string()],
         &[],
         Some(5),
@@ -86,7 +87,7 @@ fn related_docs_match_task_features_against_doc_related_features() {
 
     let related = related_docs_for_context(
         root,
-        &["docs/".to_string()],
+        &[DocsRoot::new("docs/")],
         &[],
         &["Orbit-Docs".to_string()],
         Some(5),
