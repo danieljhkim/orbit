@@ -14,6 +14,7 @@ pub(super) fn lexical_task_hit(task: &orbit_types::task::Task) -> GlobalSearchHi
         score: None,
         score_breakdown: None,
         matched_by: None,
+        workspace: None,
     }
 }
 
@@ -31,6 +32,7 @@ pub(super) fn semantic_hit_to_global(hit: orbit_search::SemanticHit) -> GlobalSe
         score: Some(hit.score),
         score_breakdown: Some(hit.score_breakdown),
         matched_by: None,
+        workspace: None,
     }
 }
 
@@ -52,5 +54,6 @@ pub(super) fn doc_result_to_global(
         score,
         score_breakdown: None,
         matched_by: Some(result.matched_by),
+        workspace: None,
     }
 }

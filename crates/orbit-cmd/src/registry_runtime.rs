@@ -15,6 +15,8 @@ use serde_json::Value;
 
 use orbit_registry::{HOST_TOML_FILE, load_host_identity, workspace_registry};
 
+use crate::workspace_catalog::attach as attach_workspace_catalog;
+
 /// Registered workspace metadata keeps the logical catalog ID distinct from the
 /// task/runtime ID stored in `.orbit/config.yaml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,8 +122,13 @@ impl RegisteredRuntimeFactory {
             let replica_owner = selection
                 .as_ref()
                 .and_then(|selection| replica_owner_for_checkout(&selection.checkout));
-            return OrbitRuntime::initialize_from_resolved_roots(roots, binding)
-                .map(|runtime| runtime.with_coordination_write_owner(replica_owner));
+            let global_root = roots.global_root.clone();
+            return OrbitRuntime::initialize_from_resolved_roots(roots, binding).map(|runtime| {
+                attach_workspace_catalog(
+                    runtime.with_coordination_write_owner(replica_owner),
+                    &global_root,
+                )
+            });
         };
 
         let global_root = global_root_for(root_override)?;
@@ -168,7 +175,10 @@ impl RegisteredRuntimeFactory {
                 &roots.local_root,
             ),
         }?;
-        Ok(runtime.with_coordination_write_owner(replica_owner))
+        Ok(attach_workspace_catalog(
+            runtime.with_coordination_write_owner(replica_owner),
+            &roots.global_root,
+        ))
     }
 
     pub fn open_registered_checkout(
@@ -179,7 +189,12 @@ impl RegisteredRuntimeFactory {
         sync_task_prefix(global_root)?;
         let binding = workspace_runtime_binding(workspace, checkout)?;
         OrbitRuntime::from_roots_with_binding(global_root, &checkout.orbit_dir, binding).map(
-            |runtime| runtime.with_coordination_write_owner(replica_owner_for_checkout(checkout)),
+            |runtime| {
+                attach_workspace_catalog(
+                    runtime.with_coordination_write_owner(replica_owner_for_checkout(checkout)),
+                    global_root,
+                )
+            },
         )
     }
 
@@ -196,6 +211,7 @@ impl RegisteredRuntimeFactory {
             local_root,
             binding,
         )
+        .map(|runtime| attach_workspace_catalog(runtime, global_root))
     }
 
     /// Bind a CLI `orbit tool run` invocation to the workspace named in `input`.

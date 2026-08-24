@@ -26,6 +26,7 @@ pub(crate) mod run_input;
 pub(crate) mod task;
 pub use task::StaleTaskReservation;
 pub(crate) mod tool_exec;
+pub mod workspace_catalog;
 pub mod workspace_claim;
 
 #[cfg(test)]
@@ -69,6 +70,10 @@ pub struct OrbitRuntime {
     /// stays registry-neutral; it only carries the refusal supplied by that
     /// owner so every task-record writer shares one fail-closed gate.
     coordination_write_owner: Option<Arc<str>>,
+    /// Supplied by the same registry-owning composition layer, for reads that
+    /// span more than one workspace. Absent on a standalone runtime, which
+    /// then answers only for its own checkout [ORB-11027].
+    workspace_catalog: Option<Arc<dyn workspace_catalog::WorkspaceCatalog>>,
     pub event_log: event_bus::EventLog,
     /// Outcome of the [ORB-10012] workspace-layout pre-flight that ran when
     /// this runtime opened (empty `applied` when the layout was already
@@ -129,6 +134,7 @@ impl OrbitRuntime {
             context,
             workspace_binding: binding.map(Arc::new),
             coordination_write_owner: None,
+            workspace_catalog: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(layout_report),
             _temp_dir: None,
@@ -159,6 +165,7 @@ impl OrbitRuntime {
             context,
             workspace_binding: Some(Arc::new(binding)),
             coordination_write_owner: None,
+            workspace_catalog: None,
             event_log: event_bus::EventLog::default(),
             layout_report: Arc::new(orbit_store::workflow::layout::LayoutUpgradeReport::default()),
             _temp_dir: Some(Arc::new(temp_dir)),
@@ -181,6 +188,23 @@ impl OrbitRuntime {
     pub fn with_coordination_write_owner(mut self, owner_machine_id: Option<String>) -> Self {
         self.coordination_write_owner = owner_machine_id.map(Arc::from);
         self
+    }
+
+    /// Attach the workspace catalog that resolves federated search scope. Like
+    /// the replica owner above, it is supplied by the registry-owning layer and
+    /// never constructed by Core.
+    pub fn with_workspace_catalog(
+        mut self,
+        catalog: Arc<dyn workspace_catalog::WorkspaceCatalog>,
+    ) -> Self {
+        self.workspace_catalog = Some(catalog);
+        self
+    }
+
+    pub(crate) fn workspace_catalog(
+        &self,
+    ) -> Option<&Arc<dyn workspace_catalog::WorkspaceCatalog>> {
+        self.workspace_catalog.as_ref()
     }
 
     /// Refuse control-plane work in a replica checkout.

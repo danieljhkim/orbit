@@ -1,5 +1,6 @@
 //! Read/cascade operations over the index.
 //!
+//! `model_ids` reports the distinct embedding models present in the index.
 //! `delete_source` cascades both the vector rows and the FTS5 rows for a
 //! given `(source_kind, source_id)`. `stats` aggregates row counts by
 //! `(source_kind, model_id)` and counts orphaned `task` rows whose
@@ -30,6 +31,29 @@ impl VectorStore {
             source_ids.insert(row.map_err(|error| OrbitError::Store(error.to_string()))?);
         }
         Ok(source_ids)
+    }
+
+    /// Distinct embedding `model_id` values present in this index.
+    ///
+    /// Cosine scores are only comparable within one model, so a federated read
+    /// consults this before claiming a workspace's vectors participate in a
+    /// fused ranking [ORB-11027].
+    pub fn model_ids(&self) -> Result<BTreeSet<String>, OrbitError> {
+        let conn = self.connection();
+        let conn = conn
+            .lock()
+            .map_err(|error| OrbitError::Store(format!("mutex poisoned: {error}")))?;
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT model_id FROM embeddings")
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let mut model_ids = BTreeSet::new();
+        for row in rows {
+            model_ids.insert(row.map_err(|error| OrbitError::Store(error.to_string()))?);
+        }
+        Ok(model_ids)
     }
 
     pub fn delete_source(&self, source_kind: &str, source_id: &str) -> Result<(), OrbitError> {

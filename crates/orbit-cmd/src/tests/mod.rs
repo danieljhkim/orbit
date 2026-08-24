@@ -7,3 +7,4 @@ mod migrate;
 mod registry_routines;
 mod registry_runtime;
 mod task_owner;
+mod workspace_catalog;

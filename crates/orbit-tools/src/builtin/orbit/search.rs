@@ -83,6 +83,25 @@ impl Tool for OrbitSearchTool {
                 param_type: "string".to_string(),
                 required: false,
             },
+            ToolParam {
+                // ORB-11027: the federated scope, deliberately not named
+                // `workspace` — that is the reserved routing selector that
+                // binds a call to one registered checkout.
+                name: "workspaces".to_string(),
+                description:
+                    "Federated scope: registered workspace names, `ws_*` IDs, or absolute checkout paths to search together. Hits carry workspace attribution. Omit to search only the bound workspace."
+                        .to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
+                name: "all_workspaces".to_string(),
+                description:
+                    "Search every active workspace registered on the answering machine. Overrides `workspaces`. Not available inside an Orbit-managed run."
+                        .to_string(),
+                param_type: "boolean".to_string(),
+                required: false,
+            },
         ];
         parameters.extend(super::model_identity_params());
         ToolSchema {

@@ -7,6 +7,7 @@ use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 use super::*;
 use crate::OrbitRuntime;
 
+mod federated;
 mod global;
 mod hybrid;
 mod path_match;
