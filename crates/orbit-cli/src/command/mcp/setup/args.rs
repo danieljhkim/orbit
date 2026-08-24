@@ -50,13 +50,14 @@ pub(super) enum McpAction<'a> {
     /// call site state both explicitly instead of inheriting a default.
     Init(ServerLaunch<'a>),
     Remove,
+    RemoveFederated,
 }
 
 impl McpAction<'_> {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Init(_) => "init",
-            Self::Remove => "remove",
+            Self::Remove | Self::RemoveFederated => "remove",
         }
     }
 }
@@ -177,6 +178,12 @@ pub struct InitArgs {
     /// Scope for written config files (workspace: repo-local, home: user-level).
     #[arg(long, value_enum, default_value_t = ScopeArg::Workspace)]
     pub scope: ScopeArg,
+    /// Register the federated mux as a separate `orbit-federated` MCP server.
+    ///
+    /// The generated entry launches `orbit mcp serve --mode federated` and
+    /// does not replace the existing v1 `orbit` server entry.
+    #[arg(long)]
+    pub federated: bool,
 }
 
 impl InitArgs {
@@ -185,10 +192,13 @@ impl InitArgs {
         // Bare `orbit mcp init` keeps its pre-existing agent-only authority;
         // only the `orbit workspace init --mcp` bootstrap path (below, via
         // `init_auto_for_workspace`) selects operator authority.
-        let workspace_id = registered_workspace_id(&layout.repo_root);
-        let launch = ServerLaunch {
-            operator: false,
-            workspace: workspace_id.as_deref(),
+        let workspace_id = (!self.federated)
+            .then(|| registered_workspace_id(&layout.repo_root))
+            .flatten();
+        let launch = if self.federated {
+            ServerLaunch::Federated
+        } else {
+            ServerLaunch::local(false, workspace_id.as_deref())
         };
         let providers = run_action(
             McpAction::Init(launch),
@@ -211,20 +221,29 @@ pub struct RemoveArgs {
     /// Scope for config files to remove (workspace: repo-local, home: user-level).
     #[arg(long, value_enum, default_value_t = ScopeArg::Workspace)]
     pub scope: ScopeArg,
+    /// Remove the separate `orbit-federated` entry instead of the v1 `orbit`
+    /// entry.
+    #[arg(long)]
+    pub federated: bool,
 }
 
 impl RemoveArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         let layout = resolve_workspace_layout(root_override)?;
+        let action = if self.federated {
+            McpAction::RemoveFederated
+        } else {
+            McpAction::Remove
+        };
         let providers = run_action(
-            McpAction::Remove,
+            action,
             &layout.repo_root,
             &layout.orbit_root,
             self.providers.resolve_mode()?,
             env_home_dir(),
             self.scope,
         )?;
-        print_action_summary(McpAction::Remove, &providers);
+        print_action_summary(action, &providers);
         Ok(CommandOutput::Silent)
     }
 }
@@ -246,10 +265,7 @@ pub(crate) fn init_auto_for_workspace(
     // The workspace being registered is known here, so the generated server is
     // bound to it directly rather than re-derived from the checkout.
     run_action(
-        McpAction::Init(ServerLaunch {
-            operator: true,
-            workspace: Some(workspace_id),
-        }),
+        McpAction::Init(ServerLaunch::local(true, Some(workspace_id))),
         repo_root,
         orbit_root,
         ProviderSelectionMode::Auto,

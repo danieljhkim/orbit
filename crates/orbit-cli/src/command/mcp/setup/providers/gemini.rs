@@ -13,6 +13,7 @@ pub(in crate::command::mcp::setup) fn apply_gemini_init(
 
 pub(in crate::command::mcp::setup) fn apply_gemini_remove(
     target: &ConfigTarget,
+    server_id: &str,
 ) -> Result<(), OrbitError> {
-    apply_simple_json_remove(target, "mcpServers")
+    apply_simple_json_remove(target, "mcpServers", server_id)
 }
