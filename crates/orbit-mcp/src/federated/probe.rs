@@ -18,13 +18,30 @@ use serde_json::{Value, json};
 
 use super::config::Destination;
 
-/// How long one destination gets to complete the whole probe.
+/// How long one destination gets to answer everything that decides *where* a
+/// call goes.
 ///
-/// The budget covers SSH connection setup, the MCP handshake, and the
-/// discovery call together, because a caller waiting on the list cannot tell
-/// those phases apart and a per-phase budget would multiply the worst case by
-/// the number of phases.
+/// The budget covers SSH connection setup, the MCP handshake, the discovery
+/// call, and — on a routed session — `tools/list`, because a caller waiting on
+/// the list cannot tell those phases apart and a per-phase budget would
+/// multiply the worst case by the number of phases.
+///
+/// It deliberately does not cover the routed `tools/call` itself. That request
+/// is stamped with its own [`DEFAULT_ROUTED_DELIVERY_TIMEOUT`] budget once
+/// classification is done, so the round trips spent choosing a destination
+/// never shorten the tool's execution time [ORB-11023].
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long a routed `tools/call` gets, measured from the moment its request
+/// is written rather than from session start.
+///
+/// The mux advertises the whole canonical tool surface, including long-running
+/// mutating tools (`orbit.command.exec`, `orbit.workflow.ship`), so a delivery
+/// budget sized like a handshake would make those tools unusable over the mux.
+/// This is the ceiling on one remote tool, not on the session: exceeding it is
+/// reported as [`OrbitError::OutcomeUnknown`], because the request was already
+/// on the wire and may have committed.
+pub const DEFAULT_ROUTED_DELIVERY_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// The MCP protocol revision this client negotiates. Pinned to the revision
 /// Orbit's own server answers with, so a probe fails loudly on a real protocol
@@ -70,14 +87,23 @@ pub trait RoutedSession: Send {
 /// The production probe: one short-lived SSH-hosted MCP session per call.
 pub struct SshDestinationProbe {
     caller_machine_id: String,
-    timeout: Duration,
+    probe_timeout: Duration,
+    delivery_timeout: Duration,
 }
 
 impl SshDestinationProbe {
-    pub fn new(caller_machine_id: String, timeout: Duration) -> Self {
+    /// `probe_timeout` bounds the phases that decide the route; a routed
+    /// `tools/call` is re-stamped with `delivery_timeout` at dispatch, so the
+    /// two are independent rather than shares of one session budget.
+    pub fn new(
+        caller_machine_id: String,
+        probe_timeout: Duration,
+        delivery_timeout: Duration,
+    ) -> Self {
         Self {
             caller_machine_id,
-            timeout,
+            probe_timeout,
+            delivery_timeout,
         }
     }
 }
@@ -89,11 +115,10 @@ impl DestinationProbe for SshDestinationProbe {
     }
 
     fn open_route(&self, destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError> {
-        Ok(Box::new(SshRoutedSession {
-            session: self.start_session(destination)?,
-            snapshot: None,
-            tools: None,
-        }))
+        Ok(Box::new(SshRoutedSession::new(
+            self.start_session(destination)?,
+            self.delivery_timeout,
+        )))
     }
 }
 
@@ -102,17 +127,32 @@ impl SshDestinationProbe {
         let child = spawn_destination_session(destination, &self.caller_machine_id)?;
         // The session is one process; the guard ends it on every path,
         // including the timeout path where the child is still mid-answer.
-        let mut session = DestinationSession::start(destination.clone(), child, self.timeout)?;
+        let mut session =
+            DestinationSession::start(destination.clone(), child, self.probe_timeout)?;
         session.handshake()?;
         Ok(session)
     }
 }
 
 /// Production routed session: one SSH child, several MCP requests, then drop.
-struct SshRoutedSession {
+pub(super) struct SshRoutedSession {
     session: DestinationSession,
     snapshot: Option<DestinationSnapshot>,
     tools: Option<Vec<String>>,
+    /// The budget the tool call itself gets, stamped at dispatch rather than
+    /// at session start.
+    delivery_timeout: Duration,
+}
+
+impl SshRoutedSession {
+    pub(super) fn new(session: DestinationSession, delivery_timeout: Duration) -> Self {
+        Self {
+            session,
+            snapshot: None,
+            tools: None,
+            delivery_timeout,
+        }
+    }
 }
 
 impl RoutedSession for SshRoutedSession {
@@ -135,6 +175,10 @@ impl RoutedSession for SshRoutedSession {
     }
 
     fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+        // Classification is finished, so the tool's own budget starts here:
+        // the SSH setup, handshake, discovery, and `tools/list` round trips
+        // that chose this destination must not shorten it.
+        self.session.restart_budget(self.delivery_timeout);
         self.session.call_tool(name, arguments)
     }
 }
@@ -163,8 +207,42 @@ fn spawn_destination_session(
         .map_err(|error| unreachable(destination, format!("could not start SSH: {error}")))
 }
 
-/// One MCP client session against a destination, bounded by a single deadline.
-struct DestinationSession {
+/// How to name a request whose answer never arrived, once its bytes are on
+/// the wire.
+///
+/// Losing the answer is not the same fact for every request. The phases that
+/// decide a route are read-only and repeatable, so silence there means the
+/// host did not answer. A routed `tools/call` may already have run and
+/// committed on the destination, and killing the SSH child does not undo it,
+/// so silence there is genuine ambiguity: reporting it as a delivery miss
+/// invites the retry that duplicates the write [ORB-11023].
+#[derive(Clone, Copy)]
+enum LostAnswer<'a> {
+    Unreachable,
+    OutcomeUnknown { tool: &'a str },
+}
+
+impl LostAnswer<'_> {
+    fn classify(self, destination: &Destination, request_id: i64, reason: String) -> OrbitError {
+        match self {
+            Self::Unreachable => unreachable(destination, reason),
+            Self::OutcomeUnknown { tool } => OrbitError::OutcomeUnknown {
+                // The destination-facing request identity, which is what an
+                // operator can correlate against that host's audit log.
+                mcp_call_id: format!("{}/{tool}#{request_id}", destination.machine_id),
+                message: format!("{reason}; the destination may have completed the call"),
+            },
+        }
+    }
+}
+
+/// One MCP client session against a destination, bounded by one deadline at a
+/// time.
+///
+/// The deadline is a budget for the request in flight, not for the session:
+/// [`DestinationSession::restart_budget`] re-stamps it when a phase with its
+/// own budget begins.
+pub(super) struct DestinationSession {
     destination: Destination,
     child: Child,
     stdin: std::process::ChildStdin,
@@ -174,7 +252,7 @@ struct DestinationSession {
 }
 
 impl DestinationSession {
-    fn start(
+    pub(super) fn start(
         destination: Destination,
         mut child: Child,
         timeout: Duration,
@@ -209,8 +287,14 @@ impl DestinationSession {
         })
     }
 
-    fn handshake(&mut self) -> Result<(), OrbitError> {
-        let response = self.request(
+    /// Start a fresh budget for the next phase, discarding whatever the
+    /// previous phases left of the old one.
+    pub(super) fn restart_budget(&mut self, timeout: Duration) {
+        self.deadline = Instant::now() + timeout;
+    }
+
+    pub(super) fn handshake(&mut self) -> Result<(), OrbitError> {
+        let response = self.request_probe(
             "initialize",
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
@@ -233,8 +317,8 @@ impl DestinationSession {
 
     /// Call the destination's private federated discovery path and return its
     /// envelope. The public v1 list intentionally filters Invalid workspaces.
-    fn discover_workspaces(&mut self) -> Result<DestinationSnapshot, OrbitError> {
-        let response = self.request(
+    pub(super) fn discover_workspaces(&mut self) -> Result<DestinationSnapshot, OrbitError> {
+        let response = self.request_probe(
             "tools/call",
             json!({
                 "name": crate::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL,
@@ -251,8 +335,8 @@ impl DestinationSession {
         snapshot_from_discovery_content(&self.destination, content)
     }
 
-    fn list_tools(&mut self) -> Result<Vec<String>, OrbitError> {
-        let response = self.request("tools/list", json!({}))?;
+    pub(super) fn list_tools(&mut self) -> Result<Vec<String>, OrbitError> {
+        let response = self.request_probe("tools/list", json!({}))?;
         let tools = response["result"]["tools"].as_array().ok_or_else(|| {
             unreachable(
                 &self.destination,
@@ -265,13 +349,19 @@ impl DestinationSession {
             .collect())
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+    /// Deliver one routed tool call.
+    ///
+    /// Unlike every other request here this one can commit work on the
+    /// destination, so a lost answer after the request is written is
+    /// [`LostAnswer::OutcomeUnknown`] rather than an unreachable host.
+    pub(super) fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
         let response = self.request(
             "tools/call",
             json!({
                 "name": mcp_advertised_tool_name(name),
                 "arguments": arguments,
             }),
+            LostAnswer::OutcomeUnknown { tool: name },
         )?;
         let result = &response["result"];
         let content = &result["structuredContent"];
@@ -286,16 +376,29 @@ impl DestinationSession {
         Ok(content.clone())
     }
 
-    fn request(&mut self, method: &str, params: Value) -> Result<Value, OrbitError> {
+    /// A request whose loss tells the caller nothing was delivered.
+    fn request_probe(&mut self, method: &str, params: Value) -> Result<Value, OrbitError> {
+        self.request(method, params, LostAnswer::Unreachable)
+    }
+
+    fn request(
+        &mut self,
+        method: &str,
+        params: Value,
+        lost: LostAnswer<'_>,
+    ) -> Result<Value, OrbitError> {
         self.next_id += 1;
         let id = self.next_id;
+        // A failed write is pre-dispatch by construction: the destination
+        // never saw the request, so it stays an unreachable host even for a
+        // delivery.
         self.send(&json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params,
         }))?;
-        self.await_response(method, id)
+        self.await_response(method, id, lost)
     }
 
     fn notify(&mut self, method: &str) -> Result<(), OrbitError> {
@@ -316,20 +419,27 @@ impl DestinationSession {
     /// Read until the response with this id arrives or the deadline passes.
     /// Matching strictly by id keeps a server-initiated message or an
     /// out-of-order answer from being read as this request's result.
-    fn await_response(&mut self, method: &str, id: i64) -> Result<Value, OrbitError> {
+    fn await_response(
+        &mut self,
+        method: &str,
+        id: i64,
+        lost: LostAnswer<'_>,
+    ) -> Result<Value, OrbitError> {
         loop {
             let remaining = self.deadline.saturating_duration_since(Instant::now());
             let line = match self.lines.recv_timeout(remaining) {
                 Ok(line) => line,
                 Err(RecvTimeoutError::Timeout) => {
-                    return Err(unreachable(
+                    return Err(lost.classify(
                         &self.destination,
+                        id,
                         format!("timed out waiting for '{method}'"),
                     ));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(unreachable(
+                    return Err(lost.classify(
                         &self.destination,
+                        id,
                         format!("session ended before answering '{method}'"),
                     ));
                 }

@@ -39,6 +39,9 @@ routing:
   selector_shape: hm_<machine_id>/ws_<workspace_id>
   delivery: one selected destination; no fallback or failover
   config_collision: duplicate machine_id fails startup as ambiguous_destination
+  budgets:
+    probe: bounds ssh setup, handshake, discovery, and tools/list
+    routed_delivery: stamped when the tools/call request is written; independent of the probe budget
   errors:
     - unknown_selector
     - unreachable_destination
@@ -46,6 +49,10 @@ routing:
     - unhealthy_checkout
     - tool_not_on_this_host
     - capability_refused
+  post_dispatch:
+    error: outcome_unknown
+    when: the tools/call request was written and its answer never arrived
+    rule: never unreachable_destination; not part of the precedence ladder
 
 authority:
   destination_runs_logs_scheduler: execute

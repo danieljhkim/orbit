@@ -30,6 +30,6 @@ pub use self::config::{
 pub use self::descriptor::{Capability, CheckoutHealth, Reachability, WorkspaceDescriptor};
 pub use self::host::{FEDERATED_WORKSPACE_LIST_TOOL, FederatedMcpHost};
 pub use self::probe::{
-    DEFAULT_PROBE_TIMEOUT, DestinationProbe, DestinationSnapshot, RoutedSession,
-    SshDestinationProbe,
+    DEFAULT_PROBE_TIMEOUT, DEFAULT_ROUTED_DELIVERY_TIMEOUT, DestinationProbe, DestinationSnapshot,
+    RoutedSession, SshDestinationProbe,
 };

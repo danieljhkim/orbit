@@ -50,9 +50,14 @@ pub(super) fn serve_mcp_federated_stdio() -> Result<(), OrbitError> {
     // The mux is a client to each destination, and identifies itself with the
     // same audit label the v1 proxy forwards.
     let identity = orbit_mcp::mcp_server_identity(&global_root, None, McpSessionAuthority::Agent)?;
+    // Two budgets, not one: the probe timeout bounds the round trips that
+    // decide where a call goes, while the routed `tools/call` is stamped
+    // separately at dispatch so a remote run that legitimately takes minutes
+    // is not cut short by the time spent classifying its route [ORB-11023].
     let probe = federated::SshDestinationProbe::new(
         identity.process_machine_id.clone(),
         federated::DEFAULT_PROBE_TIMEOUT,
+        federated::DEFAULT_ROUTED_DELIVERY_TIMEOUT,
     );
     let host: Arc<dyn McpHost> = Arc::new(federated::FederatedMcpHost::new(
         destinations,

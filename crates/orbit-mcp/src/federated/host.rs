@@ -111,6 +111,10 @@ impl FederatedMcpHost {
     /// Classification uses a live session, not the last list. Fail-closed
     /// precedence: unknown selector, then unreachable, stale, unhealthy,
     /// tool-not-on-this-host, then the destination's own refusal.
+    ///
+    /// That precedence covers everything decidable *before* dispatch. The
+    /// delivery itself runs on its own budget and, if its answer is lost, is
+    /// reported as `outcome_unknown` rather than re-entering this ladder.
     fn route_workspace_call(
         &self,
         name: &str,
@@ -175,6 +179,10 @@ impl FederatedMcpHost {
             tool = name,
             "federated mux delivering tool call"
         );
+        // Not wrapped by `delivery_unreachable`: past this point the request
+        // reaches the destination, so its failure is the destination's answer
+        // (`RemoteTool`) or a post-dispatch ambiguity (`OutcomeUnknown`) —
+        // never a delivery miss the caller should retry [ORB-11023].
         session.call_tool(name, destination_arguments(input, parsed.workspace_id()))
     }
 }
@@ -276,6 +284,10 @@ fn tool_on_surface(advertised: &[String], name: &str) -> bool {
 
 /// Connect, snapshot, and tools/list failures are delivery misses: capability
 /// and stale are undecidable without the host.
+///
+/// It covers only the classification phases. The routed `tools/call` is not
+/// re-labelled here, because once that request is written the call may have
+/// run: [`OrbitError::OutcomeUnknown`] is its honest class.
 fn delivery_unreachable(destination: &Destination, error: OrbitError) -> OrbitError {
     match error {
         OrbitError::UnreachableDestination(_) => error,

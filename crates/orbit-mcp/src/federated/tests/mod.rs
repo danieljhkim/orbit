@@ -5,4 +5,5 @@ mod config;
 mod descriptor;
 mod fixtures;
 mod host;
+mod probe;
 mod route;
