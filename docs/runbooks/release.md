@@ -48,7 +48,7 @@ date has passed or its `revoked_at` field is set.
 
 ## Steps to cut a release
 
-1. **Bump Cargo and npm together.**
+1. **Bump Cargo, npm, and MCP Registry metadata together.**
 
    - Update `[workspace.package].version` in
      [`Cargo.toml`](../../Cargo.toml).
@@ -56,6 +56,10 @@ date has passed or its `revoked_at` field is set.
      [`npm/package.json`](../../npm/package.json). The npm postinstall in
      [`npm/scripts/install-binary.js`](../../npm/scripts/install-binary.js)
      derives the GitHub binary tag from this version.
+   - Update the top-level `.version` and `.packages[0].version` in
+     [`server.json`](../../server.json). The registry metadata must reference
+     the npm package version that contains its matching `mcpName` ownership
+     marker; published npm versions are immutable.
    - Run `cargo update --workspace` to refresh `Cargo.lock` without
      third-party dependency drift.
 
@@ -64,8 +68,8 @@ date has passed or its `revoked_at` field is set.
 
 2. **Run `make release-check`.** Before the new npm package and GitHub Release
    exist, this normally reports only local-to-remote drift against the previous
-   version. Any Cargo-to-`npm/package.json` mismatch is a local error and must
-   be fixed before tagging.
+   version. Any Cargo, `npm/package.json`, or `server.json` mismatch is a local
+   error and must be fixed before tagging.
 
 3. **Keep the npm smoke current.** If this release changes any non-interactive
    command driven by
@@ -74,7 +78,8 @@ date has passed or its `revoked_at` field is set.
    update on the same commit as the tag.
 
 4. **Commit and merge the release preparation to `agent-main`.** Keep the
-   Cargo and npm version bumps, lockfile refresh, and any smoke update together.
+   Cargo, npm, and `server.json` version bumps, lockfile refresh, and any smoke
+   update together.
 
 5. **Tag the merge commit.**
 
@@ -129,11 +134,12 @@ date has passed or its `revoked_at` field is set.
 ## Continuous npm-install verification
 
 The `smoke-npm-install.yml` workflow runs on macOS and Ubuntu weekly, on every
-`v*` tag, and by manual dispatch. It executes
-`npx -y @orbit-tools/cli@latest --version`, thereby exercising the npm
-postinstall binary download and checksum/signature verification. It then
-initializes an isolated Orbit home and workspace and drives `orbit mcp serve`
-through JSON-RPC `initialize` and `tools/list`.
+`v*` tag, and by manual dispatch. It resolves the package and exact version from
+the checked-out `server.json`, then executes that version through `npx`, thereby
+exercising the npm postinstall binary download and checksum/signature
+verification. It then initializes an isolated Orbit home and workspace and
+drives the metadata-declared `mcp serve` command through JSON-RPC `initialize`
+and `tools/list`.
 
 The smoke runs against published artifacts, not the local package. Its pass
 criterion is that the installed version matches the requested tag when one is
@@ -148,18 +154,19 @@ The tag assertion can be tested without network access:
 
 ## Npm-install smoke: two artifacts
 
-The workflow checks out `scripts/smoke-npm-install.sh` from the trigger ref,
-while the script installs `@orbit-tools/cli@latest` from npm. Those are
-independently versioned until npm publication completes.
+The workflow checks out `scripts/smoke-npm-install.sh` and `server.json` from the
+trigger ref, while the script installs the exact package version declared by
+that metadata from npm. The checked-out release contract and published package
+are independently available until npm publication completes.
 
-| Trigger | Script comes from | CLI comes from |
+| Trigger | Script and metadata come from | CLI comes from |
 |---|---|---|
-| push of tag `vX.Y.Z` | that tag | npm `@latest` at run time |
-| `workflow_dispatch` | the selected ref | npm `@latest` at run time |
-| weekly cron | the default branch | npm `@latest` at run time |
+| push of tag `vX.Y.Z` | that tag | npm version declared by that tag's `server.json` |
+| `workflow_dispatch` | the selected ref | npm version declared by that ref's `server.json` |
+| weekly cron | the default branch | npm version declared by that branch's `server.json` |
 
-A green versioned smoke needs both a published `@latest` matching the tag and
-a script on the selected ref that speaks the CLI's current non-interactive
+A green versioned smoke needs the metadata-declared npm version to be published
+and a script on the selected ref that speaks the CLI's current non-interactive
 contract.
 
 If the post-publish smoke is red:
@@ -215,10 +222,12 @@ used together.
 
 - `[workspace.package].version` in `Cargo.toml`;
 - `.version` in `npm/package.json`;
+- the server name, package identity, launch arguments, and both version fields
+  in `server.json`;
 - `npm view @orbit-tools/cli version`, when npm is available;
 - the latest `gh release list -L 1` tag, when GitHub CLI access is available.
 
 Missing `npm` or `gh` skips that remote source with a stderr note. Local
-Cargo/npm drift always fails.
+Cargo/npm/registry-metadata drift always fails.
 
 <!-- ORB-10995 -->
