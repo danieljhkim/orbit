@@ -248,8 +248,11 @@ execute on the accepting server through Orbit Core.
 Workspace-scoped tools accept a registered workspace name, logical `ws_*` ID, or
 absolute path registered on the accepting server. The selector may come from the
 tool's `workspace` argument or MCP initialize metadata; server process cwd is not
-a fallback. `orbit.workspace.list` is global and reports active workspaces that
-have a checkout registered on that machine.
+a fallback. An unbound client should first call `orbit_workspace_list`, then
+reuse a returned `ws_*` ID on workspace-scoped calls. If the list is empty, set
+up the machine with `orbit init` and then run `orbit workspace init` from the
+project directory. `orbit.workspace.list` is global and reports active
+workspaces that have a checkout registered on that machine.
 
 ### Federated MCP
 

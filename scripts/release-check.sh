@@ -12,6 +12,7 @@ cd "$repo_root"
 NPM_PKG="@orbit-tools/cli"
 CARGO_TOML="Cargo.toml"
 NPM_PACKAGE_JSON="npm/package.json"
+MCP_SERVER_JSON="server.json"
 
 require_bin() {
   local bin="$1"
@@ -23,7 +24,7 @@ require_bin() {
 
 require_bin jq
 
-for file in "$CARGO_TOML" "$NPM_PACKAGE_JSON"; do
+for file in "$CARGO_TOML" "$NPM_PACKAGE_JSON" "$MCP_SERVER_JSON"; do
   if [[ ! -f "$file" ]]; then
     echo "release-check: $file not found (run from repo root)" >&2
     exit 2
@@ -44,6 +45,11 @@ cargo_package_version="$(
   ' "$CARGO_TOML"
 )"
 npm_package_version="$(jq -r .version "$NPM_PACKAGE_JSON")"
+mcp_name="$(jq -r .mcpName "$NPM_PACKAGE_JSON")"
+server_name="$(jq -r .name "$MCP_SERVER_JSON")"
+server_version="$(jq -r .version "$MCP_SERVER_JSON")"
+server_package="$(jq -r '.packages[0].identifier // empty' "$MCP_SERVER_JSON")"
+server_package_version="$(jq -r '.packages[0].version // empty' "$MCP_SERVER_JSON")"
 
 if [[ -z "$cargo_package_version" ]]; then
   echo "release-check: $CARGO_TOML has no [workspace.package] version" >&2
@@ -52,6 +58,29 @@ fi
 if [[ -z "$npm_package_version" || "$npm_package_version" == "null" ]]; then
   echo "release-check: $NPM_PACKAGE_JSON has no .version field" >&2
   exit 2
+fi
+if [[ "$mcp_name" != "io.github.danieljhkim/orbit" || "$server_name" != "$mcp_name" ]]; then
+  echo "DRIFT: npm mcpName and server.json name must be io.github.danieljhkim/orbit" >&2
+  exit 1
+fi
+if [[ "$server_package" != "$NPM_PKG" || "$server_version" != "$npm_package_version" || "$server_package_version" != "$server_version" ]]; then
+  echo "DRIFT: server.json package identity/version must match npm/package.json" >&2
+  exit 1
+fi
+if ! jq -e '
+  .packages | length == 1
+  and .[0].registryType == "npm"
+  and .[0].transport.type == "stdio"
+  and ([.[0].packageArguments[] | [.type, .value]] == [["positional", "mcp"], ["positional", "serve"]])
+  and ([.. | strings | select(. == "--operator")] | length == 0)
+' "$MCP_SERVER_JSON" >/dev/null; then
+  echo "DRIFT: server.json must retain exactly the non-operator npm stdio launch: mcp serve" >&2
+  exit 1
+fi
+if command -v mcp-publisher >/dev/null 2>&1; then
+  mcp-publisher validate "$MCP_SERVER_JSON"
+else
+  echo "release-check: mcp-publisher not on PATH; structural registry validation completed, publisher validation deferred to release CI" >&2
 fi
 
 npm_registry_version=""
@@ -78,6 +107,7 @@ fi
 
 printf '%-32s %s\n' "$CARGO_TOML [workspace.package]" "$cargo_package_version"
 printf '%-32s %s\n' "$NPM_PACKAGE_JSON" "$npm_package_version"
+printf '%-32s %s\n' "$MCP_SERVER_JSON" "$server_version"
 printf '%-32s %s\n' "npm view $NPM_PKG" "${npm_registry_version:-<skipped>}"
 printf '%-32s %s\n' "gh release list -L 1" "${gh_tag_version:-<skipped>}"
 

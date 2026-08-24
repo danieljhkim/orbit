@@ -39,7 +39,9 @@ const UNBOUND_SESSION_SELECTOR_DESCRIPTION: &str = "Workspace selector for the a
      workspace ID (`ws_*`), or an absolute path registered on that server. Required in this \
      session, which is bound to no workspace, so a call that omits it is refused. Sessions \
      bound by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at \
-     initialize may omit it; never inferred from the server process cwd.";
+     initialize may omit it; first call `orbit_workspace_list` and reuse a returned `ws_*` ID. \
+     If none is listed, run `orbit init` and then `orbit workspace init` from the project \
+     directory. Never inferred from the server process cwd.";
 
 /// Federated callers copy the list token; they must not mint a v1 local form.
 const FEDERATED_SELECTOR_DESCRIPTION: &str = "Copy the `selector` field from federated `orbit.workspace.list` to address a workspace. \

@@ -43,6 +43,16 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Validate MCP Registry metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(mktemp)"
+          trap 'rm -f "$archive"' EXIT
+          curl -LsSf "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" -o "$archive"
+          tar xzf "$archive" mcp-publisher
+          ./mcp-publisher validate server.json
+
       - name: Run npm install smoke
         shell: bash
         env:
