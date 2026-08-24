@@ -251,6 +251,49 @@ tool's `workspace` argument or MCP initialize metadata; server process cwd is no
 a fallback. `orbit.workspace.list` is global and reports active workspaces that
 have a checkout registered on that machine.
 
+### Federated MCP
+
+The opt-in federated server presents one MCP namespace over SSH destinations
+listed in the operator's machine-global `~/.orbit/mcp-destinations.toml`:
+
+```toml
+[[destinations]]
+ssh = "orbit-owner"
+machine_id = "hm_alpha"
+
+[[destinations]]
+ssh = "operator@orbit-build"
+machine_id = "hm_beta"
+```
+
+From an Orbit workspace, register that mux with a client (Codex shown here):
+
+```bash
+orbit mcp init --federated --client codex --scope home
+```
+
+This adds one client entry named `orbit-federated` that launches `orbit mcp
+serve --mode federated`. It does not replace the existing v1 `orbit` entry.
+Target another supported client with its `--client` value or use `--auto`.
+Remove only the federated entry later with `orbit mcp remove --federated`
+and the same client/scope selection.
+
+In the federated MCP session, call `orbit_workspace_list`, copy the owner row's
+host-qualified `selector`, then pass it unchanged to one workspace-scoped call:
+
+```text
+orbit_workspace_list({})
+  -> {"workspaces":[{"selector":"hm_alpha/ws_orbit", ...}]}
+
+orbit_task_list({"workspace":"hm_alpha/ws_orbit"})
+```
+
+The mux performs no placement or failover, does not detect two destinations
+that both claim Owner, and is only as available as the selected destination.
+Task reads remain owner-only, so use the owner row's selector for
+`orbit_task_list` and `orbit_task_show`; a replica selector is refused with
+`capability_refused`.
+
 Remote MCP uses one direct, byte-transparent SSH stdio hop:
 
 ```text

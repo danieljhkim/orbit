@@ -1,4 +1,41 @@
+use clap::Parser;
+
 use super::super::args::{McpProvider, ProviderSelectionArgs, ProviderSelectionMode};
+use crate::command::mcp::McpSubcommand;
+use crate::command::{Cli, Commands};
+
+#[test]
+fn cli_parses_federated_init_as_an_explicit_opt_in() {
+    let cli = Cli::parse_from(["orbit", "mcp", "init", "--federated", "--codex"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Init(args) => assert!(args.federated),
+            _ => panic!("expected mcp init"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+
+    let cli = Cli::parse_from(["orbit", "mcp", "init", "--codex"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Init(args) => assert!(!args.federated),
+            _ => panic!("expected mcp init"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+}
+
+#[test]
+fn cli_parses_federated_remove_as_an_explicit_opt_in() {
+    let cli = Cli::parse_from(["orbit", "mcp", "remove", "--federated", "--codex"]);
+    match cli.command {
+        Commands::Mcp(command) => match command.command {
+            McpSubcommand::Remove(args) => assert!(args.federated),
+            _ => panic!("expected mcp remove"),
+        },
+        _ => panic!("expected top-level mcp command"),
+    }
+}
 
 #[test]
 fn provider_selection_defaults_to_auto() {

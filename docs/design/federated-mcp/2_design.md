@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Design
 owner: grok
-last_updated: 2026-08-23
-last_validated: 2026-08-23
+last_updated: 2026-08-24
+last_validated: 2026-08-24
 status: Draft
 feature: federated-mcp
 doc_role: design
@@ -11,7 +11,7 @@ summary: Federated MCP mux, selector, capability split, list schema, and fail-cl
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11017, ORB-11015, ORB-11014, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11016, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11012, ORB-11011, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Design
@@ -22,14 +22,14 @@ The prescriptive invariants live in [specs/federated-workspace-mcp.md](./specs/f
 
 ## 1. Operator-configured destinations
 
-The gateway is a mux in front of destinations the operator already configured (MCP remotes or SSH stdio targets). It does not:
+The shipped gateway is a mux in front of the SSH stdio destinations the operator configured in `~/.orbit/mcp-destinations.toml`. It does not:
 
 - grow host-registry into a fleet inventory;
 - auto-discover the owner checkout of a repository;
 - place work, elect a leader, or pick a healthy substitute;
 - detect or reject competing control-plane authorities (see §7).
 
-Direct SSH stdio to one chosen host remains the v1 remote path and is unchanged by this proposal. A caller that does not use the federated namespace never hits the mux.
+Direct SSH stdio to one chosen host remains the v1 remote path and is unchanged by the mux. A caller that does not use the federated namespace never hits it.
 
 ## 2. Host-qualified selector
 
@@ -61,7 +61,7 @@ A destination Core that does not hold a class **refuses** tools of that class wi
 
 Tool class is assigned by what the tool does, not by a per-tool registry field:
 
-- task issuance and coordination-store writes (`orbit_task_add`, `orbit.task.update`, `orbit.task.start`, …) → `control_plane`
+- task issuance, coordination-store writes, and task reads (`orbit_task_add`, `orbit.task.update`, `orbit.task.list`, `orbit.task.show`, …) → `control_plane`
 - anything touching runs, logs, or scheduler state → `execute`
 - discovery / list tools (`orbit_workspace_list`, …) → unclassified, not subject to `capability_refused`
 
@@ -124,7 +124,9 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 ## 9. Concerns & Honest Limitations
 
 - v1 `--mode remote` is unchanged. Federated list and routing live only in `--mode federated`.
+- The mux performs no placement and does not detect competing Owner declarations. Those remain operator configuration responsibilities.
 - Availability is bounded by the chosen destination. Callers must handle visible routing failures; there is no transparent substitute result.
+- Task reads remain owner-only because the coordination store is owner-authoritative. Use the owner selector for `orbit.task.list` and `orbit.task.show`; a replica selector receives `capability_refused`.
 - Including unreachable hosts makes the list honest and larger; clients must read reachability rather than treating presence as liveness.
 - Capability advertisement can lag destination Core. The destination refuse is the correctness boundary; the gateway is not a second authorization layer.
 - Transport authentication, selector expiry, health freshness, and cloud coordination-store details are deliberately unresolved. See [3_vision.md](./3_vision.md). Probe cadence stays a vision open question; it does not change live-delivery error precedence.
@@ -134,10 +136,14 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 ## Task References
 
 - [ORB-11008] — recorded the federated multi-host MCP policy
-- [ORB-11009] — specified this proposed mechanism as the implementable contract (PR #1139)
+- [ORB-11009] — specified the implementable mux contract (PR #1139)
 - [ORB-11010] — closed the PR #1139 review contract holes in this folder
+- [ORB-11011] — sequenced the shipped federated MCP mux
+- [ORB-11012] — mapped destination checkout role to `capability_refused`
+- [ORB-11013] — implemented destination config, selectors, and routing errors
 - [ORB-11014] — federated `orbit.workspace.list`
 - [ORB-11015] — fail-closed routing of host-qualified selectors
+- [ORB-11016] — registered the federated serve path and aligned current docs
 - [ORB-11017] — federated workspace param is the host-qualified selector
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

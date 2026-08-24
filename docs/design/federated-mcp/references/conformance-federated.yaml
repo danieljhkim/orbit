@@ -1,0 +1,88 @@
+schema_version: 2
+contract: orbit-mcp-federated
+feature_status: Draft
+last_updated: 2026-08-24
+last_validated: 2026-08-24
+
+source_of_truth:
+  design: docs/design/federated-mcp/2_design.md
+  prescriptive_contract: docs/design/federated-mcp/specs/federated-workspace-mcp.md
+  destinations: crates/orbit-mcp/src/federated/config.rs
+  mux_host: crates/orbit-mcp/src/federated/host.rs::FederatedMcpHost
+  destination_capabilities: crates/orbit-mcp/src/federated/capability.rs
+  serve_entry: crates/orbit-cli/src/command/mcp/command.rs
+  client_registration: crates/orbit-cli/src/command/mcp/setup
+
+launch:
+  destinations_file: ~/.orbit/mcp-destinations.toml
+  argv: orbit mcp serve --mode federated
+  registration:
+    command: orbit mcp init --federated
+    removal: orbit mcp remove --federated
+    server_id: orbit-federated
+    coexistence_rule: preserve the v1 `orbit` client entry
+  discovery: call federated orbit_workspace_list and copy a descriptor's selector
+  workspace_call: pass the copied selector as the workspace argument
+
+federated_namespace_exception:
+  v1_invariant: one direct byte-transparent SSH stdio hop; no Orbit process relays onward
+  exception: the federated mux inspects MCP calls and relays them to the destination encoded in the host-qualified selector
+  scope: orbit mcp serve --mode federated only
+  unchanged_v1_paths:
+    - orbit mcp serve
+    - orbit mcp serve --mode remote <ssh-host>
+    - orbit mcp listen
+  v1_conformance: docs/design/mcp-bridge/references/conformance-v1.yaml
+
+routing:
+  selector_source: copy selector from federated orbit_workspace_list
+  selector_shape: hm_<machine_id>/ws_<workspace_id>
+  delivery: one selected destination; no fallback or failover
+  config_collision: duplicate machine_id fails startup as ambiguous_destination
+  errors:
+    - unknown_selector
+    - unreachable_destination
+    - stale_route
+    - unhealthy_checkout
+    - tool_not_on_this_host
+    - capability_refused
+
+authority:
+  destination_runs_logs_scheduler: execute
+  owner_coordination_store: control_plane
+  task_reads:
+    tools:
+      - orbit.task.list
+      - orbit.task.show
+    rule: owner-only; use the owner descriptor's selector
+    replica_result: capability_refused
+
+honest_limitations:
+  placement: none
+  competing_owner_detection: none
+  availability: bounded by the chosen destination
+  task_reads_on_replicas: refused; the mux does not forward them to the owner
+  replication: none
+  implicit_failover: none
+
+validation:
+  registration_and_coexistence: crates/orbit-cli/src/command/mcp/setup/tests/dispatch.rs
+  registration_argv: crates/orbit-cli/src/command/mcp/setup/providers/tests/simple_json.rs
+  config_and_selector: crates/orbit-mcp/src/federated/tests/config.rs
+  aggregate_list: crates/orbit-mcp/src/federated/tests/host.rs
+  fail_closed_routes: crates/orbit-mcp/src/federated/tests/route.rs
+  capability_classes: crates/orbit-mcp/src/federated/tests/capability.rs
+
+task_references:
+  epic: ORB-11011
+  children:
+    - ORB-11012
+    - ORB-11013
+    - ORB-11014
+    - ORB-11015
+    - ORB-11016
+    - ORB-11017
+  contract_history:
+    - ORB-11008
+    - ORB-11009
+    - ORB-11010

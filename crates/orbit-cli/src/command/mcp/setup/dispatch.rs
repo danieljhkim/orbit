@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use orbit_core::OrbitError;
 
+use crate::command::mcp::ORBIT_MCP_SERVER_ID;
+
 use super::args::{McpAction, McpProvider, ProviderSelectionMode, ScopeArg};
 use super::providers::*;
 
@@ -16,32 +18,35 @@ pub(super) fn run_action(
     let providers = resolve_providers(selection, repo_root, home_dir.as_deref());
     for provider in &providers {
         let target = ConfigTarget::resolve(scope, provider, repo_root, home_dir.as_deref())?;
-        match (action, provider) {
-            (McpAction::Init(launch), McpProvider::Claude) => apply_claude_init(&target, launch)?,
-            (McpAction::Remove, McpProvider::Claude) => apply_claude_remove(&target)?,
-            (McpAction::Init(launch), McpProvider::Codex) => apply_codex_init(&target, launch)?,
-            (McpAction::Remove, McpProvider::Codex) => apply_codex_remove(&target)?,
-            (McpAction::Init(launch), McpProvider::Gemini) => apply_gemini_init(&target, launch)?,
-            (McpAction::Remove, McpProvider::Gemini) => apply_gemini_remove(&target)?,
-            (McpAction::Init(launch), McpProvider::Grok) => apply_grok_init(&target, launch)?,
-            (McpAction::Remove, McpProvider::Grok) => apply_grok_remove(&target)?,
-            (McpAction::Init(launch), McpProvider::Cursor) => {
-                apply_simple_json_init(&target, "mcpServers", launch)?
-            }
-            (McpAction::Remove, McpProvider::Cursor) => {
-                apply_simple_json_remove(&target, "mcpServers")?
-            }
-            (McpAction::Init(launch), McpProvider::Vscode) => {
-                apply_simple_json_init(&target, "servers", launch)?
-            }
-            (McpAction::Remove, McpProvider::Vscode) => {
-                apply_simple_json_remove(&target, "servers")?
-            }
-            (McpAction::Init(launch), McpProvider::Windsurf) => {
-                apply_simple_json_init(&target, "mcpServers", launch)?
-            }
-            (McpAction::Remove, McpProvider::Windsurf) => {
-                apply_simple_json_remove(&target, "mcpServers")?
+        match action {
+            McpAction::Init(launch) => match provider {
+                McpProvider::Claude => apply_claude_init(&target, launch)?,
+                McpProvider::Codex => apply_codex_init(&target, launch)?,
+                McpProvider::Gemini => apply_gemini_init(&target, launch)?,
+                McpProvider::Grok => apply_grok_init(&target, launch)?,
+                McpProvider::Cursor => apply_simple_json_init(&target, "mcpServers", launch)?,
+                McpProvider::Vscode => apply_simple_json_init(&target, "servers", launch)?,
+                McpProvider::Windsurf => apply_simple_json_init(&target, "mcpServers", launch)?,
+            },
+            McpAction::Remove | McpAction::RemoveFederated => {
+                let server_id = if matches!(action, McpAction::RemoveFederated) {
+                    ORBIT_FEDERATED_MCP_SERVER_ID
+                } else {
+                    ORBIT_MCP_SERVER_ID
+                };
+                match provider {
+                    McpProvider::Claude => apply_claude_remove(&target, server_id)?,
+                    McpProvider::Codex => apply_codex_remove(&target, server_id)?,
+                    McpProvider::Gemini => apply_gemini_remove(&target, server_id)?,
+                    McpProvider::Grok => apply_grok_remove(&target, server_id)?,
+                    McpProvider::Cursor => {
+                        apply_simple_json_remove(&target, "mcpServers", server_id)?
+                    }
+                    McpProvider::Vscode => apply_simple_json_remove(&target, "servers", server_id)?,
+                    McpProvider::Windsurf => {
+                        apply_simple_json_remove(&target, "mcpServers", server_id)?
+                    }
+                }
             }
         }
     }
