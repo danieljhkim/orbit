@@ -186,6 +186,16 @@ impl ServerMcpHost {
         )
     }
 
+    fn list_federated_workspaces(&self) -> Result<Value, OrbitError> {
+        let registry_path =
+            orbit_registry::workspace_registry::registry_path_for(&self.global_root);
+        let registry = orbit_registry::workspace_registry::load_registry_from(&registry_path)?;
+        Ok(orbit_mcp::execute_federated_workspace_discovery(
+            &registry,
+            &self.process_machine_id,
+        ))
+    }
+
     fn call_global_tool(
         &self,
         name: &str,
@@ -200,6 +210,9 @@ impl ServerMcpHost {
             context,
             |_| match name {
                 "orbit.workspace.list" => self.list_workspaces(),
+                orbit_mcp::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL => {
+                    self.list_federated_workspaces()
+                }
                 _ => Err(OrbitError::not_found(NotFoundKind::Tool, name.to_string())),
             },
         )
@@ -343,6 +356,12 @@ impl McpHost for ServerMcpHost {
         input: Value,
         context: ToolSessionContext,
     ) -> Result<Value, OrbitError> {
+        // The mux's destination-side discovery path is intentionally absent
+        // from tools/list. It retains Invalid local checkouts for descriptor
+        // health without changing direct v1 orbit.workspace.list behavior.
+        if name == orbit_mcp::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL {
+            return self.call_global_tool(name, input, context);
+        }
         let definition = match self.definition(name) {
             Ok(definition) => definition,
             Err(error) => return self.audit_global_failure(name, input, context, error),

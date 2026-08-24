@@ -31,9 +31,6 @@ pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 /// change rather than silently degrading.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
-/// The v1 discovery tool the mux calls on each destination.
-const V1_WORKSPACE_LIST_TOOL: &str = "orbit.workspace.list";
-
 /// What one destination reported for this call.
 #[derive(Debug, Clone)]
 pub struct DestinationSnapshot {
@@ -234,12 +231,13 @@ impl DestinationSession {
         self.notify("notifications/initialized")
     }
 
-    /// Call the destination's v1 discovery tool and return its envelope.
+    /// Call the destination's private federated discovery path and return its
+    /// envelope. The public v1 list intentionally filters Invalid workspaces.
     fn discover_workspaces(&mut self) -> Result<DestinationSnapshot, OrbitError> {
         let response = self.request(
             "tools/call",
             json!({
-                "name": mcp_advertised_tool_name(V1_WORKSPACE_LIST_TOOL),
+                "name": crate::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL,
                 "arguments": {},
             }),
         )?;
@@ -250,26 +248,7 @@ impl DestinationSession {
             // message here would leave the caller matching on prose.
             return Err(remote_tool_error(&self.destination, content));
         }
-        let machine_id = content["machine_id"]
-            .as_str()
-            .ok_or_else(|| {
-                unreachable(
-                    &self.destination,
-                    "discovery answer carried no machine_id".to_string(),
-                )
-            })?
-            .to_string();
-        let workspaces: Vec<Workspace> = serde_json::from_value(content["workspaces"].clone())
-            .map_err(|error| {
-                unreachable(
-                    &self.destination,
-                    format!("discovery answer was not a workspace list: {error}"),
-                )
-            })?;
-        Ok(DestinationSnapshot {
-            machine_id,
-            workspaces,
-        })
+        snapshot_from_discovery_content(&self.destination, content)
     }
 
     fn list_tools(&mut self) -> Result<Vec<String>, OrbitError> {
@@ -378,6 +357,32 @@ impl DestinationSession {
             }
         }
     }
+}
+
+pub(crate) fn snapshot_from_discovery_content(
+    destination: &Destination,
+    content: &Value,
+) -> Result<DestinationSnapshot, OrbitError> {
+    let machine_id = content["machine_id"]
+        .as_str()
+        .ok_or_else(|| {
+            unreachable(
+                destination,
+                "discovery answer carried no machine_id".to_string(),
+            )
+        })?
+        .to_string();
+    let workspaces: Vec<Workspace> = serde_json::from_value(content["workspaces"].clone())
+        .map_err(|error| {
+            unreachable(
+                destination,
+                format!("discovery answer was not a workspace list: {error}"),
+            )
+        })?;
+    Ok(DestinationSnapshot {
+        machine_id,
+        workspaces,
+    })
 }
 
 impl Drop for DestinationSession {
