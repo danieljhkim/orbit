@@ -432,14 +432,14 @@ fn apply_private_file_mode(options: &mut OpenOptions) {
 fn apply_private_file_mode(_options: &mut OpenOptions) {}
 
 #[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> io::Result<()> {
+pub(crate) fn set_private_file_permissions(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_FILE_MODE))
 }
 
 #[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> io::Result<()> {
+pub(crate) fn set_private_file_permissions(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 

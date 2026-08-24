@@ -41,15 +41,7 @@ impl VectorStore {
     /// foreign_keys, synchronous=NORMAL) and creating the
     /// embeddings/corpus_fts schema if missing.
     pub fn open(path: &Path) -> Result<Self, OrbitError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| OrbitError::Store(e.to_string()))?;
-        }
-        let mut conn = Connection::open(path).map_err(|e| OrbitError::Store(e.to_string()))?;
-        let pragmas = orbit_common::storage::sqlite::apply_default_pragmas(&conn)?;
-        if pragmas.write_denied || orbit_common::storage::sqlite::filesystem_is_read_only(path)? {
-            drop(conn);
-            conn = orbit_common::storage::sqlite::open_immutable(path)?;
-        }
+        let conn = orbit_common::storage::sqlite::open_private(path)?.connection;
         if let Err(error) = schema::ensure_vector_schema(&conn) {
             if error.is_readonly_or_access_failure() {
                 tracing::warn!(
