@@ -13,8 +13,75 @@ struct DocsConfigFile {
 
 #[derive(Debug, Deserialize)]
 struct DocsConfigSection {
-    roots: Option<Vec<String>>,
+    roots: Option<Vec<RawDocsRoot>>,
     search: Option<DocsSearchConfigSection>,
+}
+
+/// One `[docs] roots` entry. Either the plain path string (gitignore still
+/// filters candidates under it, today's behavior) or a table naming the path
+/// explicitly as authoritative over gitignore.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawDocsRoot {
+    Plain(String),
+    Explicit {
+        path: String,
+        #[serde(default = "default_respect_gitignore")]
+        respect_gitignore: bool,
+    },
+}
+
+fn default_respect_gitignore() -> bool {
+    true
+}
+
+impl From<RawDocsRoot> for DocsRoot {
+    fn from(raw: RawDocsRoot) -> Self {
+        match raw {
+            RawDocsRoot::Plain(path) => DocsRoot {
+                path,
+                respect_gitignore: true,
+            },
+            RawDocsRoot::Explicit {
+                path,
+                respect_gitignore,
+            } => DocsRoot {
+                path,
+                respect_gitignore,
+            },
+        }
+    }
+}
+
+/// A configured `[docs].roots` entry, resolved to whether gitignore still
+/// filters candidates found beneath it. Naming a root explicitly as a table
+/// (`{ path = "...", respect_gitignore = false }`) opts it out of the
+/// gitignore filter; a plain string keeps today's behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocsRoot {
+    pub path: String,
+    pub respect_gitignore: bool,
+}
+
+impl DocsRoot {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            respect_gitignore: true,
+        }
+    }
+}
+
+impl From<&str> for DocsRoot {
+    fn from(path: &str) -> Self {
+        DocsRoot::new(path)
+    }
+}
+
+impl From<String> for DocsRoot {
+    fn from(path: String) -> Self {
+        DocsRoot::new(path)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,7 +102,7 @@ struct DocsSearchConfigSection {
     semantic_weight: Option<f32>,
 }
 
-pub fn parse_docs_roots_from_config_toml(raw: &str) -> Result<Vec<String>, OrbitError> {
+pub fn parse_docs_roots_from_config_toml(raw: &str) -> Result<Vec<DocsRoot>, OrbitError> {
     if raw.trim().is_empty() {
         return Ok(default_doc_roots());
     }
@@ -45,6 +112,7 @@ pub fn parse_docs_roots_from_config_toml(raw: &str) -> Result<Vec<String>, Orbit
     Ok(parsed
         .docs
         .and_then(|section| section.roots)
+        .map(|roots| roots.into_iter().map(DocsRoot::from).collect())
         .unwrap_or_else(default_doc_roots))
 }
 
@@ -66,7 +134,7 @@ pub fn parse_docs_search_config_from_config_toml(
     Ok(DocsSearchConfig { semantic_weight })
 }
 
-pub(super) fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<String>, OrbitError> {
+pub(super) fn read_docs_roots_from_config_path(path: &Path) -> Result<Vec<DocsRoot>, OrbitError> {
     if !path.exists() {
         return Ok(default_doc_roots());
     }
@@ -88,7 +156,7 @@ pub(super) fn read_docs_search_config_from_config_path(
 
 pub(super) fn read_task_context_docs_roots_from_config_path(
     path: &Path,
-) -> Result<Vec<String>, OrbitError> {
+) -> Result<Vec<DocsRoot>, OrbitError> {
     if !path.exists() {
         return Ok(default_doc_roots());
     }
@@ -102,7 +170,7 @@ pub(super) fn read_task_context_docs_roots_from_config_path(
 /// (and the read_ wrapper in mod.rs calls it).
 pub(super) fn parse_task_context_docs_roots_from_config_toml(
     raw: &str,
-) -> Result<Vec<String>, OrbitError> {
+) -> Result<Vec<DocsRoot>, OrbitError> {
     if raw.trim().is_empty() {
         return Ok(default_doc_roots());
     }
@@ -110,11 +178,14 @@ pub(super) fn parse_task_context_docs_roots_from_config_toml(
         OrbitError::InvalidInput(format!("invalid docs config in config.toml: {error}"))
     })?;
     Ok(match parsed.docs {
-        Some(section) => section.roots.unwrap_or_default(),
+        Some(section) => section
+            .roots
+            .map(|roots| roots.into_iter().map(DocsRoot::from).collect())
+            .unwrap_or_default(),
         None => default_doc_roots(),
     })
 }
 
-fn default_doc_roots() -> Vec<String> {
-    vec![DEFAULT_DOC_ROOT.to_string()]
+fn default_doc_roots() -> Vec<DocsRoot> {
+    vec![DocsRoot::new(DEFAULT_DOC_ROOT)]
 }
