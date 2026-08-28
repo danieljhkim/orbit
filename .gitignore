@@ -24,6 +24,12 @@ agentspace
 !.grok/
 !.grok/config.toml
 !.grok/hooks/
+# The distributable agent plugin is repository content, including its hidden
+# Claude/Codex manifests and generated-from-canonical skill mirror.
+!plugin/.mcp.json
+!plugin/.claude-plugin/
+!plugin/.codex-plugin/
+!plugin/skills/
 # OS / editor
 .DS_Store
 .vscode/settings.json
