@@ -1,16 +1,17 @@
 ---
 type: runbook
-summary: Cut and verify an Orbit release across Cargo, GitHub artifacts, Homebrew, and npm.
-tags: [operations, release, npm, signing]
-paths: [".github/workflows/release.yml", ".github/workflows/smoke-npm-install.yml", "npm/**", "scripts/release-check.sh"]
+summary: Cut and verify an Orbit release across agent plugins, Cargo, GitHub artifacts, Homebrew, and npm.
+tags: [operations, release, plugins, npm, signing]
+paths: [".github/workflows/release.yml", "plugin/**", "npm/**", "scripts/release-check.sh"]
 related_features: [orbit-docs-plugin]
 last_validated: 2026-08-23
 ---
 
 # Release Orbit
 
-This runbook keeps the Cargo workspace version, the `@orbit-tools/cli` npm
-proxy, and the GitHub Release tag in lockstep. The npm package downloads the
+This runbook keeps the Cargo workspace version, Claude/Codex/Cursor plugin
+manifests, the `@orbit-tools/cli` npm proxy, and the GitHub Release tag in
+lockstep. The npm package downloads the
 native binary for its own version during postinstall, so version drift either
 installs the wrong release or fails the download.
 
@@ -60,35 +61,48 @@ date has passed or its `revoked_at` field is set.
      [`server.json`](../../server.json). The registry metadata must reference
      the npm package version that contains its matching `mcpName` ownership
      marker; published npm versions are immutable.
+   - Update `.version` in `plugin/.claude-plugin/plugin.json`,
+     `plugin/.codex-plugin/plugin.json`, and `plugin/plugin.json`.
    - Run `cargo update --workspace` to refresh `Cargo.lock` without
      third-party dependency drift.
 
    For a major version bump, first follow
    [RELEASING.md's CHANGELOG archiving policy](../../RELEASING.md#changelog-archiving).
 
-2. **Run `make release-check`.** Before the new npm package and GitHub Release
+2. **Sync and verify plugin assets.** `crates/orbit-core/assets/skills/orbit/`
+   is canonical. Run `scripts/sync-plugin-skills.sh` to refresh the committed
+   package mirror. CI runs it with `--check` and rejects drift.
+
+3. **Run the install smokes.** `scripts/smoke-plugin-install.sh` installs the
+   repository plugin into scratch Claude Code and Codex config roots and checks
+   their MCP and skill assets. Cursor has no supported headless plugin runner,
+   so its leg creates the documented local symlink and validates the Agent
+   Plugins 1.0 root manifests. npm download/signature coverage stays solely in
+   `scripts/smoke-npm-install.sh`.
+
+4. **Run `make release-check`.** Before the new npm package and GitHub Release
    exist, this normally reports only local-to-remote drift against the previous
    version. Any Cargo, `npm/package.json`, or `server.json` mismatch is a local
    error and must be fixed before tagging.
 
-3. **Keep the npm smoke current.** If this release changes any non-interactive
+5. **Keep the npm smoke current.** If this release changes any non-interactive
    command driven by
    [`scripts/smoke-npm-install.sh`](../../scripts/smoke-npm-install.sh)
    (`orbit init`, `workspace init`, or `mcp serve`), land the script
    update on the same commit as the tag.
 
-4. **Commit and merge the release preparation to `agent-main`.** Keep the
+6. **Commit and merge the release preparation to `agent-main`.** Keep the
    Cargo, npm, and `server.json` version bumps, lockfile refresh, and any smoke
    update together.
 
-5. **Tag the merge commit.**
+7. **Tag the merge commit.**
 
    ```bash
    git tag -a vX.Y.Z -m "orbit vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-6. **Watch [`.github/workflows/release.yml`](../../.github/workflows/release.yml).**
+8. **Watch [`.github/workflows/release.yml`](../../.github/workflows/release.yml).**
    Its jobs:
 
    - build four platform CLI tarballs and the supported semantic companions;
@@ -106,7 +120,7 @@ date has passed or its `revoked_at` field is set.
    [§10c](../../RELEASING.md#10c-post-merge-back-merge-to-agent-main) to
    back-merge in the same session.
 
-7. **Publish npm manually** from the merged commit:
+9. **Publish npm manually** from the merged commit:
 
    ```bash
    cd npm
@@ -118,7 +132,7 @@ date has passed or its `revoked_at` field is set.
    between the GitHub Release and npm publish short; until npm updates,
    `npx -y @orbit-tools/cli@latest` still selects the previous release.
 
-8. **Verify after npm publish.**
+10. **Verify after npm publish.**
 
    ```bash
    make release-check
@@ -222,12 +236,20 @@ used together.
 
 - `[workspace.package].version` in `Cargo.toml`;
 - `.version` in `npm/package.json`;
+- `.version` in the Claude, Codex, and Agent Plugins 1.0 manifests;
 - the server name, package identity, launch arguments, and both version fields
   in `server.json`;
 - `npm view @orbit-tools/cli version`, when npm is available;
 - the latest `gh release list -L 1` tag, when GitHub CLI access is available.
 
+It also runs both plugin validators and the canonical-skill mirror drift check.
 Missing `npm` or `gh` skips that remote source with a stderr note. Local
-Cargo/npm/registry-metadata drift always fails.
+Cargo/npm/plugin/registry-metadata drift always fails.
+
+Claude Code installs through `/plugin marketplace add danieljhkim/orbit` and
+`/plugin install orbit`; Codex installs through its Git marketplace commands.
+Cursor uses `~/.cursor/plugins/local/orbit` pointing at `plugin/`, whose root
+`plugin.json` and `mcp.json` are the Agent Plugins 1.0 contract. Public Cursor
+Marketplace publication remains a human follow-up.
 
 <!-- ORB-10995 -->
