@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Vision
 owner: grok
-last_updated: 2026-08-23
-last_validated: 2026-08-23
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 status: Draft
 feature: federated-mcp
 doc_role: vision
@@ -20,7 +20,7 @@ Forward-looking only. The contract in [specs/federated-workspace-mcp.md](./specs
 
 ## 1. Open Questions
 
-1. **Transport authentication.** What authenticated principal does a destination Core receive on a mux-forwarded call? Selector possession is not authorization. Existing registry and session fields (`machine_id`, `host_id`, `caller_machine_id`, `caller_ip`, SSH audit labels) must not be promoted into credentials by implication.
+1. **Transport authentication.** What authenticated principal does a destination Core receive on a mux-forwarded call? Selector possession is not authorization. Existing registry and session fields (`machine_id`, `host_id`, `caller_machine_id`, `caller_ip`, SSH audit labels) must not be promoted into credentials by implication. A destination-side mechanism for the authorization half of this question is proposed in [specs/caller-authorization.md](./specs/caller-authorization.md): the destination declares each caller's ceiling and the caller's argv becomes a request. That spec is unimplemented, and proposing it does not answer this question — an implementing task closes it with evidence that a destination actually refuses an over-asking caller, and that the self-asserted `machine_id` it keys on has been separated from the authenticated identity it can be pinned to.
 2. **Selector expiry.** Does a host-qualified selector remain valid across destination catalog edits, host re-init, and mux restarts, or does it expire? If it expires, what is the caller-visible error, and how does that differ from `stale_route`?
 3. **Health freshness.** How old may host-reachability and checkout-health be when listed? Is the list a live probe, a cached projection with explicit freshness, or a last-known snapshot for unreachable hosts? The spec requires including unreachable hosts and requires routing to decide on live delivery rather than cached list health; it does not yet define probe cadence or staleness thresholds.
 4. **Cloud coordination-store details.** The declared control-plane authority may later offload the coordination store. What is the persistence contract, how do execution-binding hosts refer to it, and how does destination Core still refuse task issuance locally without implying replication?
@@ -38,6 +38,10 @@ Owner vs replica checkouts, `machine_id` vs `host_id`, and checkout-health as re
 ### mcp-bridge v1
 
 v1 is one chosen destination, byte-transparent direct SSH stdio, and no Orbit process relaying onward. Current behavior stays in [mcp-bridge 2_design.md](../mcp-bridge/2_design.md). [mcp-bridge 3_vision.md §5](../mcp-bridge/3_vision.md) now admits this mux as a federated-namespace-only exception and still excludes automatic owner discovery, replication, relays-as-product, and fleet placement.
+
+### Session authority is caller-asserted today
+
+`orbit mcp serve --operator` decides an MCP session's authority from argv, resolved once at startup in `crates/orbit-mcp/src/remote/identity.rs`. On an SSH destination the caller writes that argv, so the destination currently makes no statement about which callers may reach a governed operation. [specs/caller-authorization.md](./specs/caller-authorization.md) proposes moving that statement to the destination. It is a separate axis from the `control_plane` / `execute` classes in [2_design.md §3](./2_design.md), which are already destination-derived.
 
 ### Remote access
 
