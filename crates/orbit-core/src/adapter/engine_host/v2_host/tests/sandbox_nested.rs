@@ -1,6 +1,5 @@
-//! [ORB-11055] Nested `orbit.task.update` under the resolved macOS child-runtime
-//! profile must initialize `{global}/state/audit` without a blanket `~/.orbit`
-//! grant.
+//! Production-shaped managed nested Orbit commands under the resolved macOS
+//! child-runtime profile. [ORB-11055] [ORB-11066]
 
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
@@ -22,13 +21,13 @@ use crate::OrbitRuntime;
 #[cfg(target_os = "macos")]
 use crate::adapter::engine_host::v2_host::test_support::seed_executor;
 
-/// A registered-workspace `orbit.task.update` launched as a nested Orbit
-/// command under the resolved Gemini child-runtime profile. The durable task
-/// write and global audit-store initialization must both succeed without
-/// granting the whole global Orbit root.
+/// A managed child launched from a disposable linked worktree carries the same
+/// registry locator and provenance the CLI runner emits. Both a capability
+/// preflight and a task-store lookup must reach tool dispatch without granting
+/// the whole global Orbit root or bootstrapping workspace layout there.
 #[cfg(target_os = "macos")]
 #[test]
-fn nested_orbit_task_update_initializes_global_audit_under_sandbox() {
+fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
     if !sandbox_exec_can_apply() {
         return;
     }
@@ -39,8 +38,10 @@ fn nested_orbit_task_update_initializes_global_audit_under_sandbox() {
     let parent = sandbox_test_parent("nested-task-update");
     let _cleanup = ScopeGuard(parent.clone());
     let home = parent.join("home");
+    let child_home = parent.join("provider-home");
     let repo = parent.join("repo");
     std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&child_home).expect("create provider home");
     std::fs::create_dir_all(&repo).expect("create repo");
     init_git_repo(&repo);
 
@@ -73,6 +74,19 @@ fn nested_orbit_task_update_initializes_global_audit_under_sandbox() {
     );
     let added: Value = serde_json::from_slice(&add.stdout).expect("task add JSON");
     let task_id = added["id"].as_str().expect("task id").to_string();
+
+    let worktree = repo.join(".orbit/state/worktrees/jrun-orb-11066");
+    let worktree_output = Command::new("git")
+        .current_dir(&repo)
+        .args(["worktree", "add", "--detach"])
+        .arg(&worktree)
+        .output()
+        .expect("create linked worktree");
+    assert!(
+        worktree_output.status.success(),
+        "git worktree add failed: {}",
+        String::from_utf8_lossy(&worktree_output.stderr)
+    );
 
     let global = home.join(".orbit");
     let workspace_orbit = repo.join(".orbit");
@@ -112,77 +126,133 @@ fn nested_orbit_task_update_initializes_global_audit_under_sandbox() {
         !modify.iter().any(|entry| entry == &global_str),
         "must not blanket-reallow the global Orbit root: {modify:?}"
     );
-
     let home_str = home.to_string_lossy().into_owned();
+    assert!(
+        !modify.iter().any(|entry| entry == &home_str),
+        "must not blanket-reallow the user's home: {modify:?}"
+    );
+    assert!(
+        !modify
+            .iter()
+            .any(|entry| entry == &workspace_orbit.display().to_string()),
+        "must not blanket-reallow the workspace .orbit tree: {modify:?}"
+    );
+
     let _env = orbit_common::test_env::scoped([("HOME", Some(home_str.as_str()))]);
     let profile_text = compile_macos_sandbox_profile(&resolved.fs_profile, "gemini")
         .expect("compile nested orbit sandbox profile");
-
-    let input = serde_json::json!({
-        "id": task_id,
-        "execution_summary": "Outcome: success\nChanges:\n- nested orbit.task.update persisted under sandbox-exec\nAssessment: global audit initialized",
-        "model": "grok",
-    })
-    .to_string();
-    let args = vec![
-        "tool".to_string(),
-        "run".to_string(),
-        "orbit.task.update".to_string(),
-        "--input".to_string(),
-        input,
-    ];
+    let child_home_str = child_home.to_string_lossy().into_owned();
+    let orbit_bin_str = orbit_bin.to_string_lossy().into_owned();
     let env = vec![
-        ("HOME".to_string(), home_str.clone()),
-        ("USERPROFILE".to_string(), home_str.clone()),
+        ("HOME".to_string(), child_home_str.clone()),
+        ("USERPROFILE".to_string(), child_home_str),
         (
             "PATH".to_string(),
             "/usr/bin:/bin:/usr/local/bin".to_string(),
         ),
         ("TMPDIR".to_string(), "/tmp".to_string()),
+        ("ORBIT_BIN".to_string(), orbit_bin_str),
+        ("ORBIT_REGISTRY_ROOT".to_string(), global_str.clone()),
+        ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
+        ("ORBIT_RUN_ID".to_string(), "jrun-orb-11066".to_string()),
+        ("ORBIT_TASK_ID".to_string(), task_id.clone()),
+        ("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.clone()),
+        ("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()),
+        (
+            "ORBIT_ACTIVITY_TOOLS".to_string(),
+            "github.auth.status,orbit.task.show".to_string(),
+        ),
+        (
+            "ORBIT_ACTIVITY_FS_PROFILE".to_string(),
+            resolved.fs_profile.name.clone(),
+        ),
         ("ORBIT_AGENT_NAME".to_string(), "grok".to_string()),
         ("ORBIT_AGENT_MODEL".to_string(), "grok".to_string()),
     ];
-    let (child, _profile) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
-        profile_text: &profile_text,
-        program: orbit_bin.to_str().expect("orbit path utf8"),
-        args: &args,
-        env: &env,
-        cwd: Some(&repo),
-        stdin: Stdio::null(),
-        stdout: Stdio::piped(),
-        stderr: Stdio::piped(),
-    })
-    .expect("spawn nested orbit.task.update");
-    let output = child.wait_with_output().expect("wait nested orbit");
+
+    let output = run_sandboxed_orbit(
+        &orbit_bin,
+        &profile_text,
+        &env,
+        &worktree,
+        &["tool", "run", "github.auth.status"],
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "sandboxed orbit.task.update failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        "sandboxed github.auth.status failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
     assert!(
         !stderr.contains("file-write-create") && !stderr.contains("Operation not permitted"),
-        "nested Orbit must not hit a sandbox EPERM on global audit: {stderr}"
+        "nested Orbit must not hit a sandbox bootstrap denial: {stderr}"
+    );
+    let capability: Value = serde_json::from_slice(&output.stdout).expect("capability JSON");
+    assert!(
+        capability
+            .get("available")
+            .and_then(Value::as_bool)
+            .is_some()
+            && capability
+                .get("authenticated")
+                .and_then(Value::as_bool)
+                .is_some(),
+        "github.auth.status must return its structured capability result: {capability}"
     );
 
-    let shown = run_orbit(
+    let input = serde_json::json!({ "id": task_id, "model": "grok" }).to_string();
+    let shown = run_sandboxed_orbit(
         &orbit_bin,
-        &repo,
-        &home,
-        &["task", "show", &task_id, "--json"],
-        "task show after sandboxed update",
+        &profile_text,
+        &env,
+        &worktree,
+        &["tool", "run", "orbit.task.show", "--input", &input],
+    );
+    assert!(
+        shown.status.success(),
+        "sandboxed orbit.task.show failed: {}",
+        String::from_utf8_lossy(&shown.stderr)
     );
     let task: Value = serde_json::from_slice(&shown.stdout).expect("task show JSON");
-    let summary = task["execution_summary"].as_str().unwrap_or("");
-    assert!(
-        summary.contains("nested orbit.task.update persisted"),
-        "durable execution summary missing after sandboxed update: {task}"
-    );
-    assert!(
-        global.join("orbit.db").is_file(),
-        "global SQLite audit store should be initialized: {}",
-        global.join("orbit.db").display()
-    );
+    assert_eq!(task["id"], task_id);
+    for workspace_only in [
+        "state/job-runs",
+        "state/diagnostics",
+        "state/scoreboard",
+        "state/worktrees",
+        "knowledge",
+    ] {
+        assert!(
+            !global.join(workspace_only).exists(),
+            "managed registry discovery must not create global workspace-only path {workspace_only}"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_sandboxed_orbit(
+    bin: &Path,
+    profile_text: &str,
+    env: &[(String, String)],
+    cwd: &Path,
+    args: &[&str],
+) -> std::process::Output {
+    let args = args
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let (child, _profile) = spawn_under_macos_sandbox(MacosSandboxSpawnRequest {
+        profile_text,
+        program: bin.to_str().expect("orbit path utf8"),
+        args: &args,
+        env,
+        cwd: Some(cwd),
+        stdin: Stdio::null(),
+        stdout: Stdio::piped(),
+        stderr: Stdio::piped(),
+    })
+    .expect("spawn nested Orbit command");
+    child.wait_with_output().expect("wait nested Orbit")
 }
 
 #[cfg(target_os = "macos")]
@@ -198,6 +268,7 @@ fn run_orbit(
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_REGISTRY_ROOT")
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .env_remove("ORBIT_AGENT_NAME")
         .env_remove("ORBIT_AGENT_MODEL")

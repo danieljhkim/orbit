@@ -42,6 +42,58 @@ fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {
     }
 }
 
+/// [ORB-11066] Linux grants already name the same narrow global runtime stores
+/// as the corrected managed registry contract. In particular, the global root
+/// is not writable as a whole and workspace-only bootstrap directories are not
+/// added while chasing the macOS denial.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_child_runtime_grants_do_not_include_global_workspace_layout() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
+    );
+
+    let resolved = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve Linux sandbox")
+        .expect("descriptor");
+    let global = runtime
+        .paths()
+        .global_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().global_dir.clone());
+    assert!(
+        !resolved
+            .fs_profile
+            .modify
+            .iter()
+            .any(|entry| entry == &global.display().to_string()),
+        "Linux must not grant the whole global registry: {:?}",
+        resolved.fs_profile.modify
+    );
+    for workspace_only in [
+        "state/job-runs",
+        "state/diagnostics",
+        "state/scoreboard",
+        "state/worktrees",
+        "knowledge",
+    ] {
+        let denied = global.join(workspace_only).display().to_string();
+        assert!(
+            !resolved
+                .fs_profile
+                .modify
+                .iter()
+                .any(|entry| entry == &denied),
+            "Linux must not grant global workspace-only path {denied}: {:?}",
+            resolved.fs_profile.modify
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn direct_reviewer_profile_does_not_gain_workspace_runtime_writes() {

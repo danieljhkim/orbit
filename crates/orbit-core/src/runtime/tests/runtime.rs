@@ -70,6 +70,76 @@ fn explicit_root_flag_pins_global_registry_root() {
     assert_ne!(resolved_roots.global_root, home.path().join(".orbit"));
 }
 
+/// [ORB-11066] A managed child needs the host registry even when its HOME is
+/// provider-specific, but that locator must not turn the registry into the
+/// workspace bootstrap target.
+#[test]
+fn managed_registry_locator_keeps_workspace_bootstrap_on_the_checkout() {
+    let home = tempdir().expect("home tempdir");
+    let root = tempdir().expect("fixture root");
+    let global_root = root.path().join("global");
+    let repo_root = root.path().join("repo");
+    let workspace_root = repo_root.join(".orbit");
+    seed_initialized_workspace_root(&workspace_root);
+    let home_var = home.path().to_string_lossy().into_owned();
+    let global_var = global_root.to_string_lossy().into_owned();
+    let _env = test_env::scoped([
+        ("HOME", Some(home_var.as_str())),
+        ("ORBIT_ROOT", None),
+        ("ORBIT_REGISTRY_ROOT", Some(global_var.as_str())),
+        ("ORBIT_MANAGED_RUN_CONTEXT", Some("1")),
+        ("ORBIT_RUN_ID", Some("jrun-managed-registry")),
+    ]);
+
+    let resolved =
+        OrbitRuntime::resolve_roots_for_cwd(&repo_root, None).expect("resolve managed roots");
+    assert_eq!(resolved.global_root, global_root);
+    assert_eq!(resolved.shared_root, workspace_root);
+    assert_eq!(resolved.local_root, workspace_root);
+
+    let runtime = OrbitRuntime::initialize_from_resolved_roots(resolved, None)
+        .expect("initialize managed runtime");
+    assert_eq!(runtime.global_root(), global_root);
+    assert_eq!(runtime.shared_root(), workspace_root);
+    drop(runtime);
+
+    for workspace_only in [
+        "state/job-runs",
+        "state/diagnostics",
+        "state/scoreboard",
+        "state/worktrees",
+        "knowledge",
+    ] {
+        assert!(
+            !global_root.join(workspace_only).exists(),
+            "managed registry bootstrap must not create global workspace-only path {workspace_only}"
+        );
+    }
+}
+
+#[test]
+fn unmanaged_registry_locator_is_not_an_operator_root_override() {
+    let home = tempdir().expect("home tempdir");
+    let repo = tempdir().expect("repo tempdir");
+    let workspace_root = repo.path().join(".orbit");
+    seed_initialized_workspace_root(&workspace_root);
+    let locator = tempdir().expect("untrusted locator");
+    let home_var = home.path().to_string_lossy().into_owned();
+    let locator_var = locator.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([
+        ("HOME", Some(home_var.as_str())),
+        ("ORBIT_ROOT", None),
+        ("ORBIT_REGISTRY_ROOT", Some(locator_var.as_str())),
+        ("ORBIT_MANAGED_RUN_CONTEXT", None),
+        ("ORBIT_RUN_ID", None),
+    ]);
+
+    let resolved = OrbitRuntime::resolve_roots_for_cwd(repo.path(), None).expect("resolve roots");
+
+    assert_eq!(resolved.global_root, home.path().join(".orbit"));
+    assert_eq!(resolved.shared_root, workspace_root);
+}
+
 fn seed_initialized_workspace_root(path: &Path) {
     std::fs::create_dir_all(path.join("resources")).expect("create resources dir");
     std::fs::create_dir_all(path.join("tasks")).expect("create tasks dir");

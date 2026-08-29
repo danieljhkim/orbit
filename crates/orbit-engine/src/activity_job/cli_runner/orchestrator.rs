@@ -235,23 +235,26 @@ pub fn run_cli_backend(
     dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
-    // Spawned CLI agents resolve the Orbit registry from $HOME unless
-    // ORBIT_ROOT is set. A dispatching run already knows its registry; inject
-    // it so a provider whose HOME is a tool-specific directory (e.g. ~/.codex)
-    // can still reach `orbit tool run`. [ORB-10909]
+    // Spawned CLI agents resolve the Orbit registry from $HOME unless a
+    // managed registry locator is set. A dispatching run already knows its
+    // registry; inject it so a provider whose HOME is a tool-specific
+    // directory (e.g. ~/.codex) can still reach `orbit tool run`. [ORB-10909]
     //
     // The injected value is the authoritative shared registry root, never the
     // dispatching checkout's workspace `.orbit`. A managed run's workspace
     // state root is mounted read-only inside the sandbox and does not own the
-    // task store, so pinning a child there breaks the documented CLI fallback
-    // before any task work can start. Workspace routing is unchanged: a
-    // mutation still needs its own workspace selector and fails closed
-    // without a resolvable one. [ORB-10980]
-    if let Some(registry_root) = host.orbit_registry_root()
-        && !dispatch_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
-    {
-        dispatch_env.push(("ORBIT_ROOT".to_string(), registry_root));
-    }
+    // task store. `ORBIT_ROOT` cannot carry this contract because it is the
+    // operator's explicit data-root override and deliberately pins global,
+    // shared, and local roots together. The managed-only locator changes only
+    // the global registry; cwd/registry routing continues to own workspace
+    // selection and fails closed when it cannot resolve one. [ORB-10980]
+    // [ORB-11066]
+    let registry_locator_injected = if let Some(registry_root) = host.orbit_registry_root() {
+        dispatch_env.push(("ORBIT_REGISTRY_ROOT".to_string(), registry_root));
+        true
+    } else {
+        false
+    };
     // The child's whole environment is composed here and applied to a cleared
     // one by every launcher, so the `[execution.env]` allowlist governs what an
     // untrusted provider subprocess can read. The provider's declared
@@ -260,6 +263,13 @@ pub fn run_cli_backend(
     // this run's identity and tool pinning override any same-named value the
     // allowlist forwarded from an outer process. [ORB-10917]
     let mut child_env = host.agent_subprocess_environment(invocation.required_env_vars);
+    if registry_locator_injected {
+        // A host process may itself have been launched with an operator
+        // `ORBIT_ROOT`. Do not reinterpret that pinned-data-root input as the
+        // managed child's workspace root; the authoritative registry locator
+        // above supersedes it for this execution envelope. [ORB-11066]
+        child_env.retain(|(key, _)| key != "ORBIT_ROOT");
+    }
     child_env.extend(dispatch_env);
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by

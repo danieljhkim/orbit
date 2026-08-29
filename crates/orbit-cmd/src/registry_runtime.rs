@@ -254,12 +254,13 @@ impl RegisteredRuntimeFactory {
 }
 
 /// The host data directory a registry lookup reads: the `--root` override when
-/// one was passed, and `~/.orbit` otherwise. Never derived from cwd, so a
-/// registry-first command works from any directory.
+/// one was passed, the trusted managed registry locator for a managed child,
+/// and `~/.orbit` otherwise. Never derived from cwd, so a registry-first
+/// command works from any directory.
 pub(crate) fn global_root_for(root_override: Option<&Path>) -> Result<PathBuf, OrbitError> {
     match root_override {
         Some(root) => Ok(root.to_path_buf()),
-        None => workspace_registry::global_orbit_dir(),
+        None => orbit_core::runtime::resolve_global_root(),
     }
 }
 

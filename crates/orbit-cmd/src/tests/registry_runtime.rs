@@ -543,13 +543,11 @@ fn task_ids(value: &Value) -> Vec<String> {
         .collect()
 }
 
-/// [ORB-10980] A managed run executes its CLI agent in a linked worktree that
-/// is not a registered checkout and whose worktree-local `.orbit` is mounted
-/// read-only. The injected `ORBIT_ROOT` therefore has to be the authoritative
-/// registry root: that is what lets `orbit tool run orbit.task.show` find the
-/// injected task's owning checkout, and what a workspace-scoped mutation
-/// rebinds through. These tests pin that contract and the fail-closed
-/// behaviours around it.
+/// A managed run executes its CLI agent in a linked worktree that is not a
+/// registered checkout and whose worktree-local `.orbit` is mounted read-only.
+/// The managed registry locator must keep the authoritative global registry
+/// distinct from both workspace roots while registered shared-root routing
+/// still finds the injected task. [ORB-10980] [ORB-11066]
 struct ManagedWorktreeFixture {
     _root: tempfile::TempDir,
     registry_root: PathBuf,
@@ -559,8 +557,8 @@ struct ManagedWorktreeFixture {
 }
 
 impl ManagedWorktreeFixture {
-    /// Roots as resolved when `ORBIT_ROOT` pins the registry: an explicit root
-    /// collapses global/shared/local onto the same directory.
+    /// Explicit operator root semantics remain pinned and distinct from the
+    /// managed registry-locator contract.
     fn pinned_registry_roots(&self) -> OrbitRuntimeRoots {
         OrbitRuntimeRoots {
             global_root: self.registry_root.clone(),
@@ -654,6 +652,16 @@ fn managed_worktree_fixture() -> ManagedWorktreeFixture {
     let worktree_root = checkout
         .repo_root
         .join(".orbit/state/worktrees/jrun-managed-fixture");
+    let worktree_git_dir = checkout
+        .repo_root
+        .join(".git/worktrees/jrun-managed-fixture");
+    std::fs::create_dir_all(&worktree_root).expect("worktree root");
+    std::fs::create_dir_all(&worktree_git_dir).expect("worktree git dir");
+    std::fs::write(
+        worktree_root.join(".git"),
+        format!("gitdir: {}\n", worktree_git_dir.display()),
+    )
+    .expect("worktree gitfile");
     let worktree_state = worktree_root.join(".orbit");
     std::fs::create_dir_all(&worktree_state).expect("worktree state root");
     set_readonly(&worktree_state, true);
@@ -712,7 +720,7 @@ fn managed_registry_root_serves_task_show_and_workspace_scoped_update() {
 }
 
 #[test]
-fn managed_worktree_cwd_without_a_selector_fails_closed_under_a_pinned_registry_root() {
+fn explicit_operator_root_still_pins_data_root_and_invalid_selector_fails_closed() {
     let fixture = managed_worktree_fixture();
 
     assert!(
@@ -733,6 +741,75 @@ fn managed_worktree_cwd_without_a_selector_fails_closed_under_a_pinned_registry_
         Err(error) => error,
     };
     unsupported_workspace_message(unknown, "no-such-workspace");
+}
+
+#[test]
+fn managed_registry_locator_routes_linked_worktree_to_authoritative_store() {
+    let fixture = managed_worktree_fixture();
+    let provider_home = fixture._root.path().join("provider-home");
+    std::fs::create_dir_all(&provider_home).expect("provider home");
+    let home_var = provider_home.to_string_lossy().into_owned();
+    let registry_var = fixture.registry_root.to_string_lossy().into_owned();
+    let _env = orbit_common::test_env::scoped([
+        ("HOME", Some(home_var.as_str())),
+        ("ORBIT_ROOT", None),
+        ("ORBIT_REGISTRY_ROOT", Some(registry_var.as_str())),
+        ("ORBIT_MANAGED_RUN_CONTEXT", Some("1")),
+        ("ORBIT_RUN_ID", Some("jrun-managed-fixture")),
+    ]);
+
+    let roots = RegisteredRuntimeFactory::resolve_roots_for_cwd(&fixture.worktree_root, None)
+        .expect("resolve production-shaped managed roots");
+    assert_eq!(roots, fixture.unpinned_roots());
+    let runtime = RegisteredRuntimeFactory::open_resolved_roots(roots)
+        .expect("open registered linked-worktree runtime");
+
+    let shown = run_tool(
+        &runtime,
+        "orbit.task.show",
+        json!({ "id": fixture.task_id }),
+    )
+    .expect("managed runtime must reach the authoritative task store");
+    assert_eq!(shown["id"], fixture.task_id);
+    assert_eq!(runtime.shared_root(), fixture.repo_root.join(".orbit"));
+    assert_eq!(runtime.local_root(), fixture.worktree_root.join(".orbit"));
+    assert!(
+        !fixture.worktree_root.join(".orbit/tasks").exists(),
+        "managed routing must not create a worktree-local shadow task store"
+    );
+
+    let explicitly_selected =
+        RegisteredRuntimeFactory::initialize_with_overrides(None, Some("managed"))
+            .expect("managed registry locator must serve explicit workspace selectors");
+    let selected_task = run_tool(
+        &explicitly_selected,
+        "orbit.task.show",
+        json!({ "id": fixture.task_id }),
+    )
+    .expect("selected managed workspace must use authoritative task store");
+    assert_eq!(selected_task["id"], fixture.task_id);
+
+    let unknown = match RegisteredRuntimeFactory::initialize_with_overrides(
+        None,
+        Some("no-such-managed-workspace"),
+    ) {
+        Ok(_) => panic!("unknown managed workspace selector must fail closed"),
+        Err(error) => error,
+    };
+    unsupported_workspace_message(unknown, "no-such-managed-workspace");
+
+    for workspace_only in [
+        "state/job-runs",
+        "state/diagnostics",
+        "state/scoreboard",
+        "state/worktrees",
+        "knowledge",
+    ] {
+        assert!(
+            !fixture.registry_root.join(workspace_only).exists(),
+            "managed registry discovery must not create global workspace-only path {workspace_only}"
+        );
+    }
 }
 
 #[test]
