@@ -126,6 +126,7 @@ ci-fast:
 	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
 	./scripts/check-orphan-modules.sh
+	./scripts/check-crate-agent-guides.sh
 	./scripts/check-embedded-asset-portability.py
 	./scripts/sync-plugin-skills.sh --check
 	./scripts/test-validate-codex-plugin.sh

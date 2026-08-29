@@ -22,10 +22,10 @@ forces a directory.
 
 ### Reference shapes
 
-- [`hook/`](src/command/hook) — three subcommands, one `.rs` per body, shared
-  enum types in `render.rs`.
-- [`learning/`](src/command/learning) — eight subcommands, one `.rs` per body,
-  shared formatting in `output.rs`.
+- [`skill/`](src/command/skill) — five subcommands, one `.rs` per body, no
+  shared helper file needed.
+- [`audit/`](src/command/audit) — five subcommands, one `.rs` per body, shared
+  helpers in `support.rs`.
 - [`task/`](src/command/task) — large surface with `artifact` nested parent
   and a `tests/` subdir mirroring source files.
 - [`init/`](src/command/init) — no subcommands, but owns the host-facing init
