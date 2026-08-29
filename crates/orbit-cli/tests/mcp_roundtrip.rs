@@ -740,12 +740,64 @@ fn a_remote_session_without_a_caller_label_is_still_resolved_through_the_file() 
         &["--operator"],
         &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
     );
-    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+    for (name, arguments) in [
+        ("orbit_task_list", json!({})),
+        (
+            "orbit_task_add",
+            json!({
+                "title": "must not be created",
+                "description": "default deny must block ordinary MCP mutations",
+                "complexity": "low",
+                "model": "codex",
+            }),
+        ),
+        ("orbit_workflow_run_list", json!({})),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(
+            denied["code"], "capability_denied",
+            "an unlabelled remote caller falls to the file default, never to its own argv: {name}: {denied}"
+        );
+    }
+}
 
-    assert_eq!(
-        denied["code"], "capability_denied",
-        "an unlabelled remote caller falls to the file default, never to its own argv: {denied}"
+/// [ORB-11056] A workspace-narrowed row falls back to the file default for a
+/// call outside its allowed workspaces. With `default = "deny"`, both ordinary
+/// reads and mutations must therefore fail before reaching their handlers.
+#[test]
+fn a_remote_caller_outside_its_workspace_narrowing_cannot_use_ordinary_tools() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+default = "deny"
+
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent"]
+workspaces = ["ws_somewhere-else"]
+"#,
     );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    for (name, arguments) in [
+        ("orbit_task_list", json!({})),
+        (
+            "orbit_task_add",
+            json!({
+                "title": "must not be created",
+                "description": "workspace narrowing must block ordinary MCP mutations",
+                "complexity": "low",
+                "model": "codex",
+            }),
+        ),
+    ] {
+        let denied = client.call_tool_err(name, arguments);
+        assert_eq!(denied["code"], "capability_denied", "{name}: {denied}");
+    }
 }
 
 /// [ORB-11052] The file is a ceiling, not a grant: it can only lower a session
@@ -766,6 +818,18 @@ capabilities = ["agent", "operator"]
         &["--remote-caller-machine-id", "hm_caller"],
         &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
     );
+    let listed = client.call_tool_ok("orbit_task_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
+    let created = client.call_tool_ok(
+        "orbit_task_add",
+        json!({
+            "title": "remote agent task",
+            "description": "an agent grant retains ordinary MCP mutations",
+            "complexity": "low",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(created["title"], "remote agent task");
     let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
 
     assert_eq!(
@@ -792,6 +856,8 @@ capabilities = ["agent", "operator"]
         &["--operator", "--remote-caller-machine-id", "hm_caller"],
         &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
     );
+    let tasks = client.call_tool_ok("orbit_task_list", json!({}));
+    assert_eq!(tasks["items"], json!([]));
     let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
     assert_eq!(listed["items"], json!([]));
 
