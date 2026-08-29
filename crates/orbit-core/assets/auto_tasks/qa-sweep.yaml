@@ -12,28 +12,20 @@ template:
     feature paths as a user would; do not treat re-running the existing test
     suite as sufficient validation.
 
-    When those paths include `orbit init` or `orbit workspace init` and you
-    are inside the Cowork/agent-executor sandbox, `/` and `~/.orbit` are
-    mounted read-only. Do not init against the real home Orbit root — that
-    fails with EROFS. Put the Orbit root and any scratch git checkouts
-    under `/tmp` and use:
+    Follow this repository's documented setup and run instructions. When a
+    sandbox or other environment constraint makes the usual local state
+    unwritable, put scratch checkouts, caches, and other ephemeral state in a
+    writable temporary location rather than the machine's real home directory
+    or the product's live data root.
 
-        orbit --root /tmp/<scratch> init --non-interactive --host-name <name> --task-prefix <XXXX>
-        orbit --root /tmp/<scratch> workspace init
-
-    Root `init` hangs on stdin without `--non-interactive`. `workspace init`
-    does not need that flag and does not prompt non-interactively in
-    practice.
-
-    Before filing anything, search open Orbit tasks tagged `qa-sweep`. For each
-    real issue that is not already filed, create an Orbit task yourself through
-    the Orbit MCP tools or the equivalent `orbit tool run orbit.task.add`
-    command. Give it severity-appropriate priority, tag it `qa-sweep`, and put
-    the relevant commits, observed evidence, and exact reproduction steps in
-    its description. Skip duplicates.
+    Before reporting anything, search the workspace's configured task or issue surface
+    for open work covering the same problem. For each real issue that is not already
+    filed, create a durable record on that surface. Give it severity-appropriate
+    priority and put the relevant commits, observed evidence, and exact
+    reproduction steps in its description. Skip duplicates.
 
     A non-duplicate failing test that blocks the repository's
-    standard validation command must be filed as an Orbit task even when
+    standard validation command must be filed as a durable issue even when
     the failure is sandbox-specific, platform-specific, or otherwise
     environment-specific, including test-harness or portability defects.
     Do not leave such a breaking test in narrative-only output. Distinguish
@@ -42,12 +34,12 @@ template:
     defect). Include the failing command, the exact error, relevant
     environment evidence, and a scope assessment.
 
-    Your narrative output is advisory; the tasks you create are the durable
+    Your narrative output is advisory; the issues you file are the durable
     side-effect channel.
   acceptance_criteria:
   - Recent changes were exercised through their real user-facing paths.
-  - Real, non-duplicate issues were filed as Orbit tasks with evidence and reproduction steps.
-  - Non-duplicate failing tests that block the prescribed validation command were filed as Orbit tasks, with validation impact distinguished from production impact.
+  - Real, non-duplicate issues were filed on the workspace's configured task or issue surface with evidence and reproduction steps.
+  - Non-duplicate failing tests that block the prescribed validation command were filed as durable issues, with validation impact distinguished from production impact.
   task_type: chore
   tags:
   - qa-sweep
