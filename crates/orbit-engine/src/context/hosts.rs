@@ -210,13 +210,12 @@ pub trait RuntimeHost: Send + Sync {
         allowlisted_child_env(&[], required_env_vars)
     }
     /// The authoritative shared Orbit registry root to hand a spawned CLI
-    /// agent as `ORBIT_ROOT`.
+    /// agent as `ORBIT_REGISTRY_ROOT`.
     ///
     /// This is the registry that owns the task store, not the dispatching
-    /// checkout's workspace `.orbit`. A managed run executes in a linked
-    /// worktree whose workspace `.orbit` is mounted read-only, so pinning a
-    /// child there makes the documented `orbit tool run` fallback unable to
-    /// bootstrap, read, or update the injected task. [ORB-10980]
+    /// checkout's workspace `.orbit`. The locator selects only the global
+    /// registry; the child still resolves its workspace from its registered
+    /// linked-worktree cwd. [ORB-10980] [ORB-11066]
     fn orbit_registry_root(&self) -> Option<String> {
         None
     }

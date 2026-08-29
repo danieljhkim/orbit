@@ -3279,21 +3279,21 @@ fi
     );
 }
 
-/// [ORB-10909] CLI-runner dispatch must inject ORBIT_ROOT from the host so a
+/// [ORB-10909] CLI-runner dispatch must inject the registry locator from the host so a
 /// spawned agent whose HOME does not contain the Orbit registry can still
 /// resolve `orbit tool run` against the dispatching run's root.
 #[test]
-fn run_cli_backend_injects_orbit_root_from_host() {
+fn run_cli_backend_injects_managed_registry_root_from_host() {
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("grok");
     write_executable(
         &script,
         r#"#!/bin/sh
 cat > /dev/null
-if [ "$ORBIT_ROOT" = "/resolved/orbit/root" ]; then
+if [ "$ORBIT_REGISTRY_ROOT" = "/resolved/orbit/root" ] && [ -z "$ORBIT_ROOT" ]; then
   printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
 else
-  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"orbit_root_missing","message":"ORBIT_ROOT was not injected","details":null}}'
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"registry_root_missing","message":"managed registry routing was not isolated","details":null}}'
   exit 1
 fi
 "#,
@@ -3334,9 +3334,10 @@ fi
 
 /// [ORB-10980] A managed run executes in a linked worktree whose workspace and
 /// worktree-local `.orbit` state roots are mounted read-only. The child must be
-/// pinned to the authoritative registry root the host reports, and the existing
+/// routed to the authoritative registry root the host reports without turning
+/// that locator into an explicit workspace/data-root pin. The existing
 /// binary/PATH pinning plus managed provenance bindings must survive alongside
-/// it — those are what let the documented `orbit tool run` fallback work at all.
+/// it — those are what let the documented `orbit tool run` fallback work.
 #[test]
 fn run_cli_backend_injects_registry_root_not_worktree_state_root() {
     let temp = tempdir().expect("tempdir");
@@ -3369,9 +3370,10 @@ fail() {{
   printf '%s\n' "{{\"schemaVersion\":1,\"status\":\"failed\",\"error\":{{\"code\":\"$1\",\"message\":\"$1\",\"details\":null}}}}"
   exit 1
 }}
-[ "$ORBIT_ROOT" = "{registry}" ] || fail orbit_root_not_registry
-[ "$ORBIT_ROOT" = "{workspace_state}" ] && fail orbit_root_is_workspace_state_root
-[ "$ORBIT_ROOT" = "{worktree_state}" ] && fail orbit_root_is_worktree_state_root
+[ "$ORBIT_REGISTRY_ROOT" = "{registry}" ] || fail registry_root_not_authoritative
+[ -z "$ORBIT_ROOT" ] || fail operator_root_leaked_into_managed_child
+[ "$ORBIT_REGISTRY_ROOT" = "{workspace_state}" ] && fail registry_root_is_workspace_state_root
+[ "$ORBIT_REGISTRY_ROOT" = "{worktree_state}" ] && fail registry_root_is_worktree_state_root
 [ -n "$ORBIT_BIN" ] || fail orbit_bin_missing
 [ -n "$PATH" ] || fail path_missing
 [ "$ORBIT_RUN_ID" = "job-grok-registry-root" ] || fail run_id_missing
@@ -3409,6 +3411,8 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
     spec.model = Some("grok-build".to_string());
     spec.tools = vec!["orbit.task.show".to_string(), "proc.spawn".to_string()];
     spec.proc_allowed_programs = Some(vec!["git".to_string(), "rg".to_string()]);
+    let ambient_root = registry_root.to_string_lossy().into_owned();
+    let _ambient = orbit_common::test_env::scoped([("ORBIT_ROOT", Some(ambient_root.as_str()))]);
 
     let outcome = run_cli_backend(
         &host,
