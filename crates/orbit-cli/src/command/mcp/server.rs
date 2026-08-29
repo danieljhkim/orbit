@@ -35,29 +35,45 @@ pub(super) fn serve_mcp_stdio(
     block_on_server(orbit_mcp::serve_stdio_with_context(host, session_context))
 }
 
-/// Serve the federated mux: one stdio surface over the operator's configured
-/// destinations.
+/// Serve the federated mux: the accepting machine plus operator-configured
+/// SSH remotes, as one stdio surface.
 ///
-/// The mux serves no workspace of its own, so it composes no `ServerMcpHost`
-/// and never opens this machine's workspace registry — the list is built only
-/// from what destinations answer. Membership comes from the machine-global
-/// destinations file, whose duplicate-`machine_id` check runs here, before any
-/// tool is advertised.
+/// Local workspaces are an implicit destination and are listed and routed
+/// through [`ServerMcpHost`] in-process. Remote membership comes from the
+/// machine-global destinations file, whose duplicate-`machine_id` check runs
+/// here, before any tool is advertised. A missing or empty file is a valid
+/// local-only configuration.
 pub(super) fn serve_mcp_federated_stdio() -> Result<(), OrbitError> {
     let global_root = resolve_global_root()?;
-    let destinations =
-        federated::load_destinations(&federated::destinations_path(&global_root))?.destinations;
-    // The mux is a client to each destination, and identifies itself with the
-    // same audit label the v1 proxy forwards.
+    let remotes = federated::load_destinations(&federated::destinations_path(&global_root))?;
+    // The mux is a client to each remote, and identifies itself with the same
+    // audit label the v1 proxy forwards. Local calls reuse this process's
+    // identity and authority rather than opening SSH.
     let identity = orbit_mcp::mcp_server_identity(&global_root, None, McpSessionAuthority::Agent)?;
+    let destinations = federated::federated_membership(
+        identity.process_machine_id.clone(),
+        identity.process_host_id.clone(),
+        remotes,
+    );
+    let local_host = Arc::new(ServerMcpHost::new(
+        global_root,
+        identity.process_machine_id.clone(),
+        identity.process_host_id.clone(),
+    ));
     // Two budgets, not one: the probe timeout bounds the round trips that
     // decide where a call goes, while the routed `tools/call` is stamped
     // separately at dispatch so a remote run that legitimately takes minutes
     // is not cut short by the time spent classifying its route [ORB-11023].
-    let probe = federated::SshDestinationProbe::new(
-        identity.process_machine_id.clone(),
-        federated::DEFAULT_PROBE_TIMEOUT,
-        federated::DEFAULT_ROUTED_DELIVERY_TIMEOUT,
+    let probe = federated::CompositeDestinationProbe::new(
+        Arc::new(federated::InProcessDestinationProbe::new(
+            local_host,
+            identity.session_context.clone(),
+        )),
+        Arc::new(federated::SshDestinationProbe::new(
+            identity.process_machine_id.clone(),
+            federated::DEFAULT_PROBE_TIMEOUT,
+            federated::DEFAULT_ROUTED_DELIVERY_TIMEOUT,
+        )),
     );
     let host: Arc<dyn McpHost> = Arc::new(federated::FederatedMcpHost::new(
         destinations,
@@ -68,7 +84,7 @@ pub(super) fn serve_mcp_federated_stdio() -> Result<(), OrbitError> {
         "serving the federated MCP mux"
     );
     // Session-unbound by construction: the federated list takes no workspace,
-    // and the mux has no local catalog to resolve one against.
+    // and a routed call is addressed only by the copied host-qualified selector.
     block_on_server(orbit_mcp::serve_stdio_with_context(
         host,
         identity.session_context,

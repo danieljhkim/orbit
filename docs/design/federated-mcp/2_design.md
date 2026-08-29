@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Design
 owner: grok
-last_updated: 2026-08-24
-last_validated: 2026-08-24
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 status: Draft
 feature: federated-mcp
 doc_role: design
@@ -11,7 +11,7 @@ summary: Federated MCP mux, selector, capability split, list schema, and fail-cl
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11023, ORB-11016, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11012, ORB-11011, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11044, ORB-11023, ORB-11016, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11012, ORB-11011, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Design
@@ -20,9 +20,9 @@ This document describes the federated MCP surface. Current v1 behavior — one c
 
 The prescriptive invariants live in [specs/federated-workspace-mcp.md](./specs/federated-workspace-mcp.md). This file explains how those pieces fit.
 
-## 1. Operator-configured destinations
+## 1. Operator-configured remotes, implicit local destination
 
-The shipped gateway is a mux in front of the SSH stdio destinations the operator configured in `~/.orbit/mcp-destinations.toml`. It does not:
+The shipped gateway is a mux in front of the accepting machine plus the SSH stdio remotes the operator configured in `~/.orbit/mcp-destinations.toml`. Local workspaces need no destination row; a missing or empty file is a useful local-only federated server. An explicit SSH row that names this machine's `machine_id` is collapsed to the single in-process local route. The mux does not:
 
 - grow host-registry into a fleet inventory;
 - auto-discover the owner checkout of a repository;
@@ -87,7 +87,7 @@ v1 puts `machine_id` on the envelope (`{"machine_id", "workspaces":[…]}`) and 
 Each descriptor keeps today's v1 workspace fields (`id`, `name`, `ship_mode`, `owner_machine_id`, `git_remote`, `base_branch`, `status`, timestamps) plus:
 
 - `selector` — structured, caller-uninterpreted host-qualified route token (`hm_<id>/ws_*`);
-- `host` — destination display identity (`host_id`, renameable, display only);
+- `host` — destination display identity (local `host_id`, or the remote's configured SSH target);
 - `machine_id` — destination stable identity;
 - host-reachability — SSH/MCP reachability of the configured destination;
 - workspace checkout-health — repo-root presence at that destination, the same narrow rule as host-registry;
@@ -153,5 +153,6 @@ v1 local stdio, direct SSH stdio, and `orbit mcp listen` stay as specified in mc
 - [ORB-11015] — fail-closed routing of host-qualified selectors
 - [ORB-11016] — registered the federated serve path and aligned current docs
 - [ORB-11017] — federated workspace param is the host-qualified selector
+- [ORB-11044] — implicit local membership: local workspaces listed and routed without SSH
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,14 +1,14 @@
 ---
 type: design
 summary: "Spec: Federated workspace MCP mux, selector, capabilities, list schema, and fail-closed routing"
-last_validated: 2026-08-24
+last_validated: 2026-08-29
 title: Spec — Federated workspace MCP
 owner: grok
 status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, spec]
 related_features: [federated-mcp, host-registry, mcp-bridge]
-related_artifacts: [ORB-11023, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11044, ORB-11023, ORB-11017, ORB-11015, ORB-11014, ORB-11013, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Federated workspace MCP
@@ -21,14 +21,17 @@ Without this contract, an implementation will key selectors on renameable `host_
 
 ## Mux, not fleet registry
 
-1. Destinations are operator-configured MCP or SSH remotes. The gateway does not register, retire, or enumerate a fleet of machines as host-registry records.
-2. The gateway does not auto-discover the owner checkout of a repository and does not perform placement.
-3. The gateway must not reinterpret a selector against its own local catalog.
-4. A caller that chooses one host and speaks v1 MCP (local stdio, direct SSH stdio, or `orbit mcp listen`) never enters this mux.
+1. Remote destinations are operator-configured SSH remotes. The gateway does not register, retire, or enumerate a fleet of machines as host-registry records.
+2. The accepting machine is an implicit local destination, using its existing stable `machine_id` and workspace registry. That is this host's own membership, not fleet discovery.
+3. The gateway does not auto-discover the owner checkout of a repository and does not perform placement.
+4. The gateway must not reinterpret a selector against its own local catalog. A copied `hm_*/ws_*` selector is delivered to the destination encoded in the token: the local in-process host when that destination is this machine, otherwise the configured SSH remote.
+5. A caller that chooses one host and speaks v1 MCP (local stdio, direct SSH stdio, or `orbit mcp listen`) never enters this mux.
 
 ## Destination membership file
 
-Federated destination membership is declared only in the machine-global operator file `~/.orbit/mcp-destinations.toml`. It is not part of workspace `config.toml`, `workspaces.json`, or host-registry. The v1 file shape is an array of SSH destinations:
+Remote federated membership is declared only in the machine-global operator file `~/.orbit/mcp-destinations.toml`. It is not part of workspace `config.toml`, `workspaces.json`, or host-registry. Local workspaces require no destination row: federated serve always includes the accepting machine. A missing file or an empty `destinations` list is a valid local-only configuration.
+
+The v1 file shape is an array of additional SSH remotes:
 
 ```toml
 [[destinations]]
@@ -40,7 +43,9 @@ ssh = "operator@orbit-build"
 machine_id = "hm_beta"
 ```
 
-Each row has exactly two required keys: `ssh`, an SSH alias or `user@host` transport target, and `machine_id`, the destination's stable `hm_…` identity. TCP/MCP destination rows are not a v1 file variant. A duplicate `machine_id` makes the entire file invalid with `ambiguous_destination` during config load, before the gateway advertises tools or accepts any `tools/call`.
+Each configured row has exactly two required keys: `ssh`, an SSH alias or `user@host` transport target, and `machine_id`, the destination's stable `hm_…` identity. A machine-id-only row is invalid and fails closed at config load with an actionable `invalid_input` (missing `ssh`). TCP/MCP destination rows are not a v1 file variant. A duplicate `machine_id` makes the entire file invalid with `ambiguous_destination` during config load, before the gateway advertises tools or accepts any `tools/call`.
+
+If a valid configured row already names the accepting machine's `machine_id`, the mux exposes exactly one route for that machine — the implicit local in-process destination — rather than duplicating selectors or opening loopback SSH.
 
 ## Selector identity
 
@@ -106,13 +111,15 @@ The would-be signal is matching `git_remote` across destinations with differing 
 Federated `orbit_workspace_list` is a **new session-unbound response shape**, not a compatible extension of v1 `orbit.workspace.list`.
 
 Implemented in [ORB-11014] as `orbit mcp serve --mode federated`
-(`crates/orbit-mcp/src/federated/`). Membership is loaded once at startup from
-the destinations file; every list call then probes each destination live over
-the v1 remote argv and caches nothing. The response envelope is
-`{"workspaces": [...]}` — no envelope `machine_id`. After [ORB-11015] the mux
-advertises the canonical 23-tool surface: this list stays session-unbound and
-answered by the mux, and every workspace-scoped tool is delivered to the
-destination encoded in the copied selector.
+(`crates/orbit-mcp/src/federated/`), with implicit local membership in
+[ORB-11044]. Remote membership is loaded once at startup from the destinations
+file; the accepting machine is always prepended. Every list call then probes
+each destination live — local in-process, remotes over the v1 SSH argv — and
+caches nothing. The response envelope is `{"workspaces": [...]}` — no envelope
+`machine_id`. After [ORB-11015] the mux advertises the canonical 23-tool
+surface: this list stays session-unbound and answered by the mux, and every
+workspace-scoped tool is delivered to the destination encoded in the copied
+selector.
 
 v1 (`crates/orbit-mcp/src/remote/discovery.rs`) returns `{"machine_id": "hm_…", "workspaces": […]}` with `machine_id` on the **envelope**, and filters to `Active` workspaces that are locally checked out on the accepting machine.
 
@@ -130,7 +137,7 @@ Federated list does **not** inherit that envelope or that filter:
    | `checkout_health` | Repo-root presence at that destination: `active`, `invalid`, or `unknown` if the host cannot be probed |
    | `capabilities` | Classes the destination currently **advertises** for that workspace (a hint; see Capabilities vs checkout roles) |
 
-   `host` is the operator's configured `ssh` target: the v1 discovery envelope carries no `host_id`, so that alias is the only display identity the mux can honestly attribute to a destination.
+   `host` is the accepting machine's `host_id` for the implicit local destination. For configured remotes it is the operator's `ssh` target: the v1 discovery envelope carries no `host_id`, so that alias is the only display identity the mux can honestly attribute to a remote.
 
    The federated-only keys are exactly `selector`, `host`, `machine_id`, `reachability`, `checkout_health`, and `capabilities`. `capabilities` is an array whose values are `control_plane` and/or `execute`. These names are protocol keys; implementations must not substitute a combined `health` key or the prose labels used to describe them.
 
@@ -206,4 +213,4 @@ A disconnected or failed host therefore removes the affected route from useful s
 
 ## Agent Signature
 
-Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014]; fail-closed routing of host-qualified selectors implemented in [ORB-11015]; federated workspace-param advertisement implemented in [ORB-11017].
+Specified by grok in [ORB-11009] (PR #1139), with contract holes closed in [ORB-11010], citing prior policy [ORB-11008]. Destination config, selector, and error identities implemented in [ORB-11013]; the federated list implemented by claude in [ORB-11014]; fail-closed routing of host-qualified selectors implemented in [ORB-11015]; federated workspace-param advertisement implemented in [ORB-11017]; implicit local membership implemented in [ORB-11044].

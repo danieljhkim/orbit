@@ -19,10 +19,11 @@ pub(super) const OWNER_MACHINE: &str = "hm_owner";
 pub(super) const REPLICA_MACHINE: &str = "hm_replica";
 
 pub(super) fn destination(ssh: &str, machine_id: &str) -> Destination {
-    Destination {
-        ssh: ssh.to_string(),
-        machine_id: machine_id.to_string(),
-    }
+    Destination::ssh(ssh, machine_id)
+}
+
+pub(super) fn local_destination(machine_id: &str, host_id: &str) -> Destination {
+    Destination::local(machine_id, host_id)
 }
 
 pub(super) fn workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
