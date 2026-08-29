@@ -204,7 +204,13 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
 
     assert_eq!(definition.name, "qa-sweep");
     assert!(!definition.enabled);
-    assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "50 * * * *".to_string()
+        },
+        "qa-sweep must keep its documented hourly schedule"
+    );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
     // [ORB-10877] Same portable system-lane rule as friction-curation above.
     assert_eq!(definition.template.crew.as_deref(), Some("system"));
@@ -215,6 +221,14 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     assert_eq!(
         definition.template.status,
         orbit_types::task::TaskStatus::Backlog
+    );
+    assert_eq!(
+        definition.template.task_type,
+        orbit_types::task::TaskType::Chore
+    );
+    assert_eq!(
+        definition.template.priority,
+        orbit_types::task::TaskPriority::Medium
     );
     assert!(definition.template.tags.iter().any(|tag| tag == "qa-sweep"));
     assert!(
@@ -229,10 +243,13 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     for required in [
         "validate them hands-on",
         "exercise the affected",
+        "documented setup",
+        "writable temporary",
+        "configured task or issue surface",
         "skip duplicates",
         "failing test",
         "standard validation command",
-        "must be filed as an orbit task",
+        "must be filed as a durable issue",
         "environment-specific",
         "test-harness",
         "portability",
@@ -249,6 +266,36 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
             "template should retain '{required}'"
         );
     }
+    let yaml_lower = yaml.to_lowercase();
+    for orbit_specific in [
+        "orbit init",
+        "workspace init",
+        "--root",
+        "~/.orbit",
+        "orbit mcp",
+        "orbit tool run",
+        "filed as an orbit task",
+        "filed as orbit tasks",
+        "tag it `qa-sweep`",
+    ] {
+        assert!(
+            !yaml_lower.contains(orbit_specific),
+            "qa-sweep instructions must stay product-agnostic; found '{orbit_specific}'"
+        );
+    }
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("configured task or issue surface")
+                    && criterion.contains("evidence")
+                    && criterion.contains("reproduction")
+            }),
+        "qa-sweep acceptance criteria must require durable reporting on the workspace issue surface"
+    );
     assert!(
         definition
             .template
@@ -260,6 +307,7 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
                     && criterion.contains("validation command")
                     && criterion.contains("validation impact")
                     && criterion.contains("production impact")
+                    && !criterion.contains("orbit task")
             }),
         "qa-sweep acceptance criteria must require filing breaking tests"
     );
