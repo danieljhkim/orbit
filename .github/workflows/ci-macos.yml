@@ -24,6 +24,10 @@ on:
       - "crates/orbit-policy/**"
       - "crates/orbit-common/src/types/policy_def.rs"
       - "crates/orbit-common/src/utility/glob.rs"
+      # [ORB-11067] Managed-child logging must use the registry root authorized
+      # by the macOS sandbox rather than the provider-specific HOME.
+      - "crates/orbit-common/src/observability/logging.rs"
+      - "crates/orbit-common/src/observability/tests/logging.rs"
       # [ORB-10682] Darwin owner/cancellation liveness uses native libproc
       # state so unreaped zombies do not look like surviving work.
       - "crates/orbit-common/src/utility/process_identity.rs"
