@@ -2,7 +2,7 @@
 type: design
 summary: "Agent Families — Glossary"
 tags: ["agent-families"]
-last_validated: 2026-08-01
+last_validated: 2026-08-29
 ---
 
 # Agent Families — Glossary
