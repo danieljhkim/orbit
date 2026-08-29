@@ -43,9 +43,10 @@ fn the_rendered_line_forces_this_machines_own_argv() {
 
     assert!(
         line.starts_with(
-            "command=\"/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha\","
+            "command=\"/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha \
+             --operator\","
         ),
-        "the destination composes the whole argv, absolute path included: {line}"
+        "the destination composes the whole operator request, absolute path included: {line}"
     );
     assert!(line.contains(FORCED_COMMAND_RESTRICTIONS), "{line}");
     assert!(line.contains("no-pty"), "{line}");
@@ -56,10 +57,7 @@ fn the_rendered_line_forces_this_machines_own_argv() {
         ),
         "{line}"
     );
-    assert!(
-        !line.contains("--operator"),
-        "the line must not hand out operator authority; the callers file decides that: {line}"
-    );
+    assert!(line.contains("--operator"), "{line}");
 }
 
 #[test]
