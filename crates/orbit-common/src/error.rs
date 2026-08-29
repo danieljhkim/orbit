@@ -114,6 +114,13 @@ pub enum OrbitError {
     /// load, mirroring [`Self::AmbiguousDestination`] [ORB-11052].
     #[error("ambiguous MCP caller: {0}")]
     AmbiguousCaller(String),
+    /// The authenticated key a destination observed does not match the one its
+    /// callers file pins that caller to, so the session is refused at
+    /// establishment rather than served at a lower ceiling [ORB-11053]. A
+    /// silent downgrade would make a key mismatch indistinguishable from a
+    /// caller that simply holds a smaller grant.
+    #[error("unauthorized MCP caller: {0}")]
+    UnauthorizedCaller(String),
     #[error("federated destination unreachable: {0}")]
     UnreachableDestination(String),
     #[error("stale federated route: {0}")]

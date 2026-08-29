@@ -5,7 +5,7 @@ mod error;
 pub use error::ToolError;
 
 pub use definition::{
-    ExecutionResult, McpCapability, McpToolDefinition, McpToolDefinitionError, McpToolScope,
-    McpTransport, RemoteCallerGrant, StoredTool, ToolParam, ToolSchema, ToolSessionContext,
-    mcp_advertised_tool_name, validate_mcp_tool_definitions,
+    CallerIdentityProof, ExecutionResult, McpCapability, McpToolDefinition, McpToolDefinitionError,
+    McpToolScope, McpTransport, RemoteCallerGrant, StoredTool, ToolParam, ToolSchema,
+    ToolSessionContext, mcp_advertised_tool_name, validate_mcp_tool_definitions,
 };

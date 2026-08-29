@@ -2,18 +2,22 @@
 //!
 //! The file is an operator artifact, so these subcommands are deliberately
 //! read-mostly: `list` and `check` answer "what would this destination serve",
-//! and `init` transcribes machine IDs the operator already has. Granting
-//! `operator` stays a hand edit [ORB-11052].
+//! `init` transcribes machine IDs the operator already has, and `authorize`
+//! renders a line for a file it does not own. Granting `operator` stays a hand
+//! edit [ORB-11052], and installing an `authorized_keys` line stays an
+//! operator action [ORB-11053].
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use orbit_core::OrbitError;
 use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::{
-    DefaultGrant, McpSessionAuthority, SeedCaller, SessionCapabilityPolicy, federated,
+    DefaultGrant, McpSessionAuthority, RemoteCallerIdentity, SeedCaller, SessionCapabilityPolicy,
+    federated,
 };
+use orbit_types::identity::validate_machine_id;
 use orbit_types::tool::McpCapability;
 
 use crate::command::{CommandOut, CommandOutput};
@@ -43,6 +47,14 @@ pub enum CallersSubcommand {
     /// written: which callers may dispatch work on this machine is a decision
     /// to make deliberately, one row at a time.
     Init(CallersInitArgs),
+    /// Print the authorized_keys line that binds one caller to one SSH key
+    ///
+    /// Under that line sshd composes this machine's argv itself, so the caller
+    /// identity stops being a label the caller chose and becomes something it
+    /// had to hold a key to select. The line is printed, never installed:
+    /// `~/.ssh/authorized_keys` governs access to the whole machine, which is
+    /// well beyond what Orbit should be editing.
+    Authorize(CallersAuthorizeArgs),
 }
 
 #[derive(Args)]
@@ -61,6 +73,18 @@ pub struct CallersCheckArgs {
 #[command(about = "Seed a callers file granting agent to known machines")]
 pub struct CallersInitArgs;
 
+#[derive(Args)]
+#[command(about = "Print the authorized_keys line binding a caller to an SSH key")]
+pub struct CallersAuthorizeArgs {
+    /// The calling machine's stable identity, which the line will bind to the
+    /// key. It is what `orbit host show` prints on the caller.
+    #[arg(long, value_name = "MACHINE_ID")]
+    pub machine_id: String,
+    /// Path to the caller's *public* key, such as `~/.ssh/id_ed25519.pub`.
+    #[arg(long, value_name = "PATH")]
+    pub key: PathBuf,
+}
+
 impl CallersArgs {
     pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
         if root_override.is_some() {
@@ -76,6 +100,7 @@ impl CallersArgs {
             CallersSubcommand::List(_) => list(&path),
             CallersSubcommand::Check(args) => check(&path, &args.machine_id),
             CallersSubcommand::Init(_) => init(&global_root, &path),
+            CallersSubcommand::Authorize(args) => authorize(&path, &args),
         }
     }
 }
@@ -110,9 +135,7 @@ fn list(path: &Path) -> CommandOut {
             println!("    workspaces: {}", workspaces.join(", "));
         }
         if let Some(fingerprint) = &row.ssh_key_fingerprint {
-            // Parsed but not yet verified: nothing observes the authenticating
-            // key until the forced-command path exists [ORB-11053].
-            println!("    ssh_key_fingerprint: {fingerprint} (recorded, not yet verified)");
+            println!("    ssh_key_fingerprint: {fingerprint}");
         }
     }
     Ok(CommandOutput::Silent)
@@ -120,7 +143,11 @@ fn list(path: &Path) -> CommandOut {
 
 fn check(path: &Path, machine_id: &str) -> CommandOut {
     let file = orbit_mcp::load_callers(path)?;
-    let grant = file.resolve(machine_id);
+    // A check answers what the *grant* would be, and the grant is the same
+    // under either tier — what the tier changes is whether the caller could
+    // have selected this row at all, which is reported separately below.
+    let identity = RemoteCallerIdentity::self_asserted(machine_id);
+    let grant = file.resolve(&identity);
     println!("callers file: {}", path.display());
     println!("caller: {machine_id}");
     println!(
@@ -132,6 +159,17 @@ fn check(path: &Path, machine_id: &str) -> CommandOut {
         }
     );
     println!("granted: [{}]", capability_list(&grant.granted));
+    match &grant.pinned_fingerprint {
+        Some(fingerprint) => println!(
+            "identity: key-bound to {fingerprint} where this machine can observe the \
+             authenticating key"
+        ),
+        None => println!(
+            "identity: self-asserted — this row is selected by a name, so any caller that \
+             reaches this machine can select it. `orbit mcp callers authorize --machine-id \
+             {machine_id} --key <key>.pub` prints the authorized_keys line that binds it to a key."
+        ),
+    }
     if let Some(workspaces) = &grant.workspaces {
         println!(
             "  on workspaces: {}",
@@ -150,7 +188,7 @@ fn check(path: &Path, machine_id: &str) -> CommandOut {
         ("orbit mcp serve", McpSessionAuthority::Agent),
         ("orbit mcp serve --operator", McpSessionAuthority::Operator),
     ] {
-        let policy = SessionCapabilityPolicy::from_grant(authority, file.resolve(machine_id));
+        let policy = SessionCapabilityPolicy::from_grant(authority, file.resolve(&identity));
         // A narrowing makes "what would this session hold" a per-workspace
         // question, so answering it with one set would be a half-truth.
         match &grant.workspaces {
@@ -193,6 +231,93 @@ fn init(global_root: &Path, path: &Path) -> CommandOut {
     println!(
         "Grant operator by editing the file; `orbit mcp callers init` never writes that \
          capability."
+    );
+    Ok(CommandOutput::Silent)
+}
+
+/// Render the `authorized_keys` line that pins `machine_id` to a key.
+///
+/// Everything an operator has to *do* goes to stderr and the artifact goes to
+/// stdout alone, so `>> ~/.ssh/authorized_keys` appends a working line and
+/// nothing else. Orbit will not perform that append itself: that file decides
+/// who may log into the machine at all, and a tool that manages tasks has no
+/// business rewriting it.
+fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
+    validate_machine_id(&args.machine_id).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "'{}' is not a machine identity: {error}",
+            args.machine_id
+        ))
+    })?;
+    let contents = std::fs::read_to_string(&args.key).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to read SSH public key '{}': {error}",
+            args.key.display()
+        ))
+    })?;
+    let key = orbit_mcp::parse_public_key(&contents)?;
+    let fingerprint = key.fingerprint()?;
+    // sshd runs a forced command without a login shell, so a bare `orbit`
+    // would depend on a PATH the line cannot count on.
+    let orbit_command = std::env::current_exe()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "orbit".to_string());
+
+    println!(
+        "{}",
+        key.authorized_keys_line(&orbit_command, &args.machine_id)
+    );
+
+    eprintln!(
+        "\nInstall the line above in ~/.ssh/authorized_keys on this machine — Orbit does not \
+         edit that file."
+    );
+    // The row guidance is written against what is actually in the file: a
+    // template that restated `capabilities` would invite an operator to paste
+    // a downgrade over a grant they had already made deliberately.
+    let file = orbit_mcp::load_callers(callers_path)?;
+    let callers_path = callers_path.display();
+    match file
+        .callers
+        .iter()
+        .find(|row| row.machine_id == args.machine_id)
+    {
+        None => {
+            eprintln!(
+                "\nThere is no row for '{machine_id}' yet, so this caller would fall to the \
+                 file default. Add one to {callers_path}:",
+                machine_id = args.machine_id
+            );
+            eprintln!("\n  [[callers]]");
+            eprintln!("  machine_id          = \"{}\"", args.machine_id);
+            eprintln!("  capabilities        = [\"agent\"]");
+            eprintln!("  ssh_key_fingerprint = \"{fingerprint}\"");
+        }
+        Some(row) if row.ssh_key_fingerprint.is_none() => {
+            eprintln!(
+                "\n'{machine_id}' already has a row granting [{granted}] in {callers_path}. Add \
+                 the fingerprint to it — that is what turns the grant from a name into a key:",
+                machine_id = args.machine_id,
+                granted = row.capabilities.join(", ")
+            );
+            eprintln!("\n  ssh_key_fingerprint = \"{fingerprint}\"");
+        }
+        Some(row) if row.ssh_key_fingerprint.as_deref() != Some(fingerprint.as_str()) => eprintln!(
+            "\nThe row for '{machine_id}' in {callers_path} pins a different key ({pinned}). Two \
+             keys cannot both be the pinned one — replace it with {fingerprint}, or authorize the \
+             key already pinned.",
+            machine_id = args.machine_id,
+            pinned = row.ssh_key_fingerprint.as_deref().unwrap_or("none")
+        ),
+        Some(_) => eprintln!(
+            "\nThe row for '{machine_id}' in {callers_path} already pins this key ({fingerprint}).",
+            machine_id = args.machine_id
+        ),
+    }
+    eprintln!(
+        "\nPinning is enforced where this machine can observe the authenticating key: set \
+         `ExposeAuthInfo yes` in sshd_config, or have an AuthorizedKeysCommand pass sshd's %f \
+         token as `--caller-key-fingerprint`."
     );
     Ok(CommandOutput::Silent)
 }

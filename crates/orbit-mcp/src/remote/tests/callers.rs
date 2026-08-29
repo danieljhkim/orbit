@@ -3,11 +3,14 @@ use std::collections::BTreeSet;
 use orbit_common::OrbitError;
 use orbit_types::tool::{McpCapability, ToolSessionContext};
 
+use orbit_types::tool::CallerIdentityProof;
+
 use super::super::callers::{
-    CallersFile, DefaultGrant, SeedCaller, SessionCapabilityPolicy, load_callers,
-    render_callers_seed, write_callers_seed,
+    CallersFile, DefaultGrant, RemoteCallerIdentity, SeedCaller, SessionCapabilityPolicy,
+    inspect_caller_authorization, load_callers, render_callers_seed, write_callers_seed,
 };
 use super::super::identity::McpSessionAuthority;
+use super::super::ssh_auth::{KeyObservation, ObservedKeys};
 
 fn agent() -> BTreeSet<McpCapability> {
     BTreeSet::from([McpCapability::Agent])
@@ -15,6 +18,24 @@ fn agent() -> BTreeSet<McpCapability> {
 
 fn operator() -> BTreeSet<McpCapability> {
     BTreeSet::from([McpCapability::Agent, McpCapability::Operator])
+}
+
+/// A caller that named itself — the Tier 1 identity every existing case here
+/// is about.
+fn caller(machine_id: &str) -> RemoteCallerIdentity {
+    RemoteCallerIdentity::self_asserted(machine_id)
+}
+
+/// The key `ssh-keygen` printed this fingerprint for; the pair is checked in
+/// the `ssh_auth` tests, so here it only has to be a consistent one.
+const PINNED: &str = "SHA256:5HTlLtSRdZg7lKPho8slfRr2Q1QTPuko05+KRX/8PQw";
+const OTHER_KEY: &str = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+fn observed(fingerprint: &str) -> Option<ObservedKeys> {
+    Some(ObservedKeys {
+        fingerprints: vec![fingerprint.to_string()],
+        observation: KeyObservation::AuthInfoFile,
+    })
 }
 
 fn write(contents: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -32,7 +53,7 @@ fn a_missing_file_is_a_valid_agent_only_configuration() {
 
     assert_eq!(file, CallersFile::default());
     assert_eq!(file.default, DefaultGrant::Agent);
-    assert_eq!(file.resolve("hm_alpha").granted, agent());
+    assert_eq!(file.resolve(&caller("hm_alpha")).granted, agent());
 }
 
 #[test]
@@ -111,8 +132,10 @@ capabilities = ["agent", "operator"]
     );
     let file = load_callers(&path).expect("callers");
 
-    let agent_request =
-        SessionCapabilityPolicy::from_grant(McpSessionAuthority::Agent, file.resolve("hm_alpha"));
+    let agent_request = SessionCapabilityPolicy::from_grant(
+        McpSessionAuthority::Agent,
+        file.resolve(&caller("hm_alpha")),
+    );
 
     assert_eq!(
         agent_request.effective_for(None),
@@ -134,7 +157,7 @@ capabilities = ["agent"]
 
     let policy = SessionCapabilityPolicy::from_grant(
         McpSessionAuthority::Operator,
-        file.resolve("hm_alpha"),
+        file.resolve(&caller("hm_alpha")),
     );
 
     assert_eq!(policy.effective_for(None), agent());
@@ -153,8 +176,10 @@ capabilities = ["agent", "operator"]
     );
     let file = load_callers(&path).expect("callers");
 
-    let policy =
-        SessionCapabilityPolicy::from_grant(McpSessionAuthority::Operator, file.resolve("hm_beta"));
+    let policy = SessionCapabilityPolicy::from_grant(
+        McpSessionAuthority::Operator,
+        file.resolve(&caller("hm_beta")),
+    );
 
     assert!(
         policy.effective_for(None).is_empty(),
@@ -173,8 +198,10 @@ workspaces = ["ws_orbit"]
 "#,
     );
     let file = load_callers(&path).expect("callers");
-    let policy =
-        SessionCapabilityPolicy::from_grant(McpSessionAuthority::Operator, file.resolve("hm_beta"));
+    let policy = SessionCapabilityPolicy::from_grant(
+        McpSessionAuthority::Operator,
+        file.resolve(&caller("hm_beta")),
+    );
 
     assert_eq!(policy.effective_for(Some("ws_orbit")), operator());
     assert_eq!(
@@ -197,8 +224,10 @@ workspaces = ["ws_orbit"]
 "#,
     );
     let file = load_callers(&path).expect("callers");
-    let policy =
-        SessionCapabilityPolicy::from_grant(McpSessionAuthority::Operator, file.resolve("hm_beta"));
+    let policy = SessionCapabilityPolicy::from_grant(
+        McpSessionAuthority::Operator,
+        file.resolve(&caller("hm_beta")),
+    );
 
     assert!(
         policy.effective_for(Some("ws_other")).is_empty(),
@@ -233,7 +262,7 @@ capabilities = ["agent"]
     let file = load_callers(&path).expect("callers");
     let policy = SessionCapabilityPolicy::from_grant(
         McpSessionAuthority::Operator,
-        file.resolve("hm_alpha"),
+        file.resolve(&caller("hm_alpha")),
     );
     let mut context = ToolSessionContext::default();
 
@@ -279,9 +308,180 @@ fn a_seeded_file_loads_and_grants_agent_only() {
     write_callers_seed(&path, &seeded).expect("seed writes");
     let file = load_callers(&path).expect("a seeded file must be valid");
 
-    assert_eq!(file.resolve("hm_alpha").granted, agent());
+    assert_eq!(file.resolve(&caller("hm_alpha")).granted, agent());
     assert!(
         write_callers_seed(&path, &seeded).is_err(),
         "re-seeding must not overwrite an operator's statement"
+    );
+}
+
+/// [ORB-11053] The pin is enforced where the key is observable, and a mismatch
+/// is a refusal rather than a downgrade: a caller presenting somebody else's
+/// key must not be quietly served at the file default, which would look
+/// exactly like a caller that legitimately holds a smaller grant.
+#[test]
+fn a_key_mismatch_refuses_the_session_instead_of_lowering_it() {
+    let (dir, _path) = write(&format!(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{PINNED}"
+"#
+    ));
+    let identity = RemoteCallerIdentity::key_bound("hm_alpha", observed(OTHER_KEY));
+
+    let error =
+        SessionCapabilityPolicy::resolve(dir.path(), McpSessionAuthority::Operator, &identity)
+            .expect_err("a key mismatch must refuse at session establishment");
+
+    assert!(
+        matches!(error, OrbitError::UnauthorizedCaller(ref message) if message.contains("hm_alpha")),
+        "expected an unauthorized-caller refusal naming the caller, got {error:?}"
+    );
+}
+
+/// [ORB-11053] The key that the row names is served, and the trail records
+/// that the identity was proved rather than claimed.
+#[test]
+fn a_matching_key_is_served_and_recorded_as_key_bound() {
+    let (dir, _path) = write(&format!(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{PINNED}"
+"#
+    ));
+    let identity = RemoteCallerIdentity::key_bound("hm_alpha", observed(PINNED));
+
+    let policy =
+        SessionCapabilityPolicy::resolve(dir.path(), McpSessionAuthority::Operator, &identity)
+            .expect("a matching key is served");
+    let mut context = ToolSessionContext::default();
+    policy.stamp(&mut context, None);
+
+    assert_eq!(policy.effective_for(None), operator());
+    let grant = context.remote_caller_grant.expect("a grant is recorded");
+    assert_eq!(grant.caller_machine_id, "hm_alpha");
+    assert_eq!(
+        grant.identity,
+        CallerIdentityProof::KeyBound,
+        "a Tier 1 and a Tier 2 destination produce identical grants; only this field \
+         distinguishes them in the trail"
+    );
+}
+
+/// [ORB-11053] Verification being unavailable is not a mismatch. `ExposeAuthInfo`
+/// is off in a stock sshd, and refusing every pinned caller there would make
+/// the field unusable for the destinations most likely to set it.
+#[test]
+fn an_unobservable_key_serves_the_session_rather_than_refusing_it() {
+    let (dir, _path) = write(&format!(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{PINNED}"
+"#
+    ));
+    let identity = RemoteCallerIdentity::key_bound("hm_alpha", None);
+
+    let policy =
+        SessionCapabilityPolicy::resolve(dir.path(), McpSessionAuthority::Operator, &identity)
+            .expect("an unobservable key is not evidence of a mismatch");
+
+    assert_eq!(policy.effective_for(None), operator());
+}
+
+/// [ORB-11053] A pin is enforced under either tier. The operator wrote the
+/// fingerprint to have it checked, and a Tier 1 destination that happens to
+/// expose auth info can check it just as well — what Tier 2 adds is that the
+/// identity itself stops being the caller's to choose.
+#[test]
+fn a_pin_is_enforced_even_when_the_identity_was_self_asserted() {
+    let (dir, _path) = write(&format!(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent"]
+ssh_key_fingerprint = "{PINNED}"
+"#
+    ));
+    let identity = caller("hm_alpha").observing(observed(OTHER_KEY));
+
+    assert!(
+        SessionCapabilityPolicy::resolve(dir.path(), McpSessionAuthority::Agent, &identity)
+            .is_err()
+    );
+}
+
+/// [ORB-11053] A fingerprint in the wrong format would never match, so it
+/// would present as a key mismatch on every session. Fail the file closed at
+/// load instead, where the message can name the row.
+#[test]
+fn a_fingerprint_that_is_not_sha256_fails_the_file_closed() {
+    let (_dir, path) = write(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent"]
+ssh_key_fingerprint = "MD5:ab:cd:ef"
+"#,
+    );
+
+    let error = load_callers(&path).expect_err("an MD5 fingerprint cannot pin a row");
+
+    assert!(
+        matches!(error, OrbitError::InvalidInput(ref message) if message.contains("hm_alpha")),
+        "expected an invalid-input refusal naming the row, got {error:?}"
+    );
+}
+
+/// [ORB-11053] What `orbit doctor` reads. The two gaps are separate: nothing
+/// declared on a machine that serves SSH, and the strongest grant the file can
+/// make resting on a name.
+#[test]
+fn the_doctor_sees_an_unpinned_operator_grant_and_an_undeclared_destination() {
+    let (dir, _path) = write(&format!(
+        r#"
+[[callers]]
+machine_id = "hm_alpha"
+capabilities = ["agent", "operator"]
+
+[[callers]]
+machine_id = "hm_beta"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{PINNED}"
+
+[[callers]]
+machine_id = "hm_gamma"
+capabilities = ["agent"]
+"#
+    ));
+    let authorized_keys = dir.path().join("authorized_keys");
+    std::fs::write(&authorized_keys, "# no keys, only a comment\n").expect("write");
+
+    let health = inspect_caller_authorization(dir.path(), &authorized_keys);
+
+    assert!(health.present);
+    assert_eq!(health.row_count, 3);
+    assert_eq!(
+        health.unpinned_operator_callers,
+        vec!["hm_alpha".to_string()],
+        "an agent-only row needs no key, and a pinned operator row already has one"
+    );
+    assert!(
+        !health.serves_ssh,
+        "a commented-out authorized_keys admits nobody, so there is no gap to report"
+    );
+
+    std::fs::write(&authorized_keys, "ssh-ed25519 AAAA nobody@nowhere\n").expect("write");
+    let serving = inspect_caller_authorization(&dir.path().join("elsewhere"), &authorized_keys);
+
+    assert!(serving.serves_ssh);
+    assert!(
+        !serving.present,
+        "a machine that accepts SSH with no callers file is the Tier 1 gap the doctor reports"
     );
 }

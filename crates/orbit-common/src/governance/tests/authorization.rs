@@ -270,6 +270,7 @@ fn remote_session(
             caller_machine_id: caller_machine_id.to_string(),
             granted_capabilities: granted,
             source: "~/.orbit/mcp-callers.toml".to_string(),
+            ..orbit_types::tool::RemoteCallerGrant::default()
         }),
         ..ToolSessionContext::default()
     }

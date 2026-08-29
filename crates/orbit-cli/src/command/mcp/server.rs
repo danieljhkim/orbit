@@ -19,6 +19,7 @@ use orbit_core::runtime::resolve_global_root;
 use orbit_mcp::federated;
 use orbit_mcp::{
     ListenerExposure, McpHost, McpListener, McpSessionAuthority, SessionCapabilityPolicy,
+    SshAcceptance,
 };
 use orbit_types::tool::{McpToolDefinition, McpToolScope, ToolSessionContext};
 use serde_json::Value;
@@ -32,17 +33,21 @@ const TASK_SHOW_TOOL: &str = "orbit.task.show";
 /// This is the only entry point whose authority is resolved against the
 /// destination's callers file: it is the one an SSH caller reaches, and
 /// therefore the one whose `--operator` is a request rather than a statement
-/// [ORB-11052].
+/// [ORB-11052]. `acceptance` is how this machine's own argv describes the
+/// session's arrival — a forced command it wrote itself, or nothing, in which
+/// case the destination falls back to observing its environment [ORB-11053].
 pub(super) fn serve_mcp_stdio(
     remote_caller_machine_id: Option<String>,
     authority: McpSessionAuthority,
     bound_workspace: Option<String>,
+    acceptance: SshAcceptance,
 ) -> Result<(), OrbitError> {
     let global_root = resolve_global_root()?;
     let policy = orbit_mcp::mcp_serve_session_policy(
         &global_root,
         remote_caller_machine_id.as_deref(),
         authority,
+        &acceptance,
     )?;
     let (host, session_context) = compose_server(
         global_root,

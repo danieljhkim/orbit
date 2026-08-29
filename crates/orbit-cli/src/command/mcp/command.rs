@@ -2,7 +2,7 @@ use std::path::Path;
 
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
-use orbit_mcp::{McpSessionAuthority, RemoteProxyArgs};
+use orbit_mcp::{McpSessionAuthority, RemoteProxyArgs, SshAcceptance};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
@@ -131,6 +131,42 @@ pub struct ServeArgs {
     /// `orbit mcp callers check`.
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
+    /// Treat this session as SSH-originated because sshd started it.
+    ///
+    /// Meaningful only inside a forced command in the *called* machine's own
+    /// `authorized_keys`, which is where this machine — not the caller —
+    /// composes the whole argv. `orbit mcp callers authorize` prints the line
+    /// to install. The caller's own command is then ignored entirely: it is
+    /// never parsed, merged, or used to decide what the session may do.
+    #[arg(long, conflicts_with = "mode")]
+    pub accept_ssh: bool,
+    /// The calling machine's identity, as this machine wrote it beside the
+    /// authenticating key.
+    ///
+    /// Honored only together with `--accept-ssh`, because only there is it
+    /// this machine's own statement rather than a string a caller could type.
+    /// It selects the `~/.orbit/mcp-callers.toml` row that caps the session,
+    /// and unlike a forwarded audit label it is backed by the key sshd checked.
+    #[arg(
+        long,
+        value_name = "MACHINE_ID",
+        requires = "accept_ssh",
+        conflicts_with = "mode"
+    )]
+    pub caller: Option<String>,
+    /// Fingerprint of the key that authenticated this session, for an
+    /// `AuthorizedKeysCommand` that expands sshd's `%f` into the forced command.
+    ///
+    /// Needed only where `ExposeAuthInfo` is off, which is the sshd default.
+    /// When the matched callers row pins a key, a mismatch refuses the session
+    /// instead of serving it at a lower ceiling.
+    #[arg(
+        long,
+        value_name = "FINGERPRINT",
+        requires = "accept_ssh",
+        conflicts_with = "mode"
+    )]
+    pub caller_key_fingerprint: Option<String>,
     /// Bind this server's sessions to a registered workspace: a workspace
     /// name, a logical workspace ID (`ws_*`), or an absolute registered
     /// checkout path.
@@ -187,6 +223,17 @@ impl ServeArgs {
                     McpSessionAuthority::Agent
                 },
                 self.workspace,
+                // `--caller` is unreachable without `--accept-ssh`, so the
+                // "honored only under a forced command" rule is carried by the
+                // type the server receives rather than re-checked downstream.
+                if self.accept_ssh {
+                    SshAcceptance::ForcedCommand {
+                        caller: self.caller,
+                        caller_key_fingerprint: self.caller_key_fingerprint,
+                    }
+                } else {
+                    SshAcceptance::Environment
+                },
             )?,
         }
         Ok(CommandOutput::Silent)

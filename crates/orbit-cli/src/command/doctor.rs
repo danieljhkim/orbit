@@ -77,7 +77,11 @@ impl Execute for DoctorCommand {
                 }
             }
         }
-        let results = runtime.doctor_workspace()?;
+        let mut results = runtime.doctor_workspace()?;
+        // Machine-global rows, composed here rather than in `doctor_workspace`:
+        // `orbit-cmd` does not know about MCP and must not learn, and this is
+        // the one crate that already assembles both [ORB-11053].
+        results.extend(caller_authorization_rows());
         let failures = results
             .iter()
             .filter(|row| row.status == WorkspaceDoctorStatus::Error)
@@ -124,6 +128,112 @@ impl Execute for DoctorCommand {
             .with_exit_code(exit_code)
             .into())
     }
+}
+
+/// Whether this machine's MCP caller authorization is in a state an operator
+/// would have chosen [ORB-11053].
+///
+/// Two rows, because they are two different gaps. The first is the Tier 1 one:
+/// a machine that serves SSH sessions and has declared nothing about who may
+/// call it. The second is the Tier 2 one: an `operator` grant — the strongest
+/// thing this file can say — resting on a name any caller could type.
+///
+/// Both are warnings, never errors. Tier 2 is opt-in, and a destination that
+/// deliberately runs Tier 1 alone is a documented configuration with a weaker
+/// guarantee, not a broken one. A file that does not *load* is different: it
+/// refuses every remote session, so it fails.
+fn caller_authorization_rows() -> Vec<WorkspaceDoctorResult> {
+    let Ok(home) = orbit_common::fs::path::home_dir() else {
+        return Vec::new();
+    };
+    let health = orbit_mcp::inspect_caller_authorization(
+        &home.join(".orbit"),
+        &home.join(".ssh/authorized_keys"),
+    );
+    let file = health.path.display().to_string();
+    let callers = if let Some(defect) = &health.defect {
+        WorkspaceDoctorResult {
+            check_name: "mcp-callers".to_string(),
+            status: WorkspaceDoctorStatus::Error,
+            // The defect already names the file, so the row does not repeat it.
+            message: format!("the MCP callers file does not load: {defect}"),
+            remediation: Some(
+                "Every remote-originated MCP session is refused until this file parses. Fix the \
+                 defect named above, then rerun `orbit mcp callers list`."
+                    .to_string(),
+            ),
+        }
+    } else if health.present {
+        WorkspaceDoctorResult {
+            check_name: "mcp-callers".to_string(),
+            status: WorkspaceDoctorStatus::Ok,
+            message: format!("{file} declares {} caller(s)", health.row_count),
+            remediation: None,
+        }
+    } else if health.serves_ssh {
+        WorkspaceDoctorResult {
+            check_name: "mcp-callers".to_string(),
+            status: WorkspaceDoctorStatus::Warning,
+            message: format!(
+                "this machine accepts SSH logins but has no {file}, so remote-originated MCP \
+                 sessions are served agent capabilities only"
+            ),
+            remediation: Some(
+                "Run `orbit mcp callers init` to declare who may call this machine, then raise a \
+                 row to operator by hand if one should dispatch work here."
+                    .to_string(),
+            ),
+        }
+    } else {
+        WorkspaceDoctorResult {
+            check_name: "mcp-callers".to_string(),
+            status: WorkspaceDoctorStatus::Skipped,
+            message: "this machine accepts no SSH logins, so it serves no remote MCP callers"
+                .to_string(),
+            remediation: None,
+        }
+    };
+
+    let keys = match (
+        health.defect.is_some(),
+        health.unpinned_operator_callers.as_slice(),
+    ) {
+        (true, _) => WorkspaceDoctorResult {
+            check_name: "mcp-caller-keys".to_string(),
+            status: WorkspaceDoctorStatus::Skipped,
+            message: "the callers file does not load, so its grants cannot be inspected"
+                .to_string(),
+            remediation: None,
+        },
+        (false, []) if health.present => WorkspaceDoctorResult {
+            check_name: "mcp-caller-keys".to_string(),
+            status: WorkspaceDoctorStatus::Ok,
+            message: "every operator grant is bound to an SSH key".to_string(),
+            remediation: None,
+        },
+        (false, []) => WorkspaceDoctorResult {
+            check_name: "mcp-caller-keys".to_string(),
+            status: WorkspaceDoctorStatus::Skipped,
+            message: "no callers file, so no operator grants to bind".to_string(),
+            remediation: None,
+        },
+        (false, unpinned) => WorkspaceDoctorResult {
+            check_name: "mcp-caller-keys".to_string(),
+            status: WorkspaceDoctorStatus::Warning,
+            message: format!(
+                "{file} grants operator to {} with no ssh_key_fingerprint, so the grant rests on \
+                 a machine_id the caller asserts rather than a key it holds",
+                unpinned.join(", ")
+            ),
+            remediation: Some(format!(
+                "Run `orbit mcp callers authorize --machine-id {} --key <caller-key>.pub`, \
+                 install the printed authorized_keys line, and add the fingerprint it reports to \
+                 the row.",
+                unpinned.first().map_or("<machine-id>", String::as_str)
+            )),
+        },
+    };
+    vec![callers, keys]
 }
 
 fn status_label(status: WorkspaceDoctorStatus) -> &'static str {

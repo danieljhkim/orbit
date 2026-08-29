@@ -171,6 +171,11 @@ impl OrbitRuntime {
                     "granted_capabilities": grant.granted_capabilities,
                     "effective_capabilities": caller.grants(),
                     "source": grant.source,
+                    // Which tier answered. Both tiers produce a grant that
+                    // looks identical once resolved, so a trail that recorded
+                    // only the grant would leave a reader to assume whether
+                    // the caller had to hold a key to select it [ORB-11053].
+                    "caller_identity": grant.identity,
                 })
                 .to_string()
             }),

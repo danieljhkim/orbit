@@ -114,9 +114,9 @@ impl ToolSessionContext {
 /// downgrade legible: `effective` alone cannot distinguish a caller that was
 /// capped from one that never asked for more.
 ///
-/// `caller_machine_id` is the self-asserted label the caller forwarded. It
-/// selects a row; it is not an authenticated principal and grants nothing on
-/// its own.
+/// `caller_machine_id` is only as strong as [`Self::identity`] says it is:
+/// under [`CallerIdentityProof::SelfAsserted`] it is a label the caller chose,
+/// and it selects a row rather than proving anything.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RemoteCallerGrant {
     /// Caller identity the destination resolved the grant for.
@@ -126,6 +126,37 @@ pub struct RemoteCallerGrant {
     /// Display path of the file that made the statement, for the denial
     /// message a refused caller has to act on.
     pub source: String,
+    /// How [`Self::caller_machine_id`] was established [ORB-11053].
+    #[serde(default)]
+    pub identity: CallerIdentityProof,
+}
+
+/// How a destination established the caller identity it resolved a grant for.
+///
+/// A destination may run either tier of caller authorization, so the trail has
+/// to say which one answered rather than leaving a reader to assume: the two
+/// grants look identical once resolved, and only this field separates a row a
+/// caller merely named from one it proved it holds the key for.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum CallerIdentityProof {
+    /// The caller named itself. It selects a row and proves nothing, so the
+    /// grant is an accident guard rather than a boundary.
+    #[default]
+    SelfAsserted,
+    /// sshd authenticated the key whose `authorized_keys` entry names this
+    /// caller, and the destination — not the caller — composed the argv that
+    /// carries the identity.
+    KeyBound,
+}
+
+impl Display for CallerIdentityProof {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SelfAsserted => "self-asserted",
+            Self::KeyBound => "key-bound",
+        })
+    }
 }
 
 /// Transport that delivered an MCP call to the executing process.
