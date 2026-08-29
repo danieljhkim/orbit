@@ -525,3 +525,59 @@ mod subscriber {
         fs::metadata(path).expect("metadata").permissions().mode() & 0o777
     }
 }
+
+mod path {
+    use std::{ffi::OsString, path::PathBuf};
+
+    use tempfile::tempdir;
+
+    use super::{ENV_LOCK, EnvVarGuard};
+    use crate::observability::logging::global_jsonl_log_path;
+
+    #[test]
+    fn managed_child_logs_use_the_registry_root_with_provider_home() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let provider_home = tempdir().expect("provider home");
+        let registry_root = tempdir().expect("registry root");
+        let provider_home_value = provider_home.path().as_os_str().to_owned();
+        let registry_root_value = registry_root.path().as_os_str().to_owned();
+        let _home = EnvVarGuard::set("HOME", provider_home_value);
+        let _managed = EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", OsString::from("1"));
+        let _run = EnvVarGuard::set("ORBIT_RUN_ID", OsString::from("jrun-logging-path"));
+        let _registry = EnvVarGuard::set("ORBIT_REGISTRY_ROOT", registry_root_value);
+
+        let expected = PathBuf::from(registry_root.path()).join("state/logs/orbit.jsonl");
+        assert_eq!(global_jsonl_log_path().expect("resolve log path"), expected);
+    }
+
+    #[test]
+    fn registry_root_is_ignored_without_managed_run_context() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let home = tempdir().expect("home");
+        let registry_root = tempdir().expect("registry root");
+        let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_owned());
+        let _managed = EnvVarGuard::remove("ORBIT_MANAGED_RUN_CONTEXT");
+        let _run = EnvVarGuard::remove("ORBIT_RUN_ID");
+        let _registry = EnvVarGuard::set(
+            "ORBIT_REGISTRY_ROOT",
+            registry_root.path().as_os_str().to_owned(),
+        );
+
+        let expected = home.path().join(".orbit/state/logs/orbit.jsonl");
+        assert_eq!(global_jsonl_log_path().expect("resolve log path"), expected);
+    }
+
+    #[test]
+    fn managed_registry_root_must_be_absolute() {
+        let _env = ENV_LOCK.lock().expect("lock env");
+        let _managed = EnvVarGuard::set("ORBIT_MANAGED_RUN_CONTEXT", OsString::from("true"));
+        let _run = EnvVarGuard::set("ORBIT_RUN_ID", OsString::from("jrun-logging-path"));
+        let _registry = EnvVarGuard::set(
+            "ORBIT_REGISTRY_ROOT",
+            OsString::from("relative-registry-root"),
+        );
+
+        let error = global_jsonl_log_path().expect_err("relative registry root must be rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+}
