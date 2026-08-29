@@ -25,7 +25,8 @@ pub use self::identity::{
 };
 pub use self::proxy::{RemoteProxyArgs, serve_mcp_remote_proxy};
 pub use self::ssh_auth::{
-    FORCED_COMMAND_RESTRICTIONS, SshAcceptance, SshPublicKey, parse_public_key,
+    FORCED_COMMAND_RESTRICTIONS, SshAcceptance, SshPublicKey, issue_ssh_acceptance,
+    parse_public_key,
 };
 // The federated mux reuses the v1 remote argv verbatim rather than restating
 // it, so both client paths present one session shape to a destination.

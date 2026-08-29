@@ -149,8 +149,12 @@ fn authorize_refuses_a_machine_id_that_is_not_one() {
         key: key.path().to_path_buf(),
     };
 
-    let error = authorize(Path::new("/nonexistent/mcp-callers.toml"), &args)
-        .expect_err("a row is keyed by machine_id, so a host label cannot select one");
+    let error = authorize(
+        Path::new("/nonexistent"),
+        Path::new("/nonexistent/mcp-callers.toml"),
+        &args,
+    )
+    .expect_err("a row is keyed by machine_id, so a host label cannot select one");
 
     assert!(matches!(error, OrbitError::InvalidInput(_)), "{error:?}");
 }
