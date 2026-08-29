@@ -1883,6 +1883,60 @@ fn federated_mcp_serve_lists_and_routes_local_workspaces_without_destinations() 
     );
 }
 
+/// ORB-11048: in-process federation must preserve the outer MCP call's audit
+/// evidence while retaining the accepting server's trusted session fields.
+#[test]
+fn direct_and_federated_local_calls_record_equivalent_audit_contexts() {
+    let workspace = McpWorkspace::init();
+    let (machine_id, host_id) = host_identity(&workspace.home);
+
+    let mut direct = workspace.serve();
+    direct.call_tool_ok("orbit_crew_list", json!({}));
+    drop(direct);
+
+    let mut federated = federated_client(&workspace);
+    let listed = federated.call_tool_ok("orbit_workspace_list", json!({}));
+    let selector = listed["workspaces"][0]["selector"]
+        .as_str()
+        .expect("local selector");
+    federated.call_tool_ok("orbit_crew_list", json!({ "workspace": selector }));
+    drop(federated);
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["audit", "list", "--tool", "orbit.crew.list", "--json"])
+        .output()
+        .expect("query direct and federated audit rows");
+    assert!(
+        output.status.success(),
+        "audit list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Value = serde_json::from_slice(&output.stdout).expect("parse audit rows");
+    let rows = rows.as_array().expect("audit row array");
+    assert_eq!(rows.len(), 2, "one direct and one federated call: {rows:?}");
+
+    let direct_row = rows
+        .iter()
+        .find(|row| row["self_reported_actor"] == "orbit-mcp-roundtrip-test")
+        .expect("direct audit row preserves initialize actor");
+    let federated_row = rows
+        .iter()
+        .find(|row| row["self_reported_actor"] == "federated-roundtrip")
+        .expect("federated audit row preserves initialize actor");
+    let direct_trace = direct_row["trace_id"].as_str().expect("direct trace");
+    let federated_trace = federated_row["trace_id"].as_str().expect("federated trace");
+    assert_ne!(direct_trace, federated_trace);
+
+    for row in [direct_row, federated_row] {
+        assert_eq!(row["caller_machine_id"], machine_id);
+        assert_eq!(row["caller_host_id"], host_id);
+        assert_eq!(row["process_machine_id"], machine_id);
+        assert_eq!(row["process_host_id"], host_id);
+        assert_eq!(row["transport"], "local");
+        assert_eq!(row["effective_capabilities"], json!(["agent"]));
+    }
+}
+
 /// ORB-11044: an explicit destination naming the local machine is one local route.
 #[test]
 fn federated_mcp_serve_collapses_an_explicit_local_destination_row() {

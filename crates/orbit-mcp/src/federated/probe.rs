@@ -82,7 +82,12 @@ pub trait DestinationProbe: Send + Sync {
 pub trait RoutedSession: Send {
     fn snapshot(&mut self) -> Result<DestinationSnapshot, OrbitError>;
     fn advertised_tools(&mut self) -> Result<Vec<String>, OrbitError>;
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError>;
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError>;
 }
 
 /// The production probe: one short-lived SSH-hosted MCP session per call.
@@ -162,6 +167,8 @@ impl DestinationProbe for InProcessDestinationProbe {
 
 struct InProcessRoutedSession {
     inner: Arc<dyn crate::McpHost>,
+    /// Trusted server-owned fields captured before initialize. Per-call audit
+    /// evidence is overlaid at dispatch and never written back here.
     session_context: ToolSessionContext,
     snapshot: DestinationSnapshot,
 }
@@ -180,9 +187,16 @@ impl RoutedSession for InProcessRoutedSession {
             .collect())
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
-        self.inner
-            .call_tool(name, arguments, self.session_context.clone())
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        call_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let mut destination_context = self.session_context.clone();
+        destination_context.trace_id = call_context.trace_id;
+        destination_context.self_reported_actor = call_context.self_reported_actor;
+        self.inner.call_tool(name, arguments, destination_context)
     }
 }
 
@@ -268,7 +282,12 @@ impl RoutedSession for SshRoutedSession {
         Ok(tools)
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         // Classification is finished, so the tool's own budget starts here:
         // the SSH setup, handshake, discovery, and `tools/list` round trips
         // that chose this destination must not shorten it.
