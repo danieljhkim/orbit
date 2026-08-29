@@ -22,7 +22,9 @@
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
-use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
+use base64::engine::general_purpose::{
+    STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD, URL_SAFE_NO_PAD as BASE64_URL,
+};
 use orbit_common::OrbitError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,6 +41,16 @@ const SSH_ORIGINAL_COMMAND_ENV: &str = "SSH_ORIGINAL_COMMAND";
 
 /// Destination-local capabilities issued into generated forced commands.
 const SSH_ACCEPTANCE_DIR: &str = "mcp-ssh-acceptance";
+
+/// What every issued capability starts with, so an operator reading their own
+/// `authorized_keys` can tell at a glance which field Orbit minted.
+const ACCEPTANCE_TOKEN_PREFIX: &str = ".orbit-ssh-";
+
+/// Bytes of operating-system entropy behind one acceptance capability.
+///
+/// 256 bits, comfortably past the 128 a bearer capability needs, because the
+/// value is minted once per operator setup and never sits in a hot path.
+const ACCEPTANCE_TOKEN_BYTES: usize = 32;
 
 /// The prefix sshd and `ssh-keygen -l` use for a SHA-256 key fingerprint.
 pub const FINGERPRINT_PREFIX: &str = "SHA256:";
@@ -145,6 +157,33 @@ impl SshPublicKey {
     }
 }
 
+/// Draw one bearer capability from the operating system's CSPRNG.
+///
+/// The entropy source *is* the security property [ORB-11065]: this token is
+/// the only thing standing between a caller who can run an ordinary remote
+/// command on this destination and a forged key-bound identity, so every bit
+/// of it has to be unpredictable to that caller. `getrandom` reads the OS
+/// CSPRNG — `getrandom(2)`, `arc4random_buf`, `BCryptGenRandom` — so no part
+/// of the value is a function of state the caller can observe or approximate,
+/// such as a wall clock, a process or thread id, or a filename counter. A
+/// name generator borrowed from a temporary-file library is not a substitute:
+/// those are seeded for collision avoidance, not for secrecy.
+///
+/// The URL-safe alphabet is chosen over the standard one so the rendered value
+/// is a single unquoted word in the forced command's argv.
+fn mint_acceptance_token() -> Result<String, OrbitError> {
+    let mut entropy = [0u8; ACCEPTANCE_TOKEN_BYTES];
+    getrandom::fill(&mut entropy).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to draw operating-system entropy for an SSH acceptance token: {error}"
+        ))
+    })?;
+    Ok(format!(
+        "{ACCEPTANCE_TOKEN_PREFIX}{}",
+        BASE64_URL.encode(entropy)
+    ))
+}
+
 /// Issue the destination-only capability embedded in one generated
 /// `authorized_keys` forced command. Only its digest is persisted; the bearer
 /// value exists solely in the line the operator installs.
@@ -154,30 +193,7 @@ pub fn issue_ssh_acceptance(
     key_fingerprint: &str,
 ) -> Result<String, OrbitError> {
     let path = acceptance_record_path(global_root, machine_id);
-    std::fs::create_dir_all(global_root).map_err(|error| {
-        OrbitError::Io(format!(
-            "failed to create Orbit root '{}': {error}",
-            global_root.display()
-        ))
-    })?;
-    let random = tempfile::Builder::new()
-        .prefix(".orbit-ssh-")
-        .rand_bytes(32)
-        .tempfile_in(global_root)
-        .map_err(|error| {
-            OrbitError::Io(format!("failed to generate SSH acceptance token: {error}"))
-        })?;
-    let token = random
-        .path()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| OrbitError::Io("generated SSH acceptance token was not UTF-8".to_string()))?
-        .to_string();
-    random.close().map_err(|error| {
-        OrbitError::Io(format!(
-            "failed to finish SSH acceptance token generation: {error}"
-        ))
-    })?;
+    let token = mint_acceptance_token()?;
 
     let record = SshAcceptanceRecord {
         schema_version: 1,
@@ -211,7 +227,7 @@ pub fn verify_ssh_acceptance(
     let presented = BASE64_NO_PAD.encode(Sha256::digest(token.as_bytes()));
     if record.schema_version != 1
         || record.machine_id != machine_id
-        || presented != record.token_sha256
+        || !digests_match(&presented, &record.token_sha256)
     {
         return Err(unauthorized_acceptance());
     }
@@ -219,6 +235,23 @@ pub fn verify_ssh_acceptance(
         fingerprints: vec![record.key_fingerprint],
         observation: KeyObservation::DestinationCapability,
     })
+}
+
+/// Compare two token digests without leaking how far they agreed.
+///
+/// A digest is not itself the secret, so this is defense in depth rather than
+/// the load-bearing control; it costs one fold over 43 bytes and removes the
+/// one timing signal an attacker holding a candidate token could measure.
+fn digests_match(presented: &str, stored: &str) -> bool {
+    let (presented, stored) = (presented.as_bytes(), stored.as_bytes());
+    if presented.len() != stored.len() {
+        return false;
+    }
+    presented
+        .iter()
+        .zip(stored)
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
 }
 
 fn unauthorized_acceptance() -> OrbitError {

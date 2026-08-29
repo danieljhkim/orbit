@@ -1,3 +1,5 @@
+use base64::Engine as _;
+
 use super::super::ssh_auth::{
     FORCED_COMMAND_RESTRICTIONS, KeyObservation, ObservedKeys, SshAcceptance,
     auth_info_fingerprints, fingerprint_defect, issue_ssh_acceptance, parse_public_key,
@@ -137,6 +139,63 @@ fn only_a_destination_issued_capability_recovers_the_bound_key() {
         verify_ssh_acceptance(dir.path(), "hm_alpha", "caller-controlled").is_err(),
         "argv alone must not mint a destination capability"
     );
+}
+
+/// [ORB-11065] The capability's whole job is to be unguessable by a caller who
+/// can already run an ordinary remote command on this destination. That caller
+/// knows roughly when `orbit mcp callers authorize` ran and what the process
+/// looked like, so a token derived from a clock- or thread-id-seeded PRNG —
+/// which is what a temporary-file name generator gives you — is enumerable
+/// offline. Nothing here consults a clock, so every token in this sample is
+/// issued from the same logical instant: what distinguishes them can only be
+/// the operating system's CSPRNG.
+#[test]
+fn an_acceptance_token_is_minted_from_operating_system_entropy() {
+    const SAMPLE: usize = 64;
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let tokens: Vec<String> = (0..SAMPLE)
+        .map(|_| {
+            issue_ssh_acceptance(dir.path(), "hm_alpha", KEY_FINGERPRINT).expect("issue token")
+        })
+        .collect();
+
+    let entropy: Vec<Vec<u8>> = tokens
+        .iter()
+        .map(|token| {
+            let body = token
+                .strip_prefix(".orbit-ssh-")
+                .unwrap_or_else(|| panic!("a capability names itself: {token}"));
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(body.as_bytes())
+                .unwrap_or_else(|error| panic!("token body is not base64: {token}: {error}"))
+        })
+        .collect();
+
+    for (token, bytes) in tokens.iter().zip(&entropy) {
+        assert_eq!(
+            bytes.len() * 8,
+            256,
+            "a bearer capability must carry at least 128 bits of entropy: {token}"
+        );
+    }
+    let distinct: std::collections::BTreeSet<&Vec<u8>> = entropy.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        SAMPLE,
+        "tokens issued back to back from one process repeated, so they are not random"
+    );
+    // A counter, a filename sequence, or any value derived from a fixed seed
+    // pins some byte position; a CSPRNG pins none. With 64 draws the odds of a
+    // genuinely random position staying constant are 256^-63.
+    for position in 0..entropy[0].len() {
+        assert!(
+            entropy
+                .iter()
+                .any(|bytes| bytes[position] != entropy[0][position]),
+            "byte {position} never varied across {SAMPLE} tokens, so it is not drawn from entropy"
+        );
+    }
 }
 
 #[test]

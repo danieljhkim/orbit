@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 base64.workspace = true
+getrandom.workspace = true
 orbit-common = { path = "../orbit-common" }
 orbit-types = { path = "../orbit-types" }
 orbit-registry = { path = "../orbit-registry" }
@@ -21,7 +22,6 @@ rmcp = { version = "1.5", default-features = false, features = ["server", "trans
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["io-std", "net", "rt"] }
 toml.workspace = true
 tracing.workspace = true
