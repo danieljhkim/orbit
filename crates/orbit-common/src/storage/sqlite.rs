@@ -35,17 +35,18 @@ pub struct OpenedConnection {
 /// The database is hardened before SQLite can create WAL/SHM sidecars, and
 /// pre-existing sidecars are repaired as part of the same operation. Newly
 /// created parent directories are owner-only as well. An existing read-only
-/// database or database on a read-only filesystem is opened immutable before
-/// any directory creation or permission change is attempted.
+/// database on writable storage has group/other permissions removed before it
+/// is opened immutable. A database on a read-only filesystem is opened
+/// immutable before any directory creation or permission change is attempted.
 pub fn open_private(path: &Path) -> Result<OpenedConnection, OrbitError> {
     match fs::metadata(path) {
-        Ok(metadata) if metadata.permissions().readonly() || filesystem_is_read_only(path)? => {
-            return Ok(OpenedConnection {
-                connection: open_immutable(path)?,
-                read_only: true,
-            });
+        Ok(metadata) => {
+            let filesystem_read_only = filesystem_is_read_only(path)?;
+            if filesystem_read_only || metadata.permissions().readonly() {
+                return open_private_read_only(path, filesystem_read_only);
+            }
+            harden_sqlite_files(path)?;
         }
-        Ok(_) => harden_sqlite_files(path)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(sqlite_path_error("inspect", path, error)),
     }
@@ -74,6 +75,19 @@ pub fn open_private(path: &Path) -> Result<OpenedConnection, OrbitError> {
     Ok(OpenedConnection {
         connection,
         read_only: false,
+    })
+}
+
+pub(super) fn open_private_read_only(
+    path: &Path,
+    filesystem_read_only: bool,
+) -> Result<OpenedConnection, OrbitError> {
+    if !filesystem_read_only {
+        harden_read_only_sqlite_files(path)?;
+    }
+    Ok(OpenedConnection {
+        connection: open_immutable(path)?,
+        read_only: true,
     })
 }
 
@@ -114,6 +128,33 @@ fn harden_existing_file(path: &Path) -> Result<(), OrbitError> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(sqlite_path_error("harden", path, error)),
     }
+}
+
+fn harden_read_only_sqlite_files(path: &Path) -> Result<(), OrbitError> {
+    harden_existing_read_only_file(path)?;
+    for sidecar in sqlite_sidecar_paths(path) {
+        harden_existing_read_only_file(&sidecar)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn harden_existing_read_only_file(path: &Path) -> Result<(), OrbitError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(sqlite_path_error("inspect", path, error)),
+    };
+    let owner_only_mode = metadata.permissions().mode() & 0o700;
+    fs::set_permissions(path, fs::Permissions::from_mode(owner_only_mode))
+        .map_err(|error| sqlite_path_error("harden", path, error))
+}
+
+#[cfg(not(unix))]
+fn harden_existing_read_only_file(_path: &Path) -> Result<(), OrbitError> {
+    Ok(())
 }
 
 fn sqlite_sidecar_paths(path: &Path) -> [PathBuf; 2] {
