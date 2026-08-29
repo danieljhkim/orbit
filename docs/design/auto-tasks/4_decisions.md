@@ -2,7 +2,7 @@
 title: Auto-tasks — Decisions
 owner: claude
 last_updated: 2026-08-11
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Accepted
 feature: auto-tasks
 doc_role: decisions
@@ -43,7 +43,7 @@ Introduce auto-tasks as git-versioned YAML definitions under `.orbit/auto_tasks/
 ## No-diff-expected tasks bypass repository change gates
 
 **Recorded:** 2026-07-12 03:33:35.554901Z · [ORB-10148]
-**Paths:** `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-common/src/types/task.rs`, `.orbit/auto_tasks/**`
+**Paths:** `crates/orbit-engine/src/executor/automation/vcs/**`, `crates/orbit-types/src/task/model.rs`, `.orbit/auto_tasks/**`
 
 ### Context
 
@@ -79,7 +79,7 @@ Read and replace tracked auto-task definitions through the runtime local root. K
 ## Run budgets are provider-neutral: wall-clock timeouts, never turn caps
 
 **Recorded:** 2026-07-12 03:33:34.766432Z · [ORB-10146], [ORB-10148]
-**Paths:** `crates/orbit-core/assets/**`, `crates/orbit-common/src/types/auto_task.rs`, `.orbit/auto_tasks/**`
+**Paths:** `crates/orbit-core/assets/**`, `crates/orbit-types/src/workflow/auto_task.rs`, `.orbit/auto_tasks/**`
 
 ### Context
 
