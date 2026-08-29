@@ -421,6 +421,7 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         });
     let expected = [
         format!("{global}/state/logs/**"),
+        format!("{global}/state/audit/**"),
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace_orbit}/tasks/**"),
