@@ -241,7 +241,7 @@ fn sandbox_exec_can_apply() -> bool {
     if !sandbox_exec_available() {
         return false;
     }
-    let Ok(path) = sandbox_exec_path() else {
+    let Some(path) = sandbox_exec_path() else {
         return false;
     };
     let mut profile_file = tempfile::Builder::new()
