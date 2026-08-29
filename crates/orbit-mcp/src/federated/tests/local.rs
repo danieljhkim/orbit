@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use orbit_common::OrbitError;
-use orbit_types::tool::{McpToolDefinition, ToolSessionContext};
+use orbit_types::tool::{McpCapability, McpToolDefinition, ToolSessionContext};
 use serde_json::{Value, json};
 
 use super::super::config::{
@@ -112,6 +112,30 @@ fn local_only_mux() -> FederatedMcpHost {
         vec![local_destination(OWNER_MACHINE, "local-host")],
         Arc::new(probe),
     )
+}
+
+fn recording_local_mux() -> (Arc<FederatedMcpHost>, Arc<RecordingLocalHost>) {
+    let inner = Arc::new(RecordingLocalHost::new(OWNER_MACHINE));
+    let context = ToolSessionContext {
+        caller_machine_id: Some(OWNER_MACHINE.to_string()),
+        caller_host_id: Some("local-host".to_string()),
+        process_machine_id: Some(OWNER_MACHINE.to_string()),
+        process_host_id: Some("local-host".to_string()),
+        transport: Some(orbit_types::tool::McpTransport::Local),
+        effective_capabilities: std::collections::BTreeSet::from([McpCapability::Agent]),
+        ..ToolSessionContext::default()
+    };
+    let host = FederatedMcpHost::new(
+        vec![local_destination(OWNER_MACHINE, "local-host")],
+        Arc::new(CompositeDestinationProbe::new(
+            Arc::new(InProcessDestinationProbe::new(
+                Arc::clone(&inner) as Arc<dyn McpHost>,
+                context,
+            )),
+            Arc::new(PanickingProbe),
+        )),
+    );
+    (Arc::new(host), inner)
 }
 
 #[test]
@@ -222,29 +246,22 @@ fn an_explicit_local_ssh_row_does_not_duplicate_the_local_descriptor() {
 
 #[test]
 fn a_copied_local_selector_is_delivered_in_process_without_ssh() {
-    let inner = Arc::new(RecordingLocalHost::new(OWNER_MACHINE));
-    let context = ToolSessionContext {
-        process_machine_id: Some(OWNER_MACHINE.to_string()),
-        process_host_id: Some("local-host".to_string()),
-        transport: Some(orbit_types::tool::McpTransport::Local),
+    let (host, inner) = recording_local_mux();
+    let call_context = ToolSessionContext {
+        process_machine_id: Some("hm_spoofed".to_string()),
+        process_host_id: Some("spoofed-host".to_string()),
+        transport: Some(orbit_types::tool::McpTransport::SshMcp),
+        trace_id: Some("trace-current-call".to_string()),
+        effective_capabilities: std::collections::BTreeSet::from([McpCapability::Operator]),
+        self_reported_actor: Some("codex".to_string()),
         ..ToolSessionContext::default()
     };
-    let host = FederatedMcpHost::new(
-        vec![local_destination(OWNER_MACHINE, "local-host")],
-        Arc::new(CompositeDestinationProbe::new(
-            Arc::new(InProcessDestinationProbe::new(
-                Arc::clone(&inner) as Arc<dyn McpHost>,
-                context.clone(),
-            )),
-            Arc::new(PanickingProbe),
-        )),
-    );
 
     let result = host
         .call_tool(
             "orbit.crew.list",
             json!({ "workspace": format!("{OWNER_MACHINE}/ws_orbit") }),
-            ToolSessionContext::default(),
+            call_context,
         )
         .expect("local crew.list");
     assert_eq!(result["workspace"], "ws_orbit");
@@ -257,10 +274,74 @@ fn a_copied_local_selector_is_delivered_in_process_without_ssh() {
         calls[0].2.process_machine_id.as_deref(),
         Some(OWNER_MACHINE)
     );
+    assert_eq!(calls[0].2.process_host_id.as_deref(), Some("local-host"));
+    assert_eq!(calls[0].2.caller_machine_id.as_deref(), Some(OWNER_MACHINE));
+    assert_eq!(calls[0].2.caller_host_id.as_deref(), Some("local-host"));
     assert_eq!(
         calls[0].2.transport,
         Some(orbit_types::tool::McpTransport::Local)
     );
+    assert_eq!(
+        calls[0].2.effective_capabilities,
+        std::collections::BTreeSet::from([McpCapability::Agent])
+    );
+    assert_eq!(calls[0].2.trace_id.as_deref(), Some("trace-current-call"));
+    assert_eq!(calls[0].2.self_reported_actor.as_deref(), Some("codex"));
+}
+
+#[test]
+fn concurrent_local_routes_keep_each_calls_audit_evidence_isolated() {
+    let (host, inner) = recording_local_mux();
+
+    std::thread::scope(|scope| {
+        for (trace_id, actor) in [("trace-a", "codex"), ("trace-b", "claude-code")] {
+            let host = Arc::clone(&host);
+            scope.spawn(move || {
+                host.call_tool(
+                    "orbit.crew.list",
+                    json!({ "workspace": format!("{OWNER_MACHINE}/ws_orbit") }),
+                    ToolSessionContext {
+                        trace_id: Some(trace_id.to_string()),
+                        self_reported_actor: Some(actor.to_string()),
+                        ..ToolSessionContext::default()
+                    },
+                )
+                .expect("concurrent local route");
+            });
+        }
+    });
+
+    let calls = inner.calls.lock().expect("call log");
+    assert_eq!(calls.len(), 2);
+    let mut evidence = calls
+        .iter()
+        .map(|(_, _, context)| {
+            (
+                context.trace_id.as_deref().expect("trace").to_string(),
+                context
+                    .self_reported_actor
+                    .as_deref()
+                    .expect("actor")
+                    .to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    evidence.sort();
+    assert_eq!(
+        evidence,
+        [
+            ("trace-a".to_string(), "codex".to_string()),
+            ("trace-b".to_string(), "claude-code".to_string())
+        ]
+    );
+    for (_, _, context) in calls.iter() {
+        assert_eq!(context.process_machine_id.as_deref(), Some(OWNER_MACHINE));
+        assert_eq!(context.process_host_id.as_deref(), Some("local-host"));
+        assert_eq!(
+            context.effective_capabilities,
+            std::collections::BTreeSet::from([McpCapability::Agent])
+        );
+    }
 }
 
 #[test]

@@ -183,7 +183,11 @@ impl FederatedMcpHost {
         // reaches the destination, so its failure is the destination's answer
         // (`RemoteTool`) or a post-dispatch ambiguity (`OutcomeUnknown`) —
         // never a delivery miss the caller should retry [ORB-11023].
-        session.call_tool(name, destination_arguments(input, parsed.workspace_id()))
+        session.call_tool(
+            name,
+            destination_arguments(input, parsed.workspace_id()),
+            session_context,
+        )
     }
 }
 
