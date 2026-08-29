@@ -25,14 +25,14 @@ use orbit_common::governance::authorization::{
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_store::contracts::AuditEventInsertParams;
 use orbit_types::telemetry::AuditEventStatus;
-use orbit_types::tool::ToolSessionContext;
+use orbit_types::tool::{McpCapability, ToolSessionContext};
 
 use crate::OrbitRuntime;
 use crate::runtime::tool_exec::CapabilityEnforcement;
 
 impl OrbitRuntime {
-    /// Authorize a governed tool call, or pass an ungoverned one straight
-    /// through.
+    /// Authorize a governed tool call, then require destination-granted remote
+    /// callers to hold `agent` before reaching the ordinary MCP surface.
     ///
     /// Called from `run_tool_with_context_and_role`, which every tool caller
     /// traverses: CLI `tool run`, the CLI's admin `run_tool` bypass, MCP
@@ -44,14 +44,74 @@ impl OrbitRuntime {
         session_context: &ToolSessionContext,
         capability_enforcement: CapabilityEnforcement,
     ) -> Result<(), OrbitError> {
-        let Some(operation) = governed_tool(tool_name) else {
+        if let Some(operation) = governed_tool(tool_name) {
+            let envelope = match capability_enforcement {
+                CapabilityEnforcement::Enforce => CallerEnvelope::from_process_env(session_context),
+                CapabilityEnforcement::McpSessionOnly => {
+                    CallerEnvelope::mcp_session(session_context)
+                }
+            };
+            return self.decide_with_envelope(operation, envelope);
+        }
+        if capability_enforcement != CapabilityEnforcement::McpSessionOnly {
             return Ok(());
+        }
+
+        let caller = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(session_context));
+        if !caller.grants().contains(&McpCapability::Agent)
+            && let Some(grant) = caller.remote_caller_grant()
+        {
+            return self.deny_remote_agent_tool(tool_name, &caller, grant);
+        }
+
+        Ok(())
+    }
+
+    /// Refuse an ordinary tool when the destination resolved a remote caller
+    /// without the baseline capability for the agent MCP surface.
+    ///
+    /// Governed tools never reach this path: their operation-specific checks
+    /// remain authoritative, so an operator-only grant can still perform an
+    /// operator operation without implicitly gaining ordinary agent tools.
+    fn deny_remote_agent_tool(
+        &self,
+        tool_name: &str,
+        caller: &CallerCapabilities,
+        grant: &orbit_types::tool::RemoteCallerGrant,
+    ) -> Result<(), OrbitError> {
+        let granted = caller
+            .grants()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let granted = if granted.is_empty() {
+            "none".to_string()
+        } else {
+            granted
         };
-        let envelope = match capability_enforcement {
-            CapabilityEnforcement::Enforce => CallerEnvelope::from_process_env(session_context),
-            CapabilityEnforcement::McpSessionOnly => CallerEnvelope::mcp_session(session_context),
-        };
-        self.decide_with_envelope(operation, envelope)
+        let message = format!(
+            "operation '{tool_name}' requires the `agent` capability (ordinary MCP tools are \
+             available only to destination-granted agents); caller '{}' was resolved as \
+             `remote-grant` holding [{granted}] from {}",
+            grant.caller_machine_id, grant.source,
+        );
+
+        tracing::warn!(
+            target: "orbit.authorization",
+            operation = tool_name,
+            provenance = %caller.provenance(),
+            granted,
+            caller_machine_id = grant.caller_machine_id,
+            "ordinary MCP tool denied"
+        );
+        self.record_authorization_event(
+            tool_name,
+            caller,
+            AuditEventStatus::Denied,
+            Some(message.clone()),
+        );
+        Err(OrbitError::CapabilityDenied(message))
     }
 
     /// Authorize a governed CLI command, or pass an ungoverned one through.
@@ -97,7 +157,7 @@ impl OrbitRuntime {
                         "governed operation authorized through the operator override"
                     );
                     self.record_authorization_event(
-                        operation,
+                        operation.id,
                         &caller,
                         AuditEventStatus::Success,
                         Some("authorized through the operator override".to_string()),
@@ -119,7 +179,7 @@ impl OrbitRuntime {
                 );
                 let message = denial.to_string();
                 self.record_authorization_event(
-                    operation,
+                    operation.id,
                     &caller,
                     AuditEventStatus::Denied,
                     Some(message.clone()),
@@ -141,7 +201,7 @@ impl OrbitRuntime {
     /// completed change.)
     fn record_authorization_event(
         &self,
-        operation: &'static GovernedOperation,
+        operation_id: &str,
         caller: &CallerCapabilities,
         status: AuditEventStatus,
         error_message: Option<String>,
@@ -152,7 +212,7 @@ impl OrbitRuntime {
             subcommand: Some(caller.provenance().to_string()),
             tool_name: None,
             target_type: Some("operation".to_string()),
-            target_id: Some(operation.id.to_string()),
+            target_id: Some(operation_id.to_string()),
             role: self.actor_label().to_string(),
             status,
             exit_code: i32::from(status != AuditEventStatus::Success),
@@ -206,7 +266,7 @@ impl OrbitRuntime {
         if let Err(error) = self.record_audit_event(&params) {
             tracing::error!(
                 target: "orbit.authorization",
-                operation = operation.id,
+                operation = operation_id,
                 "failed to persist authorization audit event: {error}"
             );
         }

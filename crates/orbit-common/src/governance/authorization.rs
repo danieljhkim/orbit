@@ -30,10 +30,14 @@
 //! availability, so an unadvertised tool is still reachable through
 //! `orbit tool run`.
 //!
-//! *Permission* is [`GOVERNED_OPERATIONS`], resolved by [`authorize`] at one
-//! chokepoint per surface. This is the only authorization statement Orbit
-//! makes about a tool, and it is surface-independent: the same answer for an
-//! MCP call, a CLI `tool run`, the dashboard, and the deterministic dispatcher.
+//! *Permission* for exceptional operations is [`GOVERNED_OPERATIONS`], resolved
+//! by [`authorize`] at one chokepoint per surface. Remote-originated MCP calls
+//! also have a baseline rule at that chokepoint: a destination-side caller
+//! grant must include [`McpCapability::Agent`] before it can use ordinary,
+//! ungoverned tools. The registry remains the only operation-specific
+//! authorization statement Orbit makes, and its answer is surface-independent:
+//! the same answer for an MCP call, a CLI `tool run`, the dashboard, and the
+//! deterministic dispatcher.
 //!
 //! The two therefore need not agree, and deliberately do not. A tool may be
 //! advertised and governed (the operator MCP surface: a session served by
@@ -97,10 +101,12 @@ pub enum OperationSurface {
 
 /// One operation whose performance requires a capability.
 ///
-/// An operation absent from [`GOVERNED_OPERATIONS`] is ungoverned and executes
-/// as before. Governance is opt-in per operation on purpose: the registry is
-/// meant to name the operations whose accidental invocation actually destroys
-/// something, not to become a second copy of the tool registry.
+/// An operation absent from [`GOVERNED_OPERATIONS`] has no operation-specific
+/// capability check. Governance is opt-in per operation on purpose: the
+/// registry is meant to name the operations whose accidental invocation
+/// actually destroys something, not to become a second copy of the tool
+/// registry. The runtime separately enforces the `agent` baseline for ordinary
+/// tools when a destination-side grant identifies a remote MCP caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GovernedOperation {
     /// Canonical tool name, or `"<command> <subcommand>"` for a CLI command.
