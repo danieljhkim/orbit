@@ -195,7 +195,7 @@ fn append_codex_side_write_roots(
 ///
 /// Gemini and Claude do not have a codex-style `--add-dir` side channel, but
 /// their MCP/tool calls still execute `orbit ...` as a sandbox-inherited child.
-/// Those child processes initialize global logs/databases/tasks plus the
+/// Those child processes initialize global logs/audit/databases/tasks plus the
 /// workspace stores exposed by activity tool allowlists.
 ///
 /// Inventory boundary: this list follows currently activity-exposed Orbit write
@@ -224,6 +224,7 @@ fn append_orbit_child_runtime_write_roots(
 
     for root in [
         format!("{global}/state/logs/**"),
+        format!("{global}/state/audit/**"),
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
         format!("{workspace}/tasks/**"),
@@ -260,7 +261,11 @@ fn append_linux_runtime_write_roots(
         .canonicalize()
         .unwrap_or_else(|_| runtime.paths().orbit_dir.clone());
 
-    for directory in [global.join("state/logs"), global.join("tasks")] {
+    for directory in [
+        global.join("state/logs"),
+        global.join("state/audit"),
+        global.join("tasks"),
+    ] {
         ensure_owned_directory(&directory)?;
         append_unique_modify_root(resolved, directory.display().to_string());
     }
