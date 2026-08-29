@@ -2,14 +2,14 @@
 title: Executors — Decisions
 owner: claude
 last_updated: 2026-08-11
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Draft
 feature: executors
 doc_role: decisions
 type: design
 summary: Decision log for executor registration and the (now retired) External Executor Protocol.
 tags: [executors]
-paths: ["crates/orbit-common/src/types/executor_def.rs"]
+paths: ["crates/orbit-types/src/workflow/executor_def.rs"]
 related_features: [executors]
 related_artifacts: [ORB-00384, ORB-00400, ORB-10395]
 ---
@@ -29,7 +29,7 @@ this exception in the same PR.
 ## External Executor Protocol for dynamic out-of-process executor registration (retired)
 
 **Recorded:** 2026-06-14 00:40:41.791069Z · [ORB-00384], [ORB-10395]
-**Paths:** `crates/orbit-common/src/types/executor_def.rs`, `docs/design/executors/**`
+**Paths:** `crates/orbit-types/src/workflow/executor_def.rs`, `docs/design/executors/**`
 
 > **RETIRED 2026-07-26 — [ORB-10395].** The External Executor Protocol is not a supported Orbit surface. Retiring the v1 executor stack removed everything this decision stood up: `ExternalExecutor`, the shared `direct_agent` subprocess transport, `ActivityExecutorRegistry`, the `ActivityExecutor` trait, the v1 `ExecutionContext`, the `external.example.yaml` template, and the conformance fixture. v2 dispatch (`orbit-engine::activity_job`) is the only execution path and consults no executor registry, so an `executor_type: external` def is now inert — it deserializes and stores, but nothing spawns it. `ExecutorType::External` survives in the wire enum only so pre-existing defs keep parsing; dropping the variant is a separate release decision, tracked alongside the same call for `ExecutorType::AgentCli`. The Consequences below are history, not live obligations — in particular the wire protocol is **no longer** a backward-compatibility obligation. Any future out-of-process extension point must be decided afresh against the v2 dispatch path.
 

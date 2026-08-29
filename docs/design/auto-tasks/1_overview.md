@@ -2,7 +2,7 @@
 title: Auto-tasks — Overview
 owner: claude
 last_updated: 2026-08-22
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -69,14 +69,14 @@ becomes just the first definition.
 
 | Concern | File | Task |
 |---|---|---|
-| Definition schema | `crates/orbit-common/src/types/auto_task.rs` | ORB-10149 |
+| Definition schema | `crates/orbit-types/src/workflow/auto_task.rs` | ORB-10149 |
 | Discovery (fail-closed) | `crates/orbit-core/src/auto_tasks/loader.rs` | ORB-10149 |
 | Due-math + catch-up | `crates/orbit-core/src/auto_tasks/schedule.rs` | ORB-10149 |
 | Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
 | Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
 | CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
 | Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
-| Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
+| Deterministic action | `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 | Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |
 
