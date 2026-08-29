@@ -26,11 +26,21 @@ use super::super::super::dispatcher::DispatchError;
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::super::workspace::{WorktreeBoundaryGuard, validate_declared_worktree_pair};
+use super::super::orchestrator::resolved_activity_fs_profile_name;
 use super::super::run_cli_backend;
 use super::test_support::{
     RecordingSink, TestHost, capture_events, test_agent_loop_spec, test_agent_loop_spec_for,
     write_executable,
 };
+
+#[test]
+fn cli_activity_fs_profile_resolver_preserves_named_profile() {
+    assert_eq!(resolved_activity_fs_profile_name(None), "unrestricted");
+    assert_eq!(
+        resolved_activity_fs_profile_name(Some("implementer")),
+        "implementer"
+    );
+}
 
 #[test]
 fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
@@ -3369,7 +3379,7 @@ fail() {{
 [ "$ORBIT_TASK_ACTOR_KIND" = "agent" ] || fail actor_kind_missing
 [ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn" ] || fail activity_tools_missing
 [ "$ORBIT_PROC_ALLOWED_PROGRAMS" = "git,rg" ] || fail proc_programs_missing
-[ "$ORBIT_ACTIVITY_FS_PROFILE" = "implementer" ] || fail fs_profile_missing
+[ "$ORBIT_ACTIVITY_FS_PROFILE" = "unrestricted" ] || fail fs_profile_missing
 [ "$ORBIT_ACTIVE_TASK_ID" = "ORB-10980" ] || fail active_task_missing
 printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"}},"error":null}}'
 "#,
@@ -3406,7 +3416,7 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         "job-grok-registry-root",
         audit,
         &serde_json::json!({"prompt": "hi", "task_id": "ORB-10980"}),
-        Some("implementer"),
+        None,
     )
     .expect("run succeeds");
 
