@@ -56,6 +56,15 @@ pub struct ToolSessionContext {
     /// resolution, or any authorization decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_reported_actor: Option<String>,
+    /// The destination-side statement that capped this session, present only
+    /// on a remote-originated session [ORB-11052].
+    ///
+    /// Its presence is what distinguishes "this destination granted the
+    /// caller these capabilities" from "the local server process stamped its
+    /// own authority", so the audit trail can tell a downgraded caller from
+    /// one that never asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_caller_grant: Option<RemoteCallerGrant>,
 }
 
 impl ToolSessionContext {
@@ -88,12 +97,35 @@ impl ToolSessionContext {
             // Trusted defaults describe the accepting machine; a claim only
             // ever arrives from the client, at initialize.
             self_reported_actor: None,
+            remote_caller_grant: None,
         }
     }
 
     pub fn has_capability(&self, capability: McpCapability) -> bool {
         self.effective_capabilities.contains(&capability)
     }
+}
+
+/// What a destination's callers file granted the caller of a remote-originated
+/// MCP session [ORB-11052].
+///
+/// The session's effective capabilities are this set intersected with what the
+/// session's argv requested, so recording the grant separately is what makes a
+/// downgrade legible: `effective` alone cannot distinguish a caller that was
+/// capped from one that never asked for more.
+///
+/// `caller_machine_id` is the self-asserted label the caller forwarded. It
+/// selects a row; it is not an authenticated principal and grants nothing on
+/// its own.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteCallerGrant {
+    /// Caller identity the destination resolved the grant for.
+    pub caller_machine_id: String,
+    /// Capabilities the destination is willing to serve that caller.
+    pub granted_capabilities: BTreeSet<McpCapability>,
+    /// Display path of the file that made the statement, for the denial
+    /// message a refused caller has to act on.
+    pub source: String,
 }
 
 /// Transport that delivered an MCP call to the executing process.

@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use orbit_types::tool::{McpCapability, McpTransport};
 
+use super::super::callers::SessionCapabilityPolicy;
 use super::super::identity::{
     McpSessionAuthority, local_identity, mcp_server_identity, ssh_caller_ip,
 };
@@ -49,7 +50,7 @@ fn remote_context_keeps_identity_and_transport_concepts_separate() {
     let identity = mcp_server_identity(
         root.path(),
         Some("hm_caller".to_string()),
-        McpSessionAuthority::Agent,
+        &SessionCapabilityPolicy::local(McpSessionAuthority::Agent),
     )
     .expect("MCP server identity");
 
@@ -71,8 +72,12 @@ fn remote_context_keeps_identity_and_transport_concepts_separate() {
 fn a_default_server_serves_agent_sessions_only() {
     let root = tempfile::tempdir().expect("global root");
 
-    let identity = mcp_server_identity(root.path(), None, McpSessionAuthority::Agent)
-        .expect("MCP server identity");
+    let identity = mcp_server_identity(
+        root.path(),
+        None,
+        &SessionCapabilityPolicy::local(McpSessionAuthority::Agent),
+    )
+    .expect("MCP server identity");
 
     assert_eq!(
         identity.session_context.effective_capabilities,
@@ -85,8 +90,12 @@ fn a_default_server_serves_agent_sessions_only() {
 fn an_operator_server_grants_the_capability_governed_tools_require() {
     let root = tempfile::tempdir().expect("global root");
 
-    let identity = mcp_server_identity(root.path(), None, McpSessionAuthority::Operator)
-        .expect("MCP server identity");
+    let identity = mcp_server_identity(
+        root.path(),
+        None,
+        &SessionCapabilityPolicy::local(McpSessionAuthority::Operator),
+    )
+    .expect("MCP server identity");
 
     assert_eq!(
         identity.session_context.effective_capabilities,
