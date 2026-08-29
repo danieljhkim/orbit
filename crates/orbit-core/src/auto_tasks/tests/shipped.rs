@@ -23,6 +23,7 @@ fn shipped_defaults_all_parse_and_are_disabled() {
         .map(|(name, _)| *name)
         .collect();
     for required in [
+        "ci-failure-remediation",
         "code-review-sweep",
         "friction-curation",
         "qa-sweep",
@@ -456,5 +457,181 @@ fn security_review_default_is_portable_weekly_and_inert() {
             .any(|criterion| criterion.to_lowercase().contains("no findings")
                 && criterion.to_lowercase().contains("no-op")),
         "security-review acceptance criteria must treat a clean review as success"
+    );
+}
+
+/// CI-failure remediation is the portable default. It keeps the evidence
+/// contract while remaining disabled until an operator opts in.
+#[test]
+fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
+    let (_, yaml) = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .find(|(name, _)| *name == "ci-failure-remediation")
+        .expect("ci-failure-remediation default");
+    let definition = parse_auto_task_yaml(yaml).expect("parse ci-failure-remediation");
+
+    assert_eq!(definition.name, "ci-failure-remediation");
+    assert!(!definition.enabled, "definition must ship disabled");
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "15 * * * *".to_string()
+        },
+        "ci-failure-remediation must use a documented hourly schedule"
+    );
+    assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
+    assert_eq!(definition.template.crew.as_deref(), Some("system"));
+    assert!(
+        yaml.contains("\n  crew: system"),
+        "default must name the portable system crew"
+    );
+    assert_eq!(
+        definition.template.status,
+        orbit_types::task::TaskStatus::Backlog
+    );
+    assert_eq!(
+        definition.template.task_type,
+        orbit_types::task::TaskType::Bug
+    );
+    for required_tag in ["ci-failure-remediation", "no-diff-expected"] {
+        assert!(
+            definition
+                .template
+                .tags
+                .iter()
+                .any(|tag| tag == required_tag),
+            "missing required tag {required_tag}"
+        );
+    }
+    assert!(
+        !yaml.contains("/home/") && !yaml.contains("/Users/"),
+        "default must not contain a machine-specific path"
+    );
+    // The template ships to every workspace, so it must not name this
+    // repository's branches, gates, workflow steps, files, or run IDs.
+    for repo_specific in [
+        "agent-main",
+        "make ci",
+        "Create orbit task on CI failure",
+        ".github/workflows",
+        "30232696219",
+        "orbit-store",
+        "plugin_skill_symlinks",
+        "ORB-",
+        "CLAUDE.md",
+    ] {
+        assert!(
+            !yaml.contains(repo_specific),
+            "template must stay workspace-generic; found '{repo_specific}'"
+        );
+    }
+    assert!(
+        definition
+            .description
+            .to_lowercase()
+            .contains("github-actions-shaped")
+            || definition
+                .description
+                .to_lowercase()
+                .contains("github-actions shaped"),
+        "description must disclose the GitHub Actions shape to operators on other CI"
+    );
+
+    let body = definition.template.description.to_lowercase();
+    for required in [
+        "current head",
+        "reported head sha",
+        "checkout commit",
+        "stale",
+        "supersedes",
+        "root cause",
+        "weaken",
+        "transient",
+        "green",
+        "rerun",
+        "execution_summary",
+        "no-diff",
+        "pre-handoff",
+        "orbit tool run orbit.search",
+        "orbit tool run orbit.task.list",
+        "orbit tool run orbit.task.show",
+    ] {
+        assert!(
+            body.contains(required),
+            "template should retain '{required}'"
+        );
+    }
+    assert!(!body.contains("orbit task list"));
+    assert!(!body.contains("orbit task show"));
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("execution_summary")
+                    && criterion.contains("green rerun")
+                    && criterion.contains("root cause")
+            }),
+        "ci-failure-remediation must require the execution_summary mapping contract"
+    );
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("no-current-failure") && criterion.contains("no-diff")
+            }),
+        "ci-failure-remediation must treat a successful no-diff outcome as success"
+    );
+}
+
+/// This repository already has an enabled workspace-authored
+/// `ci-failure-remediation` definition. Seeding the inert default must treat
+/// that file as authored and leave it byte-for-byte, the way workspace init
+/// preserves an operator-authored `security-review`.
+#[test]
+fn seed_does_not_clobber_repository_authored_ci_failure_remediation() {
+    let authored_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".orbit/auto_tasks/ci-failure-remediation.yaml");
+    let authored = std::fs::read_to_string(&authored_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", authored_path.display()));
+    let authored_definition =
+        parse_auto_task_yaml(&authored).expect("repository-authored ci-failure-remediation parses");
+    assert!(
+        authored_definition.enabled,
+        "this repository's definition is workspace-authored and enabled"
+    );
+    assert_ne!(
+        authored_definition.template.crew.as_deref(),
+        Some("system"),
+        "this repository's definition must differ from the inert default so preservation is observable"
+    );
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let orbit_dir = temp.path().join(".orbit");
+    let dest = crate::auto_tasks::definition_path(&orbit_dir, "ci-failure-remediation");
+    std::fs::create_dir_all(dest.parent().expect("auto_tasks parent"))
+        .expect("create auto_tasks dir");
+    std::fs::write(&dest, &authored).expect("install repository-authored definition");
+
+    crate::auto_tasks::seed_default_auto_tasks(&orbit_dir)
+        .expect("seed defaults into a workspace that already has the authored file");
+
+    let preserved = std::fs::read_to_string(&dest).expect("read after seed");
+    assert_eq!(
+        preserved, authored,
+        "seed/re-init must treat the repository-authored definition as authored and leave it byte-for-byte"
+    );
+    let preserved_definition =
+        parse_auto_task_yaml(&preserved).expect("preserved definition still parses");
+    assert!(preserved_definition.enabled);
+    assert_eq!(
+        preserved_definition.template.crew.as_deref(),
+        authored_definition.template.crew.as_deref()
     );
 }

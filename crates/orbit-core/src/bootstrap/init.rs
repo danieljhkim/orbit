@@ -891,6 +891,7 @@ mod tests {
         let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
         let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
         let security_path = orbit_root.join("auto_tasks/security-review.yaml");
+        let ci_failure_path = orbit_root.join("auto_tasks/ci-failure-remediation.yaml");
         let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
         let friction_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
@@ -933,6 +934,23 @@ mod tests {
             security_definition.dedupe,
             orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
+        let ci_failure = fs::read_to_string(&ci_failure_path)
+            .expect("read seeded ci-failure-remediation definition");
+        let ci_failure_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&ci_failure)
+            .expect("seeded ci-failure-remediation definition parses through loader schema");
+        assert!(!ci_failure_definition.enabled);
+        assert_eq!(
+            ci_failure_definition.template.crew.as_deref(),
+            Some("system")
+        );
+        assert!(
+            ci_failure.contains("\n  crew: system"),
+            "seeded ci-failure-remediation default must name the system crew"
+        );
+        assert!(matches!(
+            ci_failure_definition.dedupe,
+            orbit_types::workflow::DedupePolicy::SkipIfOpen
+        ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
         let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
         assert!(
@@ -961,13 +979,22 @@ mod tests {
                 .iter()
                 .any(|loaded| loaded.definition.name == "security-review")
         );
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "ci-failure-remediation")
+        );
 
         let authored_friction = "operator-authored friction definition\n";
         let authored_qa = "operator-authored QA definition\n";
         let authored_security = "operator-authored security-review definition\n";
+        let authored_ci_failure = "operator-authored ci-failure-remediation definition\n";
         fs::write(&friction_path, authored_friction).expect("write friction edit");
         fs::write(&qa_path, authored_qa).expect("write QA edit");
         fs::write(&security_path, authored_security).expect("write security-review edit");
+        fs::write(&ci_failure_path, authored_ci_failure)
+            .expect("write ci-failure-remediation edit");
         let repeated =
             init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
         assert_eq!(repeated.seeded_default_auto_tasks, 0);
@@ -982,6 +1009,11 @@ mod tests {
         assert_eq!(
             fs::read_to_string(security_path).expect("read preserved security-review definition"),
             authored_security
+        );
+        assert_eq!(
+            fs::read_to_string(ci_failure_path)
+                .expect("read preserved ci-failure-remediation definition"),
+            authored_ci_failure
         );
     }
 
