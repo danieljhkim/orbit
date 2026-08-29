@@ -13,7 +13,6 @@ const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[
     "github.pr.comment.reply",
     "github.pr.comments",
     "github.pr.create",
-    "github.pr.list",
     "github.pr.merge",
     "github.pr.review",
     "github.pr.review.comment",
@@ -59,7 +58,6 @@ fn unused_tools_are_not_registered_in_public_surface() {
     for removed in [
         "git.commit",
         "git.stage_paths",
-        "github.auth.status",
         "github.pr.checkout",
         "github.pr.checks",
         "github.pr.close",
@@ -138,6 +136,62 @@ fn retired_agent_tools_are_absent_from_every_registry_surface_and_dispatch() {
             "dispatch error must name retired tool {retired}: {error}"
         );
     }
+}
+
+/// The read-only GitHub discovery surface a CI-remediation body depends on.
+///
+/// `github.pr.list` was retired with the write-side PR tools; it is back
+/// deliberately, as a read-only listing, because a body that cannot enumerate
+/// open pull-request heads cannot tell a current failure from a stale one.
+/// Nothing that mutates GitHub joined it.
+#[test]
+fn read_only_github_ci_discovery_is_registered_and_write_operations_are_not() {
+    let names = registered_tool_names();
+
+    for retained in [
+        "github.auth.status",
+        "github.pr.list",
+        "github.run.list",
+        "github.run.logs",
+        "github.run.view",
+    ] {
+        assert!(
+            names.contains(retained),
+            "CI discovery tool missing from the agent surface: {retained}"
+        );
+    }
+
+    for absent in [
+        "github.pr.checkout",
+        "github.pr.checks",
+        "github.pr.close",
+        "github.repo.view",
+    ] {
+        assert!(
+            !names.contains(absent),
+            "non-discovery github tool must stay unregistered: {absent}"
+        );
+    }
+}
+
+/// A bounded `github.run.logs` is the whole point of routing log reads through
+/// a tool: an unbounded one would hand a multi-megabyte runner log straight to
+/// the executing agent.
+#[test]
+fn run_logs_advertises_its_output_bound() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_active_schema("github.run.logs")
+        .expect("github.run.logs schema");
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .any(|param| param.name == "max_bytes" && !param.required),
+        "github.run.logs must expose an optional output bound"
+    );
 }
 
 #[test]

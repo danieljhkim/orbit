@@ -1,6 +1,18 @@
 schemaVersion: 1
 name: ci-failure-remediation
-description: Hourly evidence-first remediation of current GitHub Actions failures (GitHub-Actions-shaped; operators on other CI should adapt before enabling)
+description: |
+  Hourly evidence-first remediation of current GitHub Actions failures
+  (GitHub-Actions-shaped; operators on other CI should adapt before enabling).
+  Execution-lane precondition: the lane that runs the minted task must be able
+  to reach an authenticated GitHub CLI through the read-only `github.*` builtin
+  tools, which is where all of this definition's CI discovery happens. Those
+  tools run the GitHub CLI as a child of whichever process executes the tool,
+  so a lane that both denies reads of the CLI's credential directory and
+  forwards no GitHub token has no way to authenticate. Before enabling, confirm
+  the lane satisfies one of them: an executor whose sandbox permits reading the
+  GitHub CLI configuration, or a forwarded GitHub token in the execution
+  environment. Where neither holds, the definition still runs and reports an
+  explicit capability-unavailable outcome rather than a clean result.
 enabled: false
 schedule:
   cron: 15 * * * *
@@ -13,19 +25,63 @@ template:
     evidence described below and report a successful no-current-failure or
     transient-only outcome.
 
-    This definition is GitHub-Actions-shaped (`gh` or the GitHub API, run
-    URLs, checkout logs). Operators on other CI systems must adapt discovery
-    and rerun steps before enabling it.
+    This definition is GitHub-Actions-shaped (workflow runs, run URLs,
+    checkout logs). Operators on other CI systems must adapt discovery and
+    rerun steps before enabling it.
+
+    ## CI discovery runs through Orbit tools, not the vendor CLI
+
+    Perform every CI query through these read-only builtin tools:
+
+    - `orbit tool run github.auth.status`
+    - `orbit tool run github.run.list` — workflow runs, filtered by `branch`,
+      `workflow`, `status`, `event`, and `limit`.
+    - `orbit tool run github.run.view` — one run's jobs with their URLs,
+      steps, conclusions, event, branch, and reported head SHA.
+    - `orbit tool run github.run.logs` — a bounded log excerpt for one run,
+      failed steps by default, plus the checkout evidence parsed out of the
+      runner's own output. Pass `scope: "all"` when you need that checkout
+      evidence, because the checkout step usually succeeds and is therefore
+      absent from the failed-step log. Raise `max_bytes` only when the
+      returned excerpt reports `truncated: true` and the omitted region is
+      the part you need.
+    - `orbit tool run github.pr.list` — open pull requests with their current
+      head SHAs.
+
+    Do not invoke the GitHub command-line client directly and do not call the
+    GitHub REST or GraphQL API by hand. The tools above bound their output,
+    redact credentials, and keep the reported head SHA and the tested checkout
+    commit in separate fields; an ad-hoc query does none of that.
+
+    ## Capability preflight
+
+    Begin with `orbit tool run github.auth.status`. It answers with
+    `available` (is there a GitHub client on this execution lane at all) and
+    `authenticated` (does it hold usable credentials here).
+
+    If either is false, stop the investigation immediately. Persist an
+    `execution_summary` that records the outcome as
+    `capability_unavailable`, quotes the preflight's `detail`, names which of
+    `available` / `authenticated` was false, and states that no CI evidence
+    was gathered. Finish with no diff.
+
+    That outcome is not a clean bill of health, and you must not describe it
+    as one. Never report "no current failures", "no-current-failure", or a
+    transient-only pass when the preflight failed: those conclusions require
+    queries you were unable to run. The three endings are distinct and must
+    stay distinguishable in the summary — capability unavailable, evidenced
+    no-current-failure, and evidenced transient-only.
 
     ## Discovery and duplicate safety
 
     1. Derive this workspace's integration and release branches from
        workspace configuration and git remotes or defaults; do not assume
        branch names. Enumerate this repository's workflows and recent runs
-       with GitHub's API or `gh`, and enumerate open pull requests with
-       their current head SHAs. Cover failures for those current integration
-       and release heads and every open pull-request head, including
-       informational jobs rather than looking only at required checks.
+       with `github.run.list`, and enumerate open pull requests with their
+       current head SHAs with `github.pr.list`. Cover failures for those
+       current integration and release heads and every open pull-request
+       head, including informational jobs rather than looking only at
+       required checks.
     2. If the repository has a CI-failure task hook that files Orbit tasks
        from red runs, search open tasks for its run URL, pull request, SHA,
        and failure signature. Use `orbit tool run orbit.search` and
@@ -35,15 +91,18 @@ template:
        owns the repair and must not fan a red-run cluster out into more
        failure tasks.
     3. For every candidate run, record the run and job URLs, workflow, event,
-       branch or PR, run-attempt number, reported head SHA, and the current
-       branch/PR head SHA. Query the failed jobs and steps and inspect the
-       exact failed-step logs.
-    4. Independently verify the commit that the runner actually checked out
-       from the checkout step/log (`HEAD is now at`, checkout ref/SHA, or
-       equivalent unambiguous evidence). Keep the event's reported head SHA,
-       the current ref head, and the tested checkout commit distinct;
-       pull-request merge SHAs are not interchangeable with pull-request
-       head SHAs.
+       branch or PR, reported head SHA, and the current branch/PR head SHA.
+       A rerun is evidenced by a later run of the same workflow at the same
+       reported head SHA, which `github.run.list` reports. Read the failed
+       jobs and steps from `github.run.view`, and the exact failed-step logs
+       from `github.run.logs`.
+    4. Independently verify the commit that the runner actually checked out.
+       `github.run.logs` reports it as `checkout_commits`, with the matching
+       log lines in `checkout_evidence` (`HEAD is now at`, the checkout ref
+       or SHA, or equivalent unambiguous evidence). Keep the event's reported
+       head SHA, the current ref head, and the tested checkout commit
+       distinct; pull-request merge SHAs are not interchangeable with
+       pull-request head SHAs.
     5. Ignore a failed run as stale when its branch or PR has advanced and the
        failure does not reproduce at the current head, or when a newer
        successful run of the same workflow/check at the relevant current
@@ -80,20 +139,22 @@ template:
     Then run this repository's own documented pre-handoff gate, whatever that
     repository documents — do not assume a particular build target or vendor
     command. After the candidate commit is published through the repository's
-    normal workflow, inspect its GitHub Actions runs and require a green
-    rerun for every affected workflow/check. This includes affected
-    informational jobs even though they remain non-required. Do not declare a
-    repair validated while an affected run is missing, queued, in progress,
-    cancelled, or red.
+    normal workflow, inspect its GitHub Actions runs with `github.run.list`
+    and `github.run.view` and require a green rerun for every affected
+    workflow/check. This includes affected informational jobs even though they
+    remain non-required. Do not declare a repair validated while an affected
+    run is missing, queued, in progress, cancelled, or red.
 
-    Persist an `execution_summary` that maps every investigated run/job URL,
-    reported head SHA, actual checkout commit, and current ref head to its
-    root-cause cluster, disposition (fixed, stale, superseded, or transient),
-    change, local reproduction, exact formerly failing validation, pre-handoff
-    result, and green GitHub rerun URL. Also map any matching task created by
-    a CI-failure hook. For a successful no-diff pass, list the queries, current
-    heads, superseding successes or transient evidence, and why no
-    repository-owned failure remained.
+    Persist an `execution_summary` that names the outcome
+    (`capability_unavailable`, `no_current_failure`, `transient_only`, or
+    `remediated`) and maps every investigated run/job URL, reported head SHA,
+    actual checkout commit, and current ref head to its root-cause cluster,
+    disposition (fixed, stale, superseded, or transient), change, local
+    reproduction, exact formerly failing validation, pre-handoff result, and
+    green GitHub rerun URL. Also map any matching task created by a
+    CI-failure hook. For a successful no-diff pass, list the tool queries you
+    ran, current heads, superseding successes or transient evidence, and why
+    no repository-owned failure remained.
 
     ## Reported-head SHA versus checkout commit
 
@@ -104,12 +165,14 @@ template:
     and checks whether the failure still exists at the current ref head
     before editing.
   acceptance_criteria:
+  - Every CI query ran through the read-only github.* Orbit tools; the vendor command-line client and the GitHub API were not invoked directly.
+  - The run began with a github.auth.status preflight, and an unavailable or unauthenticated surface was persisted as an explicit capability-unavailable outcome that is never reported as a no-current-failure or transient-only pass.
   - Current-head failures across the workspace's derived integration and release branches and open pull requests were enumerated for every repository workflow, including informational jobs.
   - Every investigated run records its reported SHA, actual checkout commit, current ref head, failed job/step, exact log evidence, and stale or superseding evidence where applicable.
   - Repeated red runs are clustered by root cause, and every current repository-owned failure is reproduced and fixed without weakening or bypassing a check.
   - Transient-only classifications cite infrastructure evidence and a successful same-SHA retry; a single non-reproduction is not treated as sufficient evidence.
   - Each fixed cause passes the exact formerly failing validation and the repository's documented pre-handoff gate, and every affected required or informational GitHub Actions check executes successfully on the candidate commit.
-  - The persisted execution_summary maps each run/job URL and SHA to its root cause, disposition, change, validations, green rerun, and any matching CI-failure-hook task.
+  - The persisted execution_summary names the outcome and maps each run/job URL and SHA to its root cause, disposition, change, validations, green rerun, and any matching CI-failure-hook task.
   - A no-current-failure or transient-only investigation is a successful no-diff outcome when its current-head queries and superseding or transient evidence are persisted.
   task_type: bug
   tags:

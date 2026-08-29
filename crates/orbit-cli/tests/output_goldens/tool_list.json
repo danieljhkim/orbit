@@ -2,6 +2,157 @@
   {
     "active": true,
     "builtin": true,
+    "description": "Preflight the GitHub CLI surface: whether a GitHub CLI is present on this execution lane (`available`) and whether it holds usable credentials there (`authenticated`). Neither absence nor a missing credential is an error — both are reported so a caller can record a capability-unavailable outcome instead of mistaking it for a clean result.",
+    "enabled": true,
+    "name": "github.auth.status",
+    "parameters": [],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "List pull requests with their current head SHAs. Defaults to open pull requests.",
+    "enabled": true,
+    "name": "github.pr.list",
+    "parameters": [
+      {
+        "description": "Pull-request state filter: open (default), closed, merged, or all",
+        "name": "state",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Restrict to pull requests targeting one base branch",
+        "name": "base",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Maximum pull requests to return (default 30, capped at 100)",
+        "name": "limit",
+        "param_type": "integer",
+        "required": false
+      },
+      {
+        "description": "Repository in owner/name format (uses current directory if omitted)",
+        "name": "repo",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "List recent GitHub Actions workflow runs with each run's reported head SHA. Filter by branch, workflow, status/conclusion, and event.",
+    "enabled": true,
+    "name": "github.run.list",
+    "parameters": [
+      {
+        "description": "Restrict to runs for one branch",
+        "name": "branch",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Restrict to one workflow by name, file name, or ID",
+        "name": "workflow",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Restrict to one run status or conclusion (queued, in_progress, completed, failure, success, cancelled, timed_out, action_required)",
+        "name": "status",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Restrict to one triggering event (push, pull_request, schedule)",
+        "name": "event",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Maximum runs to return (default 20, capped at 100)",
+        "name": "limit",
+        "param_type": "integer",
+        "required": false
+      },
+      {
+        "description": "Repository in owner/name format (uses current directory if omitted)",
+        "name": "repo",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "Read a bounded excerpt of one GitHub Actions run's logs — failed steps by default, or the full log — plus the commit the runner actually checked out, parsed from the log's own checkout evidence. Output is capped so a large log cannot exhaust the caller's context; `truncated` reports when it was.",
+    "enabled": true,
+    "name": "github.run.logs",
+    "parameters": [
+      {
+        "description": "Numeric workflow-run ID",
+        "name": "run",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "Numeric job ID to narrow the log to one job",
+        "name": "job",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "\"failed\" (default) for failed-step logs, or \"all\" for the full run log — use \"all\" to evidence the checked-out commit, since the checkout step usually succeeds",
+        "name": "scope",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Maximum log bytes to return (default 16384, capped at 262144). The excerpt keeps the head and the tail and marks the omitted gap.",
+        "name": "max_bytes",
+        "param_type": "integer",
+        "required": false
+      },
+      {
+        "description": "Repository in owner/name format (uses current directory if omitted)",
+        "name": "repo",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
+    "description": "Inspect one GitHub Actions workflow run: its reported head SHA, event, branch, and every job with its URL, steps, and conclusions. Unsuccessful jobs and steps are also collected separately.",
+    "enabled": true,
+    "name": "github.run.view",
+    "parameters": [
+      {
+        "description": "Numeric workflow-run ID",
+        "name": "run",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "Repository in owner/name format (uses current directory if omitted)",
+        "name": "repo",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
     "description": "List every auto-task definition in this workspace.",
     "enabled": true,
     "name": "orbit.auto_task.list",

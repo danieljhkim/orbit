@@ -103,7 +103,11 @@ definition of the same name.
   derived integration and release heads plus open pull-request heads, with
   stale-run filtering, root-cause clustering, CI-failure-hook deduplication,
   and evidence-backed no-diff outcomes (ORB-11054). GitHub-Actions-shaped;
-  operators on other CI should adapt before enabling.
+  operators on other CI should adapt before enabling. All CI discovery runs
+  through the read-only `github.*` builtin tools, which bound log output and
+  redact credentials; a `github.auth.status` preflight makes an execution lane
+  that cannot authenticate report a capability-unavailable outcome instead of a
+  clean pipeline (ORB-11059).
 
 ## Workspace-authored definitions in this repo
 
@@ -136,5 +140,8 @@ encode this repository's branches and gates. Re-init preserves them:
 - ORB-11054 — Added the disabled hourly `ci-failure-remediation` default to the
   embedded catalog and split this overview so repo-local workspace-authored
   definitions are no longer listed as if they were embedded defaults.
+- ORB-11059 — Routed the default's CI discovery through the read-only
+  `github.run.*` / `github.pr.list` / `github.auth.status` builtin tools and
+  added the capability-unavailable outcome.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
