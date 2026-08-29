@@ -229,6 +229,7 @@ Retired features stay listed with their `_archive/` path as a historical record.
 | Resident Orchestrator | [docs/design/resident-orchestrator/](./resident-orchestrator/) | codex |
 | Routines | [docs/design/routines/](./routines/) | claude |
 | Task Artifacts | [docs/design/task-artifacts/](./task-artifacts/) | codex |
+| Task Publication | [docs/design/task-publication/](./task-publication/) | codex |
 | Task Sync (archived) | [docs/design/_archive/task-sync/](./_archive/task-sync/) | claude |
 | Terminal Interface | [docs/design/terminal-interface/](./terminal-interface/) | claude |
 | User Interface | [docs/design/user-interface/](./user-interface/) | gemini |

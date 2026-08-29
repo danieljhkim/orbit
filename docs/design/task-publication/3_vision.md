@@ -1,0 +1,118 @@
+---
+title: Task Publication — Vision
+owner: codex
+last_updated: 2026-08-29
+last_validated: 2026-08-29
+status: Draft
+feature: task-publication
+doc_role: vision
+type: design
+summary: Evolution gates for task publication, authority transfer, offline inspection, and bounded retention.
+tags: [task-publication, task-artifacts, backup, git, multi-host]
+paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
+related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
+related_artifacts: [ORB-11068]
+---
+
+# Task Publication — Vision
+
+Task publication should earn trust first as a one-way durability projection.
+Offline mutation, automatic authority movement, and multi-writer convergence are
+separate capabilities with different safety contracts; none is implied by an
+orphan branch.
+
+## 1. Open Questions
+
+1. What default publication trigger and freshness objective are justified by
+   observed task-loss and recovery needs: explicit command, post-workflow hook,
+   scheduled routine, or a combination?
+2. Should an explicit authority transfer carry the last publication generation
+   as a fencing token, and what evidence must the old owner provide before the
+   new owner can publish?
+3. Is direct read-only rendering from fetched Git objects sufficient, or does
+   offline inspection need a disposable indexed cache?
+4. What corpus size or fetch-latency threshold justifies checkpoint compaction,
+   a replacement ref, Git LFS, or an object-store attachment backend?
+5. Should hosted Orbit reuse the publication manifest as an export format, or
+   should hosted backup remain a separate API with different retention and
+   authorization guarantees?
+6. Which sensitivity checks can run deterministically across supported hosts,
+   and should an unavailable scanner fail `include` publication by default?
+
+## 2. Prior Work
+
+### Orbit task artifacts
+
+[Task Artifacts](../task-artifacts/1_overview.md) already separates structured
+metadata, Markdown prose, append-heavy JSONL, and checksummed binary attachments.
+That bundle is the publication unit; publication must not invent a parallel task
+schema.
+
+### Orbit task migration
+
+`orbit task export` and `orbit task import` validate portable `tar.zst` archives,
+restore attachment bytes, rebuild indexes, and make ID collision behavior
+explicit. Publication should reuse those bundle and validation primitives while
+keeping migration's `renumber` behavior out of same-authority recovery.
+
+### Live remote access and federated routing
+
+[Remote Access](../remote-access/1_overview.md) and
+[Federated MCP](../federated-mcp/1_overview.md) preserve destination-host
+authority while making remote state reachable. Publication complements them
+when the owner is offline; it does not cache their health, capabilities, runs,
+or live mutation surface.
+
+### Retired task sync
+
+The archived [Task Sync](../_archive/task-sync/1_overview.md) proposal used the
+same orphan ref as a shared writable registry. It required online task mutations,
+shared allocation, operation-aware replay, tombstones, and structured conflict
+resolution. Task publication keeps the useful isolated Git transport but rejects
+the multi-writer registry contract.
+
+### Git-backed trackers and backups
+
+Git-backed issue trackers demonstrate that structured records can travel through
+ordinary refs. Snapshot and backup systems demonstrate a different lesson:
+replication for recovery can remain one-way even when consumers exist on many
+machines. Publication follows the latter ownership model.
+
+## 3. What May Be Distinctive
+
+Orbit can make a narrow distinction that Git-backed trackers often blur: a
+portable Git tree need not be a shared writable database. The publication commit
+is useful precisely because it is subordinate to one task authority and carries
+enough provenance to refuse ambiguous recovery.
+
+The same task bundle can therefore serve three roles without conflation:
+
+- canonical mutable record on the owner;
+- immutable publication snapshot on the remote ref; and
+- validated recovery input on a consumer.
+
+The transition between roles is explicit. No directory becomes authoritative
+merely because it was fetched or restored.
+
+## 4. References
+
+**Orbit-internal**
+
+- [Task Publication design](./2_design.md)
+- [Task Artifacts design](../task-artifacts/2_design.md)
+- [Remote Access design](../remote-access/2_design.md)
+- [Federated MCP design](../federated-mcp/2_design.md)
+- [State and backup runbook](../../runbooks/state-and-backup.md)
+- [Retired Task Sync design](../_archive/task-sync/2_design.md)
+
+**External**
+
+- Git reference-update and commit-object semantics.
+- Repository-host branch protection and retention behavior.
+- Content-addressed backup and secret-rotation practices.
+
+## Task References
+
+- [ORB-11068] — separated one-way task publication from authority transfer and multi-writer synchronization.
+
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
