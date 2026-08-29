@@ -20,7 +20,7 @@ Task sync is an opt-in, git-orphan-branch task registry that lets engineers on t
 
 This document is the entry point. [2_design.md](./2_design.md) specifies the mechanism, call sites, and migration paths in detail; [3_vision.md](./3_vision.md) names open questions and prior work; [4_decisions.md](./4_decisions.md) is the ADR log.
 
-> **Narrow successor:** the draft [Task Publication](../../task-publication/1_overview.md) proposal reuses an orphan branch only as an authority-owned backup and recovery projection. It does **not** revive online-only mutation, shared allocation, operation-aware merging, or a writable cross-machine registry. A team that genuinely needs shared writable state would still have to revisit those problems directly. [ORB-11068] records the distinction.
+> **Narrow successor:** the draft [Task Publication](../../task-publication/1_overview.md) proposal rejects a source-repository orphan branch in favor of an authority-owned dedicated private repository for backup and recovery. It does **not** revive online-only mutation, shared allocation, operation-aware merging, or a writable cross-machine registry. A team that genuinely needs shared writable state would still have to revisit those problems directly. [ORB-11068] records the distinction.
 
 ---
 

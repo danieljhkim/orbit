@@ -7,7 +7,7 @@ status: Draft
 feature: task-publication
 doc_role: vision
 type: design
-summary: Evolution gates for task publication, authority transfer, offline inspection, and bounded retention.
+summary: Evolution gates for private task-publication repositories, authority transfer, aggregation, and bounded retention.
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
@@ -16,10 +16,10 @@ related_artifacts: [ORB-11068]
 
 # Task Publication — Vision
 
-Task publication should earn trust first as a one-way durability projection.
-Offline mutation, automatic authority movement, and multi-writer convergence are
-separate capabilities with different safety contracts; none is implied by an
-orphan branch.
+Task publication should earn trust first as a one-way durability projection in
+one dedicated private repository per workspace. Repository aggregation, offline
+mutation, automatic authority movement, and multi-writer convergence are
+separate capabilities with different access and safety contracts.
 
 ## 1. Open Questions
 
@@ -32,12 +32,17 @@ orphan branch.
 3. Is direct read-only rendering from fetched Git objects sufficient, or does
    offline inspection need a disposable indexed cache?
 4. What corpus size or fetch-latency threshold justifies checkpoint compaction,
-   a replacement ref, Git LFS, or an object-store attachment backend?
-5. Should hosted Orbit reuse the publication manifest as an export format, or
+   Git LFS, or an object-store attachment backend?
+5. Can several workspaces safely share one private repository without creating
+   cross-workspace access leakage or serializing independent authorities on one
+   branch? V1 answers no and requires separate repositories.
+6. Should hosted Orbit reuse the publication manifest as an export format, or
    should hosted backup remain a separate API with different retention and
    authorization guarantees?
-6. Which sensitivity checks can run deterministically across supported hosts,
+7. Which sensitivity checks can run deterministically across supported hosts,
    and should an unavailable scanner fail `include` publication by default?
+8. Which Git providers can prove repository visibility and branch policy through
+   a stable API without making generic Git publication provider-dependent?
 
 ## 2. Prior Work
 
@@ -65,34 +70,36 @@ or live mutation surface.
 
 ### Retired task sync
 
-The archived [Task Sync](../_archive/task-sync/1_overview.md) proposal used the
-same orphan ref as a shared writable registry. It required online task mutations,
-shared allocation, operation-aware replay, tombstones, and structured conflict
-resolution. Task publication keeps the useful isolated Git transport but rejects
-the multi-writer registry contract.
+The archived [Task Sync](../_archive/task-sync/1_overview.md) proposal used an
+orphan branch in the source-code repository as a shared writable registry. It
+required online task mutations, shared allocation, operation-aware replay,
+tombstones, and structured conflict resolution. Task publication retains Git as
+transport but chooses a separate private repository and rejects the multi-writer
+registry contract.
 
-### Git-backed trackers and backups
+### Dedicated Git repositories and backups
 
-Git-backed issue trackers demonstrate that structured records can travel through
-ordinary refs. Snapshot and backup systems demonstrate a different lesson:
-replication for recovery can remain one-way even when consumers exist on many
-machines. Publication follows the latter ownership model.
+A separate repository provides an independent collaborator, visibility,
+retention, and deletion boundary from source code. Snapshot and backup systems
+demonstrate a second lesson: replication for recovery can remain one-way even
+when consumers exist on many machines. Publication combines those properties.
 
 ## 3. What May Be Distinctive
 
 Orbit can make a narrow distinction that Git-backed trackers often blur: a
-portable Git tree need not be a shared writable database. The publication commit
-is useful precisely because it is subordinate to one task authority and carries
-enough provenance to refuse ambiguous recovery.
+portable private Git repository need not be a shared writable database. The
+publication commit is useful precisely because it is subordinate to one task
+authority and carries enough source/workspace provenance to refuse ambiguous
+recovery.
 
 The same task bundle can therefore serve three roles without conflation:
 
 - canonical mutable record on the owner;
-- immutable publication snapshot on the remote ref; and
+- immutable snapshot in its dedicated publication repository; and
 - validated recovery input on a consumer.
 
-The transition between roles is explicit. No directory becomes authoritative
-merely because it was fetched or restored.
+The transition between roles is explicit. Repository access never becomes task
+authority merely because a machine can clone or push.
 
 ## 4. References
 
@@ -108,11 +115,11 @@ merely because it was fetched or restored.
 **External**
 
 - Git reference-update and commit-object semantics.
-- Repository-host branch protection and retention behavior.
-- Content-addressed backup and secret-rotation practices.
+- Repository-host visibility, branch-protection, and retention behavior.
+- Content-addressed backup, credential management, and secret-rotation practices.
 
 ## Task References
 
-- [ORB-11068] — separated one-way task publication from authority transfer and multi-writer synchronization.
+- [ORB-11068] — chose a dedicated private publication repository and deferred aggregation and synchronization.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -95,12 +95,12 @@ the owning host through [remote-access](../remote-access/1_overview.md) and
 [federated-mcp](../federated-mcp/1_overview.md), so the multi-writer registry
 remains superseded.
 
-The draft [task-publication](../task-publication/1_overview.md) design reuses an
-orphan Git branch for a narrower purpose: one declared owner publishes immutable
-task-bundle snapshots for remote durability, read-only inspection, and explicit
-recovery. It does not revive shared allocation, online-only mutation,
-operation-aware merging, or replicated execution state. [ORB-11068] records
-that distinction.
+The draft [task-publication](../task-publication/1_overview.md) design uses a
+dedicated private Git repository for a narrower purpose: one declared owner
+publishes immutable task-bundle snapshots for remote durability, read-only
+inspection, and explicit recovery. It does not revive shared allocation,
+online-only mutation, operation-aware merging, or replicated execution state.
+[ORB-11068] records that distinction.
 
 ### 2.4 Issue trackers
 
@@ -146,7 +146,7 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) - design folder layout and ADR rules.
 - [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) - archived (superseded) git-sync proposal over the existing task layout; see [remote-access](../remote-access/1_overview.md).
-- [docs/design/task-publication/](../task-publication/1_overview.md) - draft one-way orphan-branch publication proposal that preserves one task authority.
+- [docs/design/task-publication/](../task-publication/1_overview.md) - draft one-way publication proposal using a dedicated private repository while preserving one task authority.
 - [.orbit/adrs/](../../../.orbit/adrs/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
 - [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.
