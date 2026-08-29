@@ -108,7 +108,9 @@ impl SshPublicKey {
     /// The `authorized_keys` line that pins `machine_id` to this key.
     ///
     /// `orbit_command` is the absolute path the destination will run, because
-    /// sshd executes a forced command without a login shell's `PATH`.
+    /// sshd executes a forced command without a login shell's `PATH`. The
+    /// destination requests operator so the matched callers-file grant can be
+    /// realized; that grant remains the ceiling and may still cap or deny it.
     pub fn authorized_keys_line(&self, orbit_command: &str, machine_id: &str) -> String {
         let comment = self
             .comment
@@ -116,7 +118,7 @@ impl SshPublicKey {
             .map(|comment| format!(" {comment}"))
             .unwrap_or_default();
         format!(
-            "command=\"{orbit_command} mcp serve --accept-ssh --caller {machine_id}\",\
+            "command=\"{orbit_command} mcp serve --accept-ssh --caller {machine_id} --operator\",\
              {FORCED_COMMAND_RESTRICTIONS} {algorithm} {blob}{comment}",
             algorithm = self.algorithm,
             blob = self.blob,

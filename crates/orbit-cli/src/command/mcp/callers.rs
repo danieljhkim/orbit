@@ -272,6 +272,11 @@ fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
         "\nInstall the line above in ~/.ssh/authorized_keys on this machine — Orbit does not \
          edit that file."
     );
+    eprintln!(
+        "The forced command requests operator authority, but does not grant it: the matched row \
+         in the callers file remains the ceiling, so agent-only and deny rows cannot become \
+         operator sessions."
+    );
     // The row guidance is written against what is actually in the file: a
     // template that restated `capabilities` would invite an operator to paste
     // a downgrade over a grant they had already made deliberately.
