@@ -69,6 +69,7 @@ fn error_code(err: &OrbitError) -> &str {
         OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::UnknownSelector(_) => "unknown_selector",
         OrbitError::AmbiguousDestination(_) => "ambiguous_destination",
+        OrbitError::AmbiguousCaller(_) => "ambiguous_caller",
         OrbitError::UnreachableDestination(_) => "unreachable_destination",
         OrbitError::StaleRoute(_) => "stale_route",
         OrbitError::UnhealthyCheckout(_) => "unhealthy_checkout",

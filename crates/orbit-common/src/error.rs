@@ -109,6 +109,11 @@ pub enum OrbitError {
     UnknownSelector(String),
     #[error("ambiguous federated destination: {0}")]
     AmbiguousDestination(String),
+    /// A destination's callers file names one caller twice, so the grant it
+    /// would serve that caller is undecidable. Fails the whole file closed at
+    /// load, mirroring [`Self::AmbiguousDestination`] [ORB-11052].
+    #[error("ambiguous MCP caller: {0}")]
+    AmbiguousCaller(String),
     #[error("federated destination unreachable: {0}")]
     UnreachableDestination(String),
     #[error("stale federated route: {0}")]

@@ -111,6 +111,10 @@ impl OrbitRuntime {
                     operation = operation.id,
                     provenance = %denial.provenance,
                     granted = %denial.granted,
+                    caller_machine_id = denial
+                        .remote_caller_grant
+                        .as_ref()
+                        .map(|grant| grant.caller_machine_id.as_str()),
                     "governed operation denied"
                 );
                 let message = denial.to_string();
@@ -156,7 +160,20 @@ impl OrbitRuntime {
             working_directory: std::env::current_dir()
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_else(|_| ".".to_string()),
-            arguments_json: None,
+            // A destination-side grant is recorded next to the effective set,
+            // not folded into it: `effective` alone cannot distinguish a
+            // caller this machine capped from one that never asked for more
+            // [ORB-11052]. `effective_capabilities` below stays the resolved
+            // set every existing query reads.
+            arguments_json: caller.remote_caller_grant().map(|grant| {
+                serde_json::json!({
+                    "caller_machine_id": grant.caller_machine_id,
+                    "granted_capabilities": grant.granted_capabilities,
+                    "effective_capabilities": caller.grants(),
+                    "source": grant.source,
+                })
+                .to_string()
+            }),
             stdout_truncated: None,
             stderr_truncated: None,
             error_message,
@@ -164,7 +181,9 @@ impl OrbitRuntime {
             pid: std::process::id(),
             session_id: None,
             workspace_id: None,
-            caller_machine_id: None,
+            caller_machine_id: caller
+                .remote_caller_grant()
+                .map(|grant| grant.caller_machine_id.clone()),
             caller_host_id: None,
             process_machine_id: None,
             process_host_id: None,

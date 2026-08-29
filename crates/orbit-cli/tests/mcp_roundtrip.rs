@@ -681,6 +681,224 @@ fn an_operator_served_mcp_session_reaches_a_governed_tool() {
     assert_eq!(listed["items"], json!([]));
 }
 
+/// [ORB-11052] The destination decides what a remote-originated session may do.
+///
+/// This is the escalation the callers file closes: the caller writes the
+/// remote argv, so it can always write `--operator`. Here it does, and the
+/// destination — which is the machine that would run the command — refuses
+/// anyway, because its own file grants that caller `agent`. `SSH_CONNECTION`
+/// plus the pipe on stdin is what makes the server treat the session as
+/// remote-originated, exactly as sshd would.
+#[test]
+fn a_remote_originated_session_is_capped_by_the_destinations_callers_file() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+default = "agent"
+
+[[callers]]
+machine_id = "hm_caller"
+label = "the-calling-box"
+capabilities = ["agent"]
+"#,
+    );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--operator", "--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let denied = client.call_tool_err(
+        "orbit_command_exec",
+        json!({
+            "argv": ["true"],
+            "working_directory": workspace.work.to_str().expect("utf8 workspace path"),
+            "workspace": "ws_mcp-roundtrip",
+        }),
+    );
+
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    let message = denied["message"].as_str().expect("a denial message");
+    assert!(message.contains("hm_caller"), "{message}");
+    assert!(message.contains("mcp-callers.toml"), "{message}");
+    assert!(message.contains("operator"), "{message}");
+    assert!(
+        !message.contains("orbit mcp serve --operator"),
+        "advising the flag the caller already passed would send it in a circle: {message}"
+    );
+}
+
+/// [ORB-11052] Origination is the destination's observation, not the caller's
+/// claim. A caller that simply omits the audit label must not thereby present
+/// itself as a local session.
+#[test]
+fn a_remote_session_without_a_caller_label_is_still_resolved_through_the_file() {
+    let workspace = McpWorkspace::init();
+    write_callers(&workspace, "default = \"deny\"\n");
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--operator"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+
+    assert_eq!(
+        denied["code"], "capability_denied",
+        "an unlabelled remote caller falls to the file default, never to its own argv: {denied}"
+    );
+}
+
+/// [ORB-11052] The file is a ceiling, not a grant: it can only lower a session
+/// below what its argv asked for.
+#[test]
+fn the_callers_file_never_raises_a_session_above_its_request() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+"#,
+    );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+
+    assert_eq!(
+        denied["code"], "capability_denied",
+        "a caller granted operator that did not ask for it still holds agent: {denied}"
+    );
+}
+
+/// [ORB-11052] A granted caller reaches the governed tool, and the audit trail
+/// separates what the destination granted from what the session ended up with.
+#[test]
+fn a_granted_remote_caller_reaches_a_governed_tool_and_is_audited_as_a_remote_grant() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+"#,
+    );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--operator", "--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
+
+    // Now the same caller over-asks on a governed tool its narrowing excludes,
+    // so a denial row lands and can be inspected.
+    drop(client);
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+workspaces = ["ws_somewhere-else"]
+"#,
+    );
+    let mut narrowed = workspace.serve_with_args_and_env(
+        &["--operator", "--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let denied = narrowed.call_tool_err("orbit_workflow_run_list", json!({}));
+    assert_eq!(
+        denied["code"], "capability_denied",
+        "a workspaces narrowing is evaluated against the workspace the call lands in: {denied}"
+    );
+    drop(narrowed);
+
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open server audit store");
+    let (subcommand, effective, arguments) = connection
+        .query_row(
+            "SELECT subcommand, capabilities_json, arguments_json FROM audit_events \
+             WHERE command = 'authorization' AND target_id = 'orbit.workflow.run.list' \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .expect("an authorization row for the refused governed tool");
+
+    assert_eq!(subcommand.as_deref(), Some("remote-grant"));
+    let effective = effective.expect("the effective set is recorded");
+    assert!(effective.contains("agent"), "{effective}");
+    assert!(
+        !effective.contains("operator"),
+        "the narrowed call must not hold operator: {effective}"
+    );
+    let arguments = arguments.expect("the grant is recorded beside the effective set");
+    assert!(arguments.contains("hm_caller"), "{arguments}");
+    assert!(arguments.contains("granted_capabilities"), "{arguments}");
+    assert!(arguments.contains("mcp-callers.toml"), "{arguments}");
+}
+
+/// [ORB-11052] A duplicate `machine_id` fails the whole file closed at load —
+/// before any session is served, not per call.
+#[test]
+fn a_duplicate_caller_row_stops_the_server_before_it_serves() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent"]
+
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+"#,
+    );
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--remote-caller-machine-id", "hm_caller"])
+        .env("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run orbit mcp serve");
+
+    assert!(!output.status.success(), "a duplicate row must fail closed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("hm_caller"), "{stderr}");
+}
+
+/// [ORB-11052] A local session's authority resolution is unchanged: no
+/// `SSH_CONNECTION`, so the callers file is not consulted at all and
+/// `--operator` still means operator — even with a file that would deny.
+#[test]
+fn a_local_session_keeps_its_argv_authority() {
+    let workspace = McpWorkspace::init();
+    write_callers(&workspace, "default = \"deny\"\n");
+
+    let mut operator = workspace.serve_with_args(&["--operator"]);
+    let listed = operator.call_tool_ok("orbit_workflow_run_list", json!({}));
+
+    assert_eq!(listed["items"], json!([]));
+}
+
+fn write_callers(workspace: &McpWorkspace, contents: &str) {
+    let orbit_home = workspace.home.join(".orbit");
+    std::fs::create_dir_all(&orbit_home).expect("global orbit root");
+    std::fs::write(orbit_home.join("mcp-callers.toml"), contents).expect("write callers file");
+}
+
 /// ORB-10960: `orbit workspace init --mcp` is the operator-facing bootstrap
 /// path. This proves it end to end — configuration output through server
 /// startup — rather than only unit-testing the argv string builder: it runs

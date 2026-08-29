@@ -6,6 +6,7 @@ use orbit_mcp::{McpSessionAuthority, RemoteProxyArgs};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 
+use super::callers::CallersArgs;
 use super::listen::ListenArgs;
 use super::setup::{InitArgs, RemoveArgs};
 
@@ -51,6 +52,13 @@ pub enum McpSubcommand {
     /// is. The socket authenticates no client, so it binds loopback unless a
     /// wider bind is asked for explicitly.
     Listen(ListenArgs),
+    /// Inspect and seed which callers this machine serves, and as what
+    ///
+    /// On an SSH destination the caller writes the remote argv, so the
+    /// authority a remote session asks for is a request. `~/.orbit/mcp-callers.toml`
+    /// is this machine's answer, and a remote session holds the intersection
+    /// of the two. Local sessions are unaffected.
+    Callers(CallersArgs),
 }
 
 impl Execute for McpSubcommand {
@@ -64,6 +72,7 @@ impl Execute for McpSubcommand {
             Self::Remove(args) => args.execute_without_runtime(None),
             Self::Serve(args) => args.execute_without_runtime(None),
             Self::Listen(args) => args.execute_without_runtime(None),
+            Self::Callers(args) => args.execute_without_runtime(None),
         }
     }
 }
@@ -114,6 +123,12 @@ pub struct ServeArgs {
     /// is the deliberate act — `ORBIT_OPERATOR` in this process's environment is
     /// ignored on the MCP surface, so an operator shell cannot grant operator
     /// authority to an agent's server by accident.
+    ///
+    /// On a session that arrived over SSH this is a *request*, not a grant.
+    /// The machine serving it caps the session at what its
+    /// `~/.orbit/mcp-callers.toml` grants the calling machine, so a caller
+    /// cannot serve itself operator authority on someone else's host. See
+    /// `orbit mcp callers check`.
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
     /// Bind this server's sessions to a registered workspace: a workspace

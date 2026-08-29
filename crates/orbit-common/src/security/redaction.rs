@@ -96,6 +96,9 @@ pub fn redact_sensitive_env_error(error: OrbitError) -> OrbitError {
         OrbitError::UnknownSelector(m) => {
             OrbitError::UnknownSelector(redact_sensitive_env_text(&m))
         }
+        OrbitError::AmbiguousCaller(m) => {
+            OrbitError::AmbiguousCaller(redact_sensitive_env_text(&m))
+        }
         OrbitError::AmbiguousDestination(m) => {
             OrbitError::AmbiguousDestination(redact_sensitive_env_text(&m))
         }
@@ -250,6 +253,7 @@ pub fn redact_all_error(error: OrbitError) -> OrbitError {
         },
         OrbitError::CapabilityDenied(m) => OrbitError::CapabilityDenied(redact_all(&m)),
         OrbitError::UnknownSelector(m) => OrbitError::UnknownSelector(redact_all(&m)),
+        OrbitError::AmbiguousCaller(m) => OrbitError::AmbiguousCaller(redact_all(&m)),
         OrbitError::AmbiguousDestination(m) => OrbitError::AmbiguousDestination(redact_all(&m)),
         OrbitError::UnreachableDestination(m) => OrbitError::UnreachableDestination(redact_all(&m)),
         OrbitError::StaleRoute(m) => OrbitError::StaleRoute(redact_all(&m)),
