@@ -67,9 +67,9 @@ scheduler's cursor untouched — so it is the safe way to test a definition's
 wording before enabling it. Over MCP: `orbit_auto_task_list` and
 `orbit_auto_task_mint`.
 
-## The four seeded definitions
+## The five seeded definitions
 
-`orbit workspace init` seeds all four, disabled:
+`orbit workspace init` seeds all five, disabled:
 
 - **`qa-sweep`** — hourly. Identifies recent changes, exercises them hands-on
   through their real user-facing paths rather than just re-running the test
@@ -86,6 +86,12 @@ wording before enabling it. Over MCP: `orbit_auto_task_list` and
   candidate finding against the live code, files the non-duplicate ones as tasks
   tagged `code-review`, and records the new last-reviewed commit in its execution
   summary — that cursor is the next sweep's window start.
+- **`ci-failure-remediation`** — hourly. Investigates current GitHub Actions
+  failures on the workspace's derived integration and release heads plus open
+  pull-request heads, clusters by root cause, repairs repository-owned failures
+  without weakening a check, and treats a clean current-head pass as a successful
+  no-diff outcome. The body is GitHub-Actions-shaped; operators on other CI
+  should adapt it before enabling.
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.

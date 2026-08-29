@@ -1,0 +1,128 @@
+schemaVersion: 1
+name: ci-failure-remediation
+description: Hourly evidence-first remediation of current GitHub Actions failures (GitHub-Actions-shaped; operators on other CI should adapt before enabling)
+enabled: false
+schedule:
+  cron: 15 * * * *
+template:
+  title: Remediate current GitHub Actions failures
+  description: |
+    Investigate and remediate current GitHub Actions failures for this
+    repository. This task may legitimately finish with no diff: if no
+    current, reproducible, repository-owned failure remains, persist the
+    evidence described below and report a successful no-current-failure or
+    transient-only outcome.
+
+    This definition is GitHub-Actions-shaped (`gh` or the GitHub API, run
+    URLs, checkout logs). Operators on other CI systems must adapt discovery
+    and rerun steps before enabling it.
+
+    ## Discovery and duplicate safety
+
+    1. Derive this workspace's integration and release branches from
+       workspace configuration and git remotes or defaults; do not assume
+       branch names. Enumerate this repository's workflows and recent runs
+       with GitHub's API or `gh`, and enumerate open pull requests with
+       their current head SHAs. Cover failures for those current integration
+       and release heads and every open pull-request head, including
+       informational jobs rather than looking only at required checks.
+    2. If the repository has a CI-failure task hook that files Orbit tasks
+       from red runs, search open tasks for its run URL, pull request, SHA,
+       and failure signature. Use `orbit tool run orbit.search` and
+       `orbit tool run orbit.task.list` / `orbit tool run orbit.task.show`.
+       Reference matching tasks in the execution summary; do not create
+       another task for the same run or root cause. This remediation task
+       owns the repair and must not fan a red-run cluster out into more
+       failure tasks.
+    3. For every candidate run, record the run and job URLs, workflow, event,
+       branch or PR, run-attempt number, reported head SHA, and the current
+       branch/PR head SHA. Query the failed jobs and steps and inspect the
+       exact failed-step logs.
+    4. Independently verify the commit that the runner actually checked out
+       from the checkout step/log (`HEAD is now at`, checkout ref/SHA, or
+       equivalent unambiguous evidence). Keep the event's reported head SHA,
+       the current ref head, and the tested checkout commit distinct;
+       pull-request merge SHAs are not interchangeable with pull-request
+       head SHAs.
+    5. Ignore a failed run as stale when its branch or PR has advanced and the
+       failure does not reproduce at the current head, or when a newer
+       successful run of the same workflow/check at the relevant current
+       commit supersedes it. Cite the advancing or superseding run and SHAs;
+       age alone is not evidence that a failure is stale.
+
+    ## Diagnosis and remediation
+
+    Cluster repeated runs by root cause before editing. Use the failing
+    command, job/step, exact error signature, tested commit, and causal
+    dependency between failures to distinguish one regression repeated across
+    push/PR runs from independent failures. Repair each current root cause
+    once, while retaining a mapping from every affected run/job to that
+    cluster.
+
+    Reproduce every current candidate at the current repository head using
+    the exact command or the narrowest faithful local equivalent. A
+    deterministic repository-owned failure is in scope and must be fixed in
+    this task's worktree. Classify a GitHub service, network, hosted-runner, or
+    other infrastructure failure as transient only with concrete evidence,
+    such as a successful retry at the same SHA plus logs showing the
+    infrastructure fault. Do not call a failure transient merely because it
+    fails to reproduce once.
+
+    Fix the underlying repository-owned cause. Do not disable a workflow,
+    weaken an assertion or lint level, add a broad allow/ignore rule, mark a
+    failing gate `continue-on-error`, remove an affected target from coverage,
+    or otherwise obtain green CI by hiding the failure. Informational checks
+    remain informational, but they must execute successfully.
+
+    ## Validation and handoff
+
+    For each fixed root cause, rerun the exact command that formerly failed.
+    Then run this repository's own documented pre-handoff gate, whatever that
+    repository documents — do not assume a particular build target or vendor
+    command. After the candidate commit is published through the repository's
+    normal workflow, inspect its GitHub Actions runs and require a green
+    rerun for every affected workflow/check. This includes affected
+    informational jobs even though they remain non-required. Do not declare a
+    repair validated while an affected run is missing, queued, in progress,
+    cancelled, or red.
+
+    Persist an `execution_summary` that maps every investigated run/job URL,
+    reported head SHA, actual checkout commit, and current ref head to its
+    root-cause cluster, disposition (fixed, stale, superseded, or transient),
+    change, local reproduction, exact formerly failing validation, pre-handoff
+    result, and green GitHub rerun URL. Also map any matching task created by
+    a CI-failure hook. For a successful no-diff pass, list the queries, current
+    heads, superseding successes or transient evidence, and why no
+    repository-owned failure remained.
+
+    ## Reported-head SHA versus checkout commit
+
+    A CI event's reported head SHA is not always the commit the runner tested.
+    Merge-queue or pull-request merge SHAs, a checkout of a different ref, or
+    stale metadata can make the event SHA disagree with the checkout log. A
+    valid investigation records both, clusters by the actual tested commit,
+    and checks whether the failure still exists at the current ref head
+    before editing.
+  acceptance_criteria:
+  - Current-head failures across the workspace's derived integration and release branches and open pull requests were enumerated for every repository workflow, including informational jobs.
+  - Every investigated run records its reported SHA, actual checkout commit, current ref head, failed job/step, exact log evidence, and stale or superseding evidence where applicable.
+  - Repeated red runs are clustered by root cause, and every current repository-owned failure is reproduced and fixed without weakening or bypassing a check.
+  - Transient-only classifications cite infrastructure evidence and a successful same-SHA retry; a single non-reproduction is not treated as sufficient evidence.
+  - Each fixed cause passes the exact formerly failing validation and the repository's documented pre-handoff gate, and every affected required or informational GitHub Actions check executes successfully on the candidate commit.
+  - The persisted execution_summary maps each run/job URL and SHA to its root cause, disposition, change, validations, green rerun, and any matching CI-failure-hook task.
+  - A no-current-failure or transient-only investigation is a successful no-diff outcome when its current-head queries and superseding or transient evidence are persisted.
+  task_type: bug
+  tags:
+  - ci-failure-remediation
+  - github-actions
+  - no-diff-expected
+  priority: high
+  # The portable system lane is seeded per machine and compatibility-aliased
+  # for configs written before that crew existed.
+  crew: system
+  status: backlog
+dedupe: skip_if_open
+created_by: system
+created_at: 2026-08-29T00:00:00Z
+updated_by: system
+updated_at: 2026-08-29T00:00:00Z

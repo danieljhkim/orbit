@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950, ORB-11054]
 ---
 
 # Auto-tasks — Overview
@@ -78,23 +78,46 @@ becomes just the first definition.
 | Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
 | Deterministic action | `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
-| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |
+| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950, ORB-11054 |
 
-## Definitions shipped in this repo
+## Embedded default catalog
 
-- `qa-sweep` — hands-on validation of recent changes (ORB-10148).
+These five YAML files live under `crates/orbit-core/assets/auto_tasks/` and are
+registered in `DEFAULT_AUTO_TASK_FILES`. `orbit workspace init` materializes a
+missing file as `enabled: false`; re-init does not overwrite a workspace-authored
+definition of the same name.
+
+- `qa-sweep` — hands-on validation of recent changes (ORB-10148, embedded by ORB-10550).
 - `friction-curation` — disabled-by-default daily evidence-first pass that deduplicates open
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
-  verified-real issues (ORB-10440).
+  verified-real issues (ORB-10440, embedded by ORB-10549).
 - `security-review` — disabled-by-default weekly evidence-backed review of
   applicable application code, dependencies, secret handling, and configuration;
   each actionable finding is filed as a durable Orbit task, and a clean review
   is a successful no-op (ORB-10950).
+- `code-review-sweep` — disabled-by-default six-hourly review of commits merged
+  since the previous sweep's recorded cursor.
 - `ci-failure-remediation` — disabled-by-default hourly investigation and
-  remediation of current-head GitHub Actions failures across integration,
-  release, and open-PR refs, with stale-run filtering, root-cause clustering,
-  PR-hook deduplication, and evidence-backed no-diff outcomes (ORB-10514).
+  remediation of current-head GitHub Actions failures across the workspace's
+  derived integration and release heads plus open pull-request heads, with
+  stale-run filtering, root-cause clustering, CI-failure-hook deduplication,
+  and evidence-backed no-diff outcomes (ORB-11054). GitHub-Actions-shaped;
+  operators on other CI should adapt before enabling.
+
+## Workspace-authored definitions in this repo
+
+Orbit's own checkout also carries extra `.orbit/auto_tasks/` files that are
+**not** embedded defaults. They may be enabled, name a family-specific crew, or
+encode this repository's branches and gates. Re-init preserves them:
+
+- `ci-failure-remediation` — this repository's enabled, Orbit-specific
+  definition (ORB-10514, `crew: luna`). Distinct from the inert portable default
+  of the same name; managed-asset reconciliation treats the local file as
+  authored.
+- `doc-duties`, `model-price-audit`, `release-prep`, and this repository's
+  enabled copies of catalog names such as `code-review-sweep` and
+  `security-review`.
 
 ## Task References
 
@@ -110,5 +133,8 @@ becomes just the first definition.
   friction tool invocations on the registered `orbit tool run` surface.
 - ORB-10950 — Added the disabled weekly `security-review` default to the
   embedded catalog so new workspaces can opt into a recurring security review.
+- ORB-11054 — Added the disabled hourly `ci-failure-remediation` default to the
+  embedded catalog and split this overview so repo-local workspace-authored
+  definitions are no longer listed as if they were embedded defaults.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
