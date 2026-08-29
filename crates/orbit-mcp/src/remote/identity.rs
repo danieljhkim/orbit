@@ -4,11 +4,13 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use orbit_common::OrbitError;
+use orbit_types::identity::validate_machine_id;
 use orbit_types::tool::{McpCapability, McpTransport, ToolSessionContext};
 
 use orbit_registry::{HostIdentityState, inspect_host_identity, os_hostname};
 
-use super::callers::SessionCapabilityPolicy;
+use super::callers::{RemoteCallerIdentity, SessionCapabilityPolicy};
+use super::ssh_auth::{self, SshAcceptance};
 
 const LOCAL_MACHINE_FALLBACK: &str = "host/local";
 const LOCAL_HOST_FALLBACK: &str = "local";
@@ -86,8 +88,14 @@ pub fn mcp_server_identity(
     // session for audit even where the policy is local, and a policy the
     // destination resolved from a callers file is by construction remote.
     let is_remote = remote_caller_machine_id.is_some() || policy.is_granted();
-    let caller_machine_id =
-        resolved_caller_machine_id(remote_caller_machine_id.as_deref(), &process_machine_id);
+    // The policy already holds the identity the destination resolved, which
+    // under a forced command is the one it wrote next to the authenticating
+    // key rather than anything the caller forwarded. Re-deriving it from argv
+    // here would quietly disagree with the grant recorded beside it.
+    let caller_machine_id = policy.caller_machine_id().map_or_else(
+        || resolved_caller_machine_id(remote_caller_machine_id.as_deref(), &process_machine_id),
+        ToOwned::to_owned,
+    );
     let mut session_context = ToolSessionContext {
         caller_machine_id: Some(caller_machine_id),
         caller_host_id: (!is_remote).then(|| process_host_id.clone()),
@@ -116,20 +124,79 @@ pub fn mcp_server_identity(
 /// `orbit mcp serve` session.
 ///
 /// This is the one entry point that consults the callers file. Whether it does
-/// is decided here, by the destination, from its own environment — not from
-/// the caller's argv, which a caller can simply not write.
+/// is decided here, by the destination — from a forced command it wrote itself
+/// or, failing that, from its own environment. Never from the caller's argv,
+/// which a caller can simply not write.
 pub fn mcp_serve_session_policy(
     global_root: &Path,
     remote_caller_machine_id: Option<&str>,
     authority: McpSessionAuthority,
+    acceptance: &SshAcceptance,
 ) -> Result<SessionCapabilityPolicy, OrbitError> {
-    if !super::callers::remote_originated() {
+    let Some(identity) = remote_caller_identity(global_root, remote_caller_machine_id, acceptance)?
+    else {
         return Ok(SessionCapabilityPolicy::local(authority));
+    };
+    SessionCapabilityPolicy::resolve(global_root, authority, &identity)
+}
+
+/// Who this destination is serving, or `None` when the session is local.
+///
+/// Under a forced command the answer is the destination's own statement and
+/// origination is settled: sshd ran a line out of this machine's
+/// `authorized_keys`, so no environment check can be more authoritative than
+/// that. Otherwise the Tier 1 observation decides, unchanged.
+fn remote_caller_identity(
+    global_root: &Path,
+    remote_caller_machine_id: Option<&str>,
+    acceptance: &SshAcceptance,
+) -> Result<Option<RemoteCallerIdentity>, OrbitError> {
+    let SshAcceptance::ForcedCommand {
+        caller,
+        caller_key_fingerprint,
+    } = acceptance
+    else {
+        if !super::callers::remote_originated() {
+            return Ok(None);
+        }
+        let (process_machine_id, _) = local_identity(global_root)?;
+        let machine_id = resolved_caller_machine_id(remote_caller_machine_id, &process_machine_id);
+        return Ok(Some(
+            RemoteCallerIdentity::self_asserted(machine_id)
+                .observing(ssh_auth::observe_authenticating_keys(None)),
+        ));
+    };
+    if ssh_auth::ignored_original_command() {
+        // Recorded because it was overridden, not because it was read: the
+        // destination composed this argv, and the caller's string has no way
+        // into the authority decision.
+        tracing::info!(
+            target: "orbit.mcp.callers",
+            "serving a forced-command MCP session; the caller's SSH_ORIGINAL_COMMAND is ignored \
+             entirely and contributes nothing to the requested authority"
+        );
     }
-    let (process_machine_id, _) = local_identity(global_root)?;
-    let caller_machine_id =
-        resolved_caller_machine_id(remote_caller_machine_id, &process_machine_id);
-    SessionCapabilityPolicy::resolve(global_root, authority, &caller_machine_id)
+    let observed = ssh_auth::observe_authenticating_keys(caller_key_fingerprint.as_deref());
+    let Some(caller) = caller
+        .as_deref()
+        .map(str::trim)
+        .filter(|caller| !caller.is_empty())
+    else {
+        // A forced command that names no caller still forces origination — it
+        // simply has no better identity to offer than Tier 1 did.
+        let (process_machine_id, _) = local_identity(global_root)?;
+        let machine_id = resolved_caller_machine_id(remote_caller_machine_id, &process_machine_id);
+        return Ok(Some(
+            RemoteCallerIdentity::self_asserted(machine_id).observing(observed),
+        ));
+    };
+    validate_machine_id(caller).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "`orbit mcp serve --caller {caller}` is not a valid machine identity: {error}. This \
+             argument comes from this machine's own authorized_keys; fix the forced command there"
+        ))
+    })?;
+    Ok(Some(RemoteCallerIdentity::key_bound(caller, observed)))
 }
 
 pub(super) fn local_identity(global_root: &Path) -> Result<(String, String), OrbitError> {

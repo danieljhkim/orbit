@@ -35,11 +35,13 @@ use serde_json::Value;
 pub use adapter::OrbitToolServer;
 pub use listener::{DEFAULT_MCP_LISTEN_PORT, ListenerExposure, McpListener};
 pub use remote::{
-    CALLERS_FILE, CALLERS_FILE_DISPLAY, CallerRow, CallersFile, DefaultGrant,
-    FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL, McpServerIdentity, McpSessionAuthority,
-    RemoteProxyArgs, ResolvedCallerGrant, SeedCaller, SessionCapabilityPolicy, callers_path,
-    canonical_mcp_tool_definitions, execute_discovery_tool, execute_federated_workspace_discovery,
-    load_callers, mcp_serve_session_policy, mcp_server_identity, remote_originated,
+    CALLERS_FILE, CALLERS_FILE_DISPLAY, CallerAuthorizationHealth, CallerRow, CallersFile,
+    DefaultGrant, FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL, FORCED_COMMAND_RESTRICTIONS,
+    McpServerIdentity, McpSessionAuthority, RemoteCallerIdentity, RemoteProxyArgs,
+    ResolvedCallerGrant, SeedCaller, SessionCapabilityPolicy, SshAcceptance, SshPublicKey,
+    callers_path, canonical_mcp_tool_definitions, execute_discovery_tool,
+    execute_federated_workspace_discovery, inspect_caller_authorization, load_callers,
+    mcp_serve_session_policy, mcp_server_identity, parse_public_key, remote_originated,
     render_callers_seed, safe_mcp_tool_names, serve_mcp_remote_proxy, write_callers_seed,
 };
 

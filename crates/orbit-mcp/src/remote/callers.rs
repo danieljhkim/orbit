@@ -14,15 +14,22 @@
 //! the work — the caller's argv becomes a request, and the file is the
 //! ceiling.
 //!
-//! # What this is not
+//! # How strong the identity is depends on the destination
 //!
-//! The caller identity keyed on here is self-asserted: `--remote-caller-machine-id`
-//! is a label the caller chooses, so a caller that can reach this destination
-//! can also name a different row. That makes this an accident guard, in
-//! keeping with the governance kernel's doctrine — strictly stronger than a
-//! caller-authored grant, and not a boundary anything may be relaxed against.
-//! Binding the identity to the key sshd already authenticated is separate,
-//! deliberately later work.
+//! Two tiers share this file, and a reader must never assume which one
+//! answered. Under Tier 1 the caller identity is self-asserted:
+//! `--remote-caller-machine-id` is a label the caller chooses, so a caller that
+//! can reach this destination can also name a different row. That is an
+//! accident guard, in keeping with the governance kernel's doctrine — strictly
+//! stronger than a caller-authored grant, and not a boundary anything may be
+//! relaxed against.
+//!
+//! Under Tier 2 [ORB-11053] the destination pins the identity to a key in its
+//! own `authorized_keys`, sshd authenticates that key, and the forced command
+//! Orbit runs names the caller. There the identity is a real boundary for the
+//! remote case. [`RemoteCallerIdentity`] carries which of the two applies all
+//! the way into the audit row, so the difference is recorded rather than
+//! assumed. See [`super::ssh_auth`].
 
 use std::collections::{BTreeSet, HashSet};
 use std::io;
@@ -30,10 +37,11 @@ use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
 use orbit_types::identity::validate_machine_id;
-use orbit_types::tool::{McpCapability, RemoteCallerGrant};
+use orbit_types::tool::{CallerIdentityProof, McpCapability, RemoteCallerGrant};
 use serde::Deserialize;
 
 use super::identity::McpSessionAuthority;
+use super::ssh_auth::{self, ObservedKeys};
 
 pub const CALLERS_FILE: &str = "mcp-callers.toml";
 
@@ -80,9 +88,12 @@ pub struct CallerRow {
     /// Narrows the grant to these logical `ws_*` IDs.
     #[serde(default)]
     pub workspaces: Option<Vec<String>>,
-    /// Binds the row to an authenticated key. Parsed and surfaced; verifying
-    /// it needs the forced-command path that supplies the key, which is not
-    /// yet built [ORB-11053].
+    /// Binds the row to a key sshd authenticated, in the `SHA256:…` form
+    /// `ssh-keygen -l` prints [ORB-11053]. Enforced at session establishment
+    /// whenever the destination can observe the authenticating key; a
+    /// destination that cannot observe it serves the session and records that
+    /// the identity was unverified, because a fingerprint nothing can check is
+    /// not evidence of a mismatch.
     #[serde(default)]
     pub ssh_key_fingerprint: Option<String>,
 }
@@ -168,6 +179,19 @@ fn validate_callers(file: &CallersFile, path: &Path) -> Result<(), OrbitError> {
                 }
             }
         }
+        if let Some(defect) = row
+            .ssh_key_fingerprint
+            .as_deref()
+            .and_then(ssh_auth::fingerprint_defect)
+        {
+            return Err(invalid(
+                path,
+                format!(
+                    "caller '{}' pins a key fingerprint that {defect}",
+                    row.machine_id
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -213,12 +237,63 @@ fn invalid(path: &Path, detail: String) -> OrbitError {
     ))
 }
 
+/// The caller identity a destination resolves a grant for, and how strongly it
+/// knows it [ORB-11053].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteCallerIdentity {
+    /// The `hm_…` identity a row is selected by.
+    pub machine_id: String,
+    /// Whether the destination composed that identity itself, next to a key
+    /// sshd authenticated, or the caller merely claimed it.
+    pub proof: CallerIdentityProof,
+    /// The keys sshd accepted, when this destination can see them. `None`
+    /// means verification is unavailable here, which is not a mismatch.
+    pub observed_keys: Option<ObservedKeys>,
+}
+
+impl RemoteCallerIdentity {
+    /// An identity the caller claimed. Selects a row and proves nothing.
+    pub fn self_asserted(machine_id: impl Into<String>) -> Self {
+        Self {
+            machine_id: machine_id.into(),
+            proof: CallerIdentityProof::SelfAsserted,
+            observed_keys: None,
+        }
+    }
+
+    /// An identity this destination wrote next to a key in its own
+    /// `authorized_keys`, which sshd authenticated before running the forced
+    /// command that carries it.
+    pub fn key_bound(machine_id: impl Into<String>, observed_keys: Option<ObservedKeys>) -> Self {
+        Self {
+            machine_id: machine_id.into(),
+            proof: CallerIdentityProof::KeyBound,
+            observed_keys,
+        }
+    }
+
+    /// Attach the keys sshd accepted to an already-resolved identity.
+    ///
+    /// A pinned row is enforced under either tier: the operator wrote the
+    /// fingerprint to have it checked, and a Tier 1 destination that happens to
+    /// run `ExposeAuthInfo` can check it just as well. What Tier 2 adds is that
+    /// the *identity itself* is no longer the caller's to choose.
+    pub fn observing(mut self, observed_keys: Option<ObservedKeys>) -> Self {
+        self.observed_keys = observed_keys;
+        self
+    }
+}
+
 /// What this destination will serve one caller, before the caller's request is
 /// taken into account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCallerGrant {
     /// The caller identity this grant was resolved for.
     pub caller_machine_id: String,
+    /// How that identity was established.
+    pub identity: CallerIdentityProof,
+    /// The key the matched row pins the caller to, if it pins one.
+    pub pinned_fingerprint: Option<String>,
     /// The row's `label`, when one matched.
     pub label: Option<String>,
     /// Capabilities on the workspaces this grant covers.
@@ -252,12 +327,13 @@ impl ResolvedCallerGrant {
 }
 
 impl CallersFile {
-    /// What this destination serves `caller_machine_id`.
+    /// What this destination serves `identity`.
     ///
-    /// An absent, malformed, or unmatched caller label falls to the file
+    /// An absent, malformed, or unmatched caller identity falls to the file
     /// default. It never falls back to the caller's argv: that is the
     /// escalation being closed.
-    pub fn resolve(&self, caller_machine_id: &str) -> ResolvedCallerGrant {
+    pub fn resolve(&self, identity: &RemoteCallerIdentity) -> ResolvedCallerGrant {
+        let caller_machine_id = identity.machine_id.as_str();
         let default = self.default.capabilities();
         let Some(row) = self
             .callers
@@ -266,6 +342,8 @@ impl CallersFile {
         else {
             return ResolvedCallerGrant {
                 caller_machine_id: caller_machine_id.to_string(),
+                identity: identity.proof,
+                pinned_fingerprint: None,
                 label: None,
                 granted: default.clone(),
                 elsewhere: default,
@@ -283,6 +361,8 @@ impl CallersFile {
             .collect::<BTreeSet<_>>();
         ResolvedCallerGrant {
             caller_machine_id: caller_machine_id.to_string(),
+            identity: identity.proof,
+            pinned_fingerprint: row.ssh_key_fingerprint.clone(),
             label: row.label.clone(),
             granted,
             elsewhere: default,
@@ -358,7 +438,7 @@ impl SessionCapabilityPolicy {
     pub fn resolve(
         global_root: &Path,
         authority: McpSessionAuthority,
-        caller_machine_id: &str,
+        identity: &RemoteCallerIdentity,
     ) -> Result<Self, OrbitError> {
         let path = callers_path(global_root);
         let exists = path.exists();
@@ -374,15 +454,33 @@ impl SessionCapabilityPolicy {
                  capabilities only — run `orbit mcp callers init` to declare callers"
             );
         }
+        let grant = file.resolve(identity);
+        enforce_key_binding(&grant, identity)?;
         Ok(Self {
             requested: authority.capabilities(),
-            grant: Some(file.resolve(caller_machine_id)),
+            grant: Some(grant),
         })
     }
 
     /// Whether the destination's callers file governs this session.
     pub fn is_granted(&self) -> bool {
         self.grant.is_some()
+    }
+
+    /// The caller identity this destination resolved the grant for.
+    ///
+    /// This is the identity the audit envelope must carry, and it is not
+    /// always the label the caller forwarded: under a forced command it is
+    /// what the destination itself wrote next to the authenticating key.
+    pub fn caller_machine_id(&self) -> Option<&str> {
+        self.grant
+            .as_ref()
+            .map(|grant| grant.caller_machine_id.as_str())
+    }
+
+    /// How the caller identity behind this session was established.
+    pub fn caller_identity(&self) -> Option<CallerIdentityProof> {
+        self.grant.as_ref().map(|grant| grant.identity)
     }
 
     /// Effective capabilities for a call landing in `workspace_id`.
@@ -419,6 +517,7 @@ impl SessionCapabilityPolicy {
             caller_machine_id: grant.caller_machine_id.clone(),
             granted_capabilities: grant.for_workspace(workspace_id),
             source: CALLERS_FILE_DISPLAY.to_string(),
+            identity: grant.identity,
         })
     }
 
@@ -436,6 +535,118 @@ impl SessionCapabilityPolicy {
     ) {
         context.effective_capabilities = self.effective_for(workspace_id);
         context.remote_caller_grant = self.grant_for(workspace_id);
+    }
+}
+
+/// Refuse a session whose authenticating key is not the one its row pins.
+///
+/// The refusal is at session establishment and it is a refusal, not a
+/// downgrade: serving the caller at the file default would make a key mismatch
+/// — which is either a misconfiguration or somebody else's key — look exactly
+/// like a caller that legitimately holds a smaller grant, and the operator who
+/// wrote the fingerprint would never learn the difference.
+///
+/// An unobservable key is a different situation and is deliberately not a
+/// refusal. `ExposeAuthInfo` is off in a stock `sshd_config`, and there is no
+/// evidence of a mismatch in the absence of evidence; the session is served
+/// and the gap is announced once, where an operator will see it.
+fn enforce_key_binding(
+    grant: &ResolvedCallerGrant,
+    identity: &RemoteCallerIdentity,
+) -> Result<(), OrbitError> {
+    let Some(pinned) = &grant.pinned_fingerprint else {
+        return Ok(());
+    };
+    let Some(observed) = &identity.observed_keys else {
+        tracing::warn!(
+            target: "orbit.mcp.callers",
+            caller_machine_id = %identity.machine_id,
+            identity = %identity.proof,
+            "caller row pins an SSH key but this destination cannot observe the authenticating \
+             key; set `ExposeAuthInfo yes` in sshd_config, or supply the fingerprint from an \
+             AuthorizedKeysCommand, to have the pin enforced"
+        );
+        return Ok(());
+    };
+    if observed.matches(pinned) {
+        return Ok(());
+    }
+    Err(OrbitError::UnauthorizedCaller(format!(
+        "caller '{caller}' is pinned to {pinned} by {CALLERS_FILE_DISPLAY} on this machine, but \
+         the key that authenticated this session is {observed} (seen through {source})",
+        caller = identity.machine_id,
+        observed = observed.label(),
+        source = observed.observation.label(),
+    )))
+}
+
+/// What this machine's caller authorization looks like from the outside, for
+/// `orbit doctor` [ORB-11053].
+///
+/// Facts only. The severity of each one, and how it is worded, is the
+/// diagnosing surface's business — this crate speaks MCP and owns the file, not
+/// the doctor's table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerAuthorizationHealth {
+    /// Where the callers file would be.
+    pub path: PathBuf,
+    /// Whether it is there.
+    pub present: bool,
+    /// Why it does not load, when it is there and does not.
+    pub defect: Option<String>,
+    /// Whether this machine accepts SSH logins at all, and therefore whether a
+    /// missing callers file is a live gap or a fact about a machine nobody
+    /// calls.
+    pub serves_ssh: bool,
+    /// Callers granted `operator` with no `ssh_key_fingerprint`: the grant
+    /// that most wants a key behind it, resting on a name the caller chose.
+    pub unpinned_operator_callers: Vec<String>,
+    /// Rows in the file, for a summary line.
+    pub row_count: usize,
+}
+
+/// Inspect this machine's caller authorization without serving a session.
+///
+/// `authorized_keys` is the evidence that this machine is reachable over SSH at
+/// all. It is a weaker signal than a fleet registry would be and is not used
+/// for any decision — only to keep `orbit doctor` from nagging a laptop that
+/// serves nobody about a file it has no reason to write.
+pub fn inspect_caller_authorization(
+    global_root: &Path,
+    authorized_keys: &Path,
+) -> CallerAuthorizationHealth {
+    let path = callers_path(global_root);
+    let present = path.exists();
+    let serves_ssh = std::fs::read_to_string(authorized_keys).is_ok_and(|contents| {
+        contents
+            .lines()
+            .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+    });
+    match load_callers(&path) {
+        Ok(file) => CallerAuthorizationHealth {
+            path,
+            present,
+            defect: None,
+            serves_ssh,
+            unpinned_operator_callers: file
+                .callers
+                .iter()
+                .filter(|row| {
+                    row.ssh_key_fingerprint.is_none()
+                        && row.capabilities.iter().any(|value| value == "operator")
+                })
+                .map(|row| row.machine_id.clone())
+                .collect(),
+            row_count: file.callers.len(),
+        },
+        Err(error) => CallerAuthorizationHealth {
+            path,
+            present,
+            defect: Some(error.to_string()),
+            serves_ssh,
+            unpinned_operator_callers: Vec::new(),
+            row_count: 0,
+        },
     }
 }
 

@@ -893,6 +893,244 @@ fn a_local_session_keeps_its_argv_authority() {
     assert_eq!(listed["items"], json!([]));
 }
 
+/// [ORB-11053] The `authorized_keys` fixture: a real key and the fingerprint
+/// `ssh-keygen -l` prints for it.
+const CALLER_KEY_FINGERPRINT: &str = "SHA256:5HTlLtSRdZg7lKPho8slfRr2Q1QTPuko05+KRX/8PQw";
+const OTHER_KEY_FINGERPRINT: &str = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+/// [ORB-11053] Under a forced command the destination decides that the session
+/// is remote, without waiting to be told by the environment.
+///
+/// There is no `SSH_CONNECTION` here on purpose. Tier 1 would read this as a
+/// local session and hand it the `--operator` its argv asks for; `--accept-ssh`
+/// is this machine's own statement that sshd started it, so the callers file
+/// governs and the over-asking caller is refused.
+#[test]
+fn a_forced_command_session_is_remote_originated_without_ssh_connection() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent"]
+"#,
+    );
+
+    let mut client =
+        workspace.serve_with_args(&["--accept-ssh", "--caller", "hm_caller", "--operator"]);
+    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    let message = denied["message"].as_str().expect("a denial message");
+    assert!(
+        message.contains("hm_caller"),
+        "the refusal names the identity this machine wrote beside the key: {message}"
+    );
+}
+
+/// [ORB-11053] `SSH_ORIGINAL_COMMAND` is ignored entirely — not parsed, not
+/// merged, not used to derive a requested authority.
+///
+/// The caller asks for operator in the only channel a forced command leaves it,
+/// and the file would grant operator. The session still holds agent alone,
+/// because the request comes from the argv *this machine* composed.
+#[test]
+fn a_forced_command_ignores_the_command_the_caller_asked_for() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+"#,
+    );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--accept-ssh", "--caller", "hm_caller"],
+        &[(
+            "SSH_ORIGINAL_COMMAND",
+            "orbit mcp serve --operator --remote-caller-machine-id hm_caller",
+        )],
+    );
+    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+
+    assert_eq!(
+        denied["code"], "capability_denied",
+        "the caller's own command must contribute nothing to the requested authority: {denied}"
+    );
+}
+
+/// [ORB-11053] `--caller` is honored only under `--accept-ssh`. On an ordinary
+/// `orbit mcp serve` it is a caller-supplied flag, and a caller-supplied
+/// identity is the escalation this tier exists to close.
+#[test]
+fn an_ordinary_serve_refuses_to_take_a_caller_identity() {
+    let workspace = McpWorkspace::init();
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--caller", "hm_caller"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run orbit mcp serve");
+
+    assert!(
+        !output.status.success(),
+        "an identity nobody authenticated must not be accepted"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--accept-ssh"), "{stderr}");
+}
+
+/// [ORB-11053] A pinned row is enforced where the key is observable, and a
+/// mismatch stops the session at establishment rather than serving it at a
+/// lower ceiling — which would be indistinguishable from a smaller grant.
+#[test]
+fn a_key_mismatch_stops_the_server_before_it_serves() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        &format!(
+            r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
+"#
+        ),
+    );
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "mcp",
+            "serve",
+            "--accept-ssh",
+            "--caller",
+            "hm_caller",
+            "--caller-key-fingerprint",
+            OTHER_KEY_FINGERPRINT,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run orbit mcp serve");
+
+    assert!(!output.status.success(), "a key mismatch must fail closed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("hm_caller"), "{stderr}");
+}
+
+/// [ORB-11053] The matching key is served, and the trail says the identity was
+/// proved rather than claimed. Tier 2 is opt-in, so a reader who cannot tell
+/// the tiers apart in the audit row would have to assume which one ran.
+#[test]
+fn a_key_bound_caller_is_served_and_audited_as_key_bound() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        &format!(
+            r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent", "operator"]
+ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
+"#
+        ),
+    );
+
+    let mut client = workspace.serve_with_args(&[
+        "--accept-ssh",
+        "--caller",
+        "hm_caller",
+        "--caller-key-fingerprint",
+        CALLER_KEY_FINGERPRINT,
+        "--operator",
+    ]);
+    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
+    assert_eq!(listed["items"], json!([]));
+    drop(client);
+
+    // Now the same key-bound caller over-asks, so a denial row lands and the
+    // recorded grant can be inspected. Only a denial (or an override) writes
+    // an authorization row; an ordinary success has nothing to explain.
+    write_callers(
+        &workspace,
+        &format!(
+            r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent"]
+ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
+"#
+        ),
+    );
+    let mut capped = workspace.serve_with_args(&[
+        "--accept-ssh",
+        "--caller",
+        "hm_caller",
+        "--caller-key-fingerprint",
+        CALLER_KEY_FINGERPRINT,
+        "--operator",
+    ]);
+    let denied = capped.call_tool_err("orbit_workflow_run_list", json!({}));
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    drop(capped);
+
+    let arguments = last_authorization_arguments(&workspace);
+    assert!(arguments.contains("hm_caller"), "{arguments}");
+    assert!(
+        arguments.contains("key-bound"),
+        "the trail must separate a proved identity from a claimed one: {arguments}"
+    );
+}
+
+/// [ORB-11053] A Tier 1 destination stays valid, and says so in the trail. The
+/// same refusal, keyed on a label the caller forwarded, is recorded as
+/// self-asserted rather than left for a reader to assume.
+#[test]
+fn a_tier_one_destination_is_audited_as_self_asserted() {
+    let workspace = McpWorkspace::init();
+    write_callers(
+        &workspace,
+        r#"
+[[callers]]
+machine_id = "hm_caller"
+capabilities = ["agent"]
+"#,
+    );
+
+    let mut client = workspace.serve_with_args_and_env(
+        &["--operator", "--remote-caller-machine-id", "hm_caller"],
+        &[("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")],
+    );
+    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+    assert_eq!(denied["code"], "capability_denied", "{denied}");
+    drop(client);
+
+    let arguments = last_authorization_arguments(&workspace);
+    assert!(
+        arguments.contains("self-asserted"),
+        "a Tier 1 grant must be legible as one rather than assumed: {arguments}"
+    );
+}
+
+/// The `arguments_json` of the most recent authorization row for the governed
+/// workflow-list tool.
+fn last_authorization_arguments(workspace: &McpWorkspace) -> String {
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open server audit store");
+    connection
+        .query_row(
+            "SELECT arguments_json FROM audit_events \
+             WHERE command = 'authorization' AND target_id = 'orbit.workflow.run.list' \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("an authorization row for the governed tool")
+        .expect("the grant is recorded beside the effective set")
+}
+
 fn write_callers(workspace: &McpWorkspace, contents: &str) {
     let orbit_home = workspace.home.join(".orbit");
     std::fs::create_dir_all(&orbit_home).expect("global orbit root");

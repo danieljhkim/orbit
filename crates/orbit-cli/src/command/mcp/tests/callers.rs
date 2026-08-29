@@ -101,3 +101,56 @@ fn seeding_reads_registry_owners_and_configured_destinations() {
         "the configured SSH target is the operator-facing name already written down"
     );
 }
+
+#[test]
+fn authorize_names_both_the_caller_and_its_key() {
+    match parse(&[
+        "callers",
+        "authorize",
+        "--machine-id",
+        "hm_alpha",
+        "--key",
+        "/home/op/.ssh/id_ed25519.pub",
+    ]) {
+        CallersSubcommand::Authorize(args) => {
+            assert_eq!(args.machine_id, "hm_alpha");
+            assert_eq!(args.key, Path::new("/home/op/.ssh/id_ed25519.pub"));
+        }
+        _ => panic!("expected `authorize`"),
+    }
+}
+
+#[test]
+fn authorize_needs_a_key_to_bind_the_identity_to() {
+    // Without a key there is nothing to bind, and a line with only a machine
+    // ID would read as a grant while authenticating nobody [ORB-11053].
+    for argv in [
+        ["callers", "authorize", "--machine-id", "hm_alpha"].as_slice(),
+        ["callers", "authorize", "--key", "/tmp/k.pub"].as_slice(),
+        ["callers", "authorize"].as_slice(),
+    ] {
+        assert!(
+            CallersCli::try_parse_from(argv).is_err(),
+            "unexpected partial authorize accepted: {argv:?}"
+        );
+    }
+}
+
+#[test]
+fn authorize_refuses_a_machine_id_that_is_not_one() {
+    let key = tempfile::NamedTempFile::new().expect("temp key");
+    std::fs::write(
+        key.path(),
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMX3zk7E9dEvV0tMWx6b+FKAWBcQiweXKgUOc0AqkKH op@box\n",
+    )
+    .expect("write key");
+    let args = CallersAuthorizeArgs {
+        machine_id: "daniels-mac-mini".to_string(),
+        key: key.path().to_path_buf(),
+    };
+
+    let error = authorize(Path::new("/nonexistent/mcp-callers.toml"), &args)
+        .expect_err("a row is keyed by machine_id, so a host label cannot select one");
+
+    assert!(matches!(error, OrbitError::InvalidInput(_)), "{error:?}");
+}
