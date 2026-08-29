@@ -179,9 +179,9 @@ fn nested_orbit_task_update_initializes_global_audit_under_sandbox() {
         "durable execution summary missing after sandboxed update: {task}"
     );
     assert!(
-        global.join("state/audit").is_dir(),
-        "global audit store should be initialized: {}",
-        global.join("state/audit").display()
+        global.join("orbit.db").is_file(),
+        "global SQLite audit store should be initialized: {}",
+        global.join("orbit.db").display()
     );
 }
 
