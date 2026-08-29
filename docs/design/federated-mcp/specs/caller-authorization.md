@@ -36,9 +36,9 @@ This is the unresolved transport-authentication question in [3_vision.md §1](..
 This spec therefore has two tiers, and they must not be conflated:
 
 - **Tier 1 — the callers file (implemented, [ORB-11052]).** Moves the authorization *statement* to the destination. The caller identity it keys on is self-asserted, so Tier 1 alone remains an accident guard, in keeping with the kernel's doctrine. It is still strictly stronger than the prior behavior, where the caller's request *was* the grant.
-- **Tier 2 — key-bound caller identity (implemented, [ORB-11053]).** Makes the identity authenticated by delegating to sshd. This is a real boundary for the remote case, and it introduces no Orbit-held credential: the key is the one SSH already checks. It is opt-in per destination: a destination running Tier 1 alone stays valid, with the weaker guarantee stated above.
+- **Tier 2 — key-bound caller identity (implemented, [ORB-11053], hardened by [ORB-11057]).** Makes the identity authenticated by delegating key admission to sshd and requiring a destination-issued forced-command capability before Orbit honors the caller name. It is opt-in per destination: a destination running Tier 1 alone stays valid, with the weaker guarantee stated above.
 
-Neither tier introduces a password, token, or keychain into Orbit. That prohibition stands.
+Tier 2 persists only a SHA-256 capability digest under `~/.orbit/mcp-ssh-acceptance/`; the bearer value exists only in the root-managed authorized-keys entry. Orbit does not hold the caller's SSH private key or any reusable login credential.
 
 ## The callers file
 
@@ -94,7 +94,7 @@ Both halves are load-bearing:
 
 A session that is not remote-originated is **local**, and its authority resolution is unchanged: the process owner is the caller, argv stays authoritative, and the accident-guard model holds unmodified. No local workflow changes.
 
-Under Tier 2 the environment check is not consulted at all: `--accept-ssh` in a forced command *is* the destination's statement that sshd started this process, and no observation of the environment can be more authoritative than a line out of the destination's own `authorized_keys`.
+Under Tier 2 the environment check is not consulted. The hidden `--accept-ssh <destination-token>` value must match the digest Orbit issued while rendering the forced command. Public flag names and SSH-shaped environment variables are not evidence and cannot select a Tier 2 row.
 
 ## Requested, granted, effective
 
@@ -119,19 +119,19 @@ Invariants:
 Tier 1 leaves `machine_id` self-asserted. To make the caller identity authenticated, the destination pins it to the SSH key that authenticated, using a forced command in `authorized_keys`:
 
 ```
-command="/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha --operator",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA… caller@daniels-mac-mini
+command="/usr/local/bin/orbit mcp serve --accept-ssh <destination-token> --caller hm_alpha --operator",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA… caller@daniels-mac-mini
 ```
 
 Invariants:
 
 1. Under a forced command the destination composes its own argv. The caller's command arrives only as `SSH_ORIGINAL_COMMAND` and **is ignored entirely** — not parsed, not merged, not used to derive a requested authority. The generated line names `--operator`, so the destination-owned request is `{agent, operator}`; the matched callers-file row remains the grant ceiling, and intersection with an agent-only or deny grant still cannot yield operator. Its *presence* is logged, so the trail shows that something was overridden; its content never enters a decision.
-2. `--accept-ssh` marks the session remote-originated regardless of the environment checks above, and `--caller` supplies the identity. `--caller` is honored **only** in the presence of `--accept-ssh`, and never as a caller-supplied flag on an ordinary `orbit mcp serve`. The two are modeled as one `SshAcceptance` value with an `Environment` and a `ForcedCommand` variant, so an identity without a forced command is unrepresentable rather than merely rejected.
-3. When a row carries `ssh_key_fingerprint` and the destination can observe the authenticating key, a mismatch refuses the session at establishment, not a silent downgrade — a downgrade would make somebody else's key indistinguishable from a caller that legitimately holds a smaller grant. There are two observation sources: `SSH_USER_AUTH`, the file sshd writes under `ExposeAuthInfo yes`, and `--caller-key-fingerprint` in the forced command, for an `AuthorizedKeysCommand` that expands sshd's `%f` token. **An unobservable key is not a mismatch**: `ExposeAuthInfo` is off in a stock `sshd_config`, so a destination that cannot see the key serves the session and warns once, naming both remedies. Refusing there would make the field unusable for the destinations most likely to want it.
+2. `--accept-ssh` takes an unguessable destination capability. `--caller` is honored only after that capability matches the SHA-256 digest stored for the same machine ID. `SshAcceptance::Environment` has nowhere to hold a caller identity, while `ForcedCommand` carries both the caller and capability; merely typing the public flags cannot construct a trusted identity.
+3. The acceptance record also carries the fingerprint of the public key beside which the capability was emitted. A matched row with a different `ssh_key_fingerprint` refuses the session at establishment. `--caller-key-fingerprint` is not accepted: a copied fingerprint is caller text, not an observation. `SSH_USER_AUTH` remains an optional Tier 1 observation source and is not what upgrades an argv identity to `key-bound`.
 4. A pin is enforced under either tier. The operator wrote the fingerprint to have it checked, and a Tier 1 destination that happens to expose auth info can check it. What Tier 2 adds is that the *identity itself* stops being the caller's to choose.
 5. Tier 2 is opt-in. A destination running Tier 1 alone is a valid, documented configuration with a weaker guarantee, and the difference is legible in the audit trail rather than assumed — see `caller_identity` below.
-6. A forced command that omits `--caller` still forces origination; it simply has no better identity to offer than Tier 1 did, and is recorded as self-asserted.
+6. An acceptance invocation that omits `--caller`, presents an unknown token, or names a caller other than the token record refuses before loading a grant.
 
-`orbit mcp callers authorize --machine-id <hm_…> --key <path>` emits the operator-requesting `authorized_keys` line. The request is intentionally broad so the same generated setup can realize whichever authority the matched callers-file row grants; it does not grant operator by itself. Orbit does not edit `authorized_keys` itself; that file decides who may log into the machine at all, which is well beyond what a task tool should rewrite. The line goes to stdout alone so it can be redirected, and everything the operator must *do* — install the line, add the printed `ssh_key_fingerprint` to the row, enable an observation source — goes to stderr. The command also reports whether a row for that `machine_id` exists and whether it already pins a different key.
+`orbit mcp callers authorize --machine-id <hm_…> --key <path>` rotates the caller's acceptance capability, stores its digest and key fingerprint under `~/.orbit/mcp-ssh-acceptance/`, and emits the operator-requesting authorized-keys line. The bearer-bearing line must be installed in a root-owned `AuthorizedKeysFile` the login account cannot read (for example `/etc/ssh/authorized_keys/%u` configured in `sshd_config`); putting it in account-owned `~/.ssh/authorized_keys` would let an ordinary remote command read and replay the bearer. The request remains capped by the callers-file row. Orbit does not edit SSH login policy itself. Re-running the command invalidates the previously emitted line.
 
 The rendered line carries `no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding` and the absolute path of the running `orbit`: a forced command runs without a login shell's `PATH`, and the MCP transport is one non-PTY stdio pipe that needs none of the capabilities those options close.
 

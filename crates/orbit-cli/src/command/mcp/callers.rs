@@ -51,9 +51,9 @@ pub enum CallersSubcommand {
     ///
     /// Under that line sshd composes this machine's argv itself, so the caller
     /// identity stops being a label the caller chose and becomes something it
-    /// had to hold a key to select. The line is printed, never installed:
-    /// `~/.ssh/authorized_keys` governs access to the whole machine, which is
-    /// well beyond what Orbit should be editing.
+    /// had to hold a key to select. The line is printed, never installed. It
+    /// belongs in a root-managed `AuthorizedKeysFile` the login account cannot
+    /// read, because the forced command carries a destination capability.
     Authorize(CallersAuthorizeArgs),
 }
 
@@ -100,7 +100,7 @@ impl CallersArgs {
             CallersSubcommand::List(_) => list(&path),
             CallersSubcommand::Check(args) => check(&path, &args.machine_id),
             CallersSubcommand::Init(_) => init(&global_root, &path),
-            CallersSubcommand::Authorize(args) => authorize(&path, &args),
+            CallersSubcommand::Authorize(args) => authorize(&global_root, &path, &args),
         }
     }
 }
@@ -238,11 +238,10 @@ fn init(global_root: &Path, path: &Path) -> CommandOut {
 /// Render the `authorized_keys` line that pins `machine_id` to a key.
 ///
 /// Everything an operator has to *do* goes to stderr and the artifact goes to
-/// stdout alone, so `>> ~/.ssh/authorized_keys` appends a working line and
-/// nothing else. Orbit will not perform that append itself: that file decides
-/// who may log into the machine at all, and a tool that manages tasks has no
-/// business rewriting it.
-fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
+/// stdout alone. Orbit will not install it: the root-managed
+/// `AuthorizedKeysFile` decides who may log into the machine at all, and a
+/// tool that manages tasks has no business rewriting it.
+fn authorize(global_root: &Path, callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
     validate_machine_id(&args.machine_id).map_err(|error| {
         OrbitError::InvalidInput(format!(
             "'{}' is not a machine identity: {error}",
@@ -257,6 +256,11 @@ fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
     })?;
     let key = orbit_mcp::parse_public_key(&contents)?;
     let fingerprint = key.fingerprint()?;
+    // Refuse malformed destination policy before rotating the capability and
+    // invalidating an already-installed forced command.
+    let file = orbit_mcp::load_callers(callers_path)?;
+    let acceptance_token =
+        orbit_mcp::issue_ssh_acceptance(global_root, &args.machine_id, &fingerprint)?;
     // sshd runs a forced command without a login shell, so a bare `orbit`
     // would depend on a PATH the line cannot count on.
     let orbit_command = std::env::current_exe()
@@ -265,12 +269,15 @@ fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
 
     println!(
         "{}",
-        key.authorized_keys_line(&orbit_command, &args.machine_id)
+        key.authorized_keys_line(&orbit_command, &args.machine_id, &acceptance_token)
     );
 
     eprintln!(
-        "\nInstall the line above in ~/.ssh/authorized_keys on this machine — Orbit does not \
-         edit that file."
+        "\nInstall the line above in a root-owned AuthorizedKeysFile that this login account \
+         cannot read (for example /etc/ssh/authorized_keys/%u configured in sshd_config). Orbit \
+         does not edit login policy. Do not put this line in the account-owned \
+         ~/.ssh/authorized_keys: its destination capability would then be readable and \
+         replayable by an ordinary remote command."
     );
     eprintln!(
         "The forced command requests operator authority, but does not grant it: the matched row \
@@ -280,7 +287,6 @@ fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
     // The row guidance is written against what is actually in the file: a
     // template that restated `capabilities` would invite an operator to paste
     // a downgrade over a grant they had already made deliberately.
-    let file = orbit_mcp::load_callers(callers_path)?;
     let callers_path = callers_path.display();
     match file
         .callers
@@ -320,9 +326,8 @@ fn authorize(callers_path: &Path, args: &CallersAuthorizeArgs) -> CommandOut {
         ),
     }
     eprintln!(
-        "\nPinning is enforced where this machine can observe the authenticating key: set \
-         `ExposeAuthInfo yes` in sshd_config, or have an AuthorizedKeysCommand pass sshd's %f \
-         token as `--caller-key-fingerprint`."
+        "\nThe generated destination capability binds this forced command to the key fingerprint. \
+         Re-running authorize rotates it and invalidates the previous generated line."
     );
     Ok(CommandOutput::Silent)
 }

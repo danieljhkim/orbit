@@ -131,15 +131,20 @@ pub struct ServeArgs {
     /// `orbit mcp callers check`.
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
-    /// Treat this session as SSH-originated because sshd started it.
+    /// Treat this session as SSH-originated after validating the destination
+    /// capability carried by this hidden option.
     ///
-    /// Meaningful only inside a forced command in the *called* machine's own
-    /// `authorized_keys`, which is where this machine — not the caller —
-    /// composes the whole argv. `orbit mcp callers authorize` prints the line
-    /// to install. The caller's own command is then ignored entirely: it is
-    /// never parsed, merged, or used to decide what the session may do.
-    #[arg(long, conflicts_with = "mode")]
-    pub accept_ssh: bool,
+    /// Meaningful only inside the forced command printed by `orbit mcp callers
+    /// authorize`. That setup stores only the capability digest locally and
+    /// installs the bearer value in a root-managed `AuthorizedKeysFile`, so a
+    /// caller-authored remote command cannot reproduce it.
+    #[arg(
+        long,
+        value_name = "DESTINATION_TOKEN",
+        hide = true,
+        conflicts_with = "mode"
+    )]
+    pub accept_ssh: Option<String>,
     /// The calling machine's identity, as this machine wrote it beside the
     /// authenticating key.
     ///
@@ -154,19 +159,6 @@ pub struct ServeArgs {
         conflicts_with = "mode"
     )]
     pub caller: Option<String>,
-    /// Fingerprint of the key that authenticated this session, for an
-    /// `AuthorizedKeysCommand` that expands sshd's `%f` into the forced command.
-    ///
-    /// Needed only where `ExposeAuthInfo` is off, which is the sshd default.
-    /// When the matched callers row pins a key, a mismatch refuses the session
-    /// instead of serving it at a lower ceiling.
-    #[arg(
-        long,
-        value_name = "FINGERPRINT",
-        requires = "accept_ssh",
-        conflicts_with = "mode"
-    )]
-    pub caller_key_fingerprint: Option<String>,
     /// Bind this server's sessions to a registered workspace: a workspace
     /// name, a logical workspace ID (`ws_*`), or an absolute registered
     /// checkout path.
@@ -226,10 +218,10 @@ impl ServeArgs {
                 // `--caller` is unreachable without `--accept-ssh`, so the
                 // "honored only under a forced command" rule is carried by the
                 // type the server receives rather than re-checked downstream.
-                if self.accept_ssh {
+                if let Some(acceptance_token) = self.accept_ssh {
                     SshAcceptance::ForcedCommand {
                         caller: self.caller,
-                        caller_key_fingerprint: self.caller_key_fingerprint,
+                        acceptance_token,
                     }
                 } else {
                     SshAcceptance::Environment

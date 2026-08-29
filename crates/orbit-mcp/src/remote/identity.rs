@@ -153,7 +153,7 @@ fn remote_caller_identity(
 ) -> Result<Option<RemoteCallerIdentity>, OrbitError> {
     let SshAcceptance::ForcedCommand {
         caller,
-        caller_key_fingerprint,
+        acceptance_token,
     } = acceptance
     else {
         if !super::callers::remote_originated() {
@@ -163,7 +163,7 @@ fn remote_caller_identity(
         let machine_id = resolved_caller_machine_id(remote_caller_machine_id, &process_machine_id);
         return Ok(Some(
             RemoteCallerIdentity::self_asserted(machine_id)
-                .observing(ssh_auth::observe_authenticating_keys(None)),
+                .observing(ssh_auth::observe_authenticating_keys()),
         ));
     };
     if ssh_auth::ignored_original_command() {
@@ -176,18 +176,15 @@ fn remote_caller_identity(
              entirely and contributes nothing to the requested authority"
         );
     }
-    let observed = ssh_auth::observe_authenticating_keys(caller_key_fingerprint.as_deref());
     let Some(caller) = caller
         .as_deref()
         .map(str::trim)
         .filter(|caller| !caller.is_empty())
     else {
-        // A forced command that names no caller still forces origination — it
-        // simply has no better identity to offer than Tier 1 did.
-        let (process_machine_id, _) = local_identity(global_root)?;
-        let machine_id = resolved_caller_machine_id(remote_caller_machine_id, &process_machine_id);
-        return Ok(Some(
-            RemoteCallerIdentity::self_asserted(machine_id).observing(observed),
+        return Err(OrbitError::UnauthorizedCaller(
+            "SSH MCP acceptance did not name a caller; regenerate the authorized_keys line with \
+             `orbit mcp callers authorize`"
+                .to_string(),
         ));
     };
     validate_machine_id(caller).map_err(|error| {
@@ -196,7 +193,11 @@ fn remote_caller_identity(
              argument comes from this machine's own authorized_keys; fix the forced command there"
         ))
     })?;
-    Ok(Some(RemoteCallerIdentity::key_bound(caller, observed)))
+    let observed = ssh_auth::verify_ssh_acceptance(global_root, caller, acceptance_token)?;
+    Ok(Some(RemoteCallerIdentity::key_bound(
+        caller,
+        Some(observed),
+    )))
 }
 
 pub(super) fn local_identity(global_root: &Path) -> Result<(String, String), OrbitError> {

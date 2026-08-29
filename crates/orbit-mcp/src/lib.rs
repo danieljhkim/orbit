@@ -40,9 +40,10 @@ pub use remote::{
     McpServerIdentity, McpSessionAuthority, RemoteCallerIdentity, RemoteProxyArgs,
     ResolvedCallerGrant, SeedCaller, SessionCapabilityPolicy, SshAcceptance, SshPublicKey,
     callers_path, canonical_mcp_tool_definitions, execute_discovery_tool,
-    execute_federated_workspace_discovery, inspect_caller_authorization, load_callers,
-    mcp_serve_session_policy, mcp_server_identity, parse_public_key, remote_originated,
-    render_callers_seed, safe_mcp_tool_names, serve_mcp_remote_proxy, write_callers_seed,
+    execute_federated_workspace_discovery, inspect_caller_authorization, issue_ssh_acceptance,
+    load_callers, mcp_serve_session_policy, mcp_server_identity, parse_public_key,
+    remote_originated, render_callers_seed, safe_mcp_tool_names, serve_mcp_remote_proxy,
+    write_callers_seed,
 };
 
 /// Back-end for the complete MCP tool surface.

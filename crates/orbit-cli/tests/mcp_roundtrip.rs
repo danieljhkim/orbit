@@ -1046,16 +1046,14 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
         ),
     );
     let argv = generated_forced_command_argv(&workspace);
+    assert_eq!(&argv[1..4], ["mcp", "serve", "--accept-ssh"]);
+    assert!(
+        argv[4].starts_with(".orbit-ssh-"),
+        "the setup must inject a destination-issued capability: {argv:?}"
+    );
     assert_eq!(
-        &argv[1..],
-        [
-            "mcp",
-            "serve",
-            "--accept-ssh",
-            "--caller",
-            "hm_caller",
-            "--operator"
-        ],
+        &argv[5..],
+        ["--caller", "hm_caller", "--operator"],
         "the rendered destination-owned request must ask for operator"
     );
 
@@ -1092,15 +1090,11 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
     );
 }
 
-/// [ORB-11053] Under a forced command the destination decides that the session
-/// is remote, without waiting to be told by the environment.
-///
-/// There is no `SSH_CONNECTION` here on purpose. Tier 1 would read this as a
-/// local session and hand it the `--operator` its argv asks for; `--accept-ssh`
-/// is this machine's own statement that sshd started it, so the callers file
-/// governs and the over-asking caller is refused.
+/// [ORB-11057] The public flag name is not proof that a destination generated
+/// the argv. Without the destination-issued value the old forged invocation is
+/// rejected before a caller row can be selected.
 #[test]
-fn a_forced_command_session_is_remote_originated_without_ssh_connection() {
+fn caller_controlled_accept_ssh_flags_cannot_select_a_caller_row() {
     let workspace = McpWorkspace::init();
     write_callers(
         &workspace,
@@ -1111,16 +1105,34 @@ capabilities = ["agent"]
 "#,
     );
 
-    let mut client =
-        workspace.serve_with_args(&["--accept-ssh", "--caller", "hm_caller", "--operator"]);
-    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
-
-    assert_eq!(denied["code"], "capability_denied", "{denied}");
-    let message = denied["message"].as_str().expect("a denial message");
-    assert!(
-        message.contains("hm_caller"),
-        "the refusal names the identity this machine wrote beside the key: {message}"
-    );
+    for environment in [None, Some(("SSH_CONNECTION", "forged by caller"))] {
+        let mut command = McpWorkspace::orbit_command(&workspace.work, &workspace.home);
+        command.args([
+            "mcp",
+            "serve",
+            "--accept-ssh",
+            "caller-controlled-token",
+            "--caller",
+            "hm_caller",
+            "--operator",
+        ]);
+        if let Some((name, value)) = environment {
+            command.env(name, value).env(
+                "SSH_ORIGINAL_COMMAND",
+                "orbit mcp serve --accept-ssh caller-controlled-token --caller hm_caller",
+            );
+        }
+        let output = command
+            .stdin(Stdio::null())
+            .output()
+            .expect("run forged orbit mcp serve");
+        assert!(!output.status.success(), "forged acceptance must fail");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not issued by this destination"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 /// [ORB-11053] `SSH_ORIGINAL_COMMAND` is ignored entirely — not parsed, not
@@ -1141,13 +1153,21 @@ capabilities = ["agent", "operator"]
 "#,
     );
 
-    let mut client = workspace.serve_with_args_and_env(
-        &["--accept-ssh", "--caller", "hm_caller"],
-        &[(
+    let mut argv = generated_forced_command_argv(&workspace);
+    argv.retain(|argument| argument != "--operator");
+    let child = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(&argv[1..])
+        .env(
             "SSH_ORIGINAL_COMMAND",
             "orbit mcp serve --operator --remote-caller-machine-id hm_caller",
-        )],
-    );
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn destination-issued command");
+    let mut client = McpClient::new(child);
+    workspace.initialize(&mut client);
     let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
 
     assert_eq!(
@@ -1177,6 +1197,32 @@ fn an_ordinary_serve_refuses_to_take_a_caller_identity() {
     assert!(stderr.contains("--accept-ssh"), "{stderr}");
 }
 
+/// [ORB-11057] The former fingerprint argv is not an authentication source.
+#[test]
+fn copied_fingerprint_flags_are_refused() {
+    let workspace = McpWorkspace::init();
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "mcp",
+            "serve",
+            "--accept-ssh",
+            "--caller",
+            "hm_caller",
+            "--caller-key-fingerprint",
+            CALLER_KEY_FINGERPRINT,
+        ])
+        .env("SSH_CONNECTION", "192.0.2.8 43100 198.51.100.2 22")
+        .env("SSH_ORIGINAL_COMMAND", "caller controlled")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run legacy forged argv");
+
+    assert!(
+        !output.status.success(),
+        "copied fingerprint must not authenticate"
+    );
+}
+
 /// [ORB-11053] A pinned row is enforced where the key is observable, and a
 /// mismatch stops the session at establishment rather than serving it at a
 /// lower ceiling — which would be indistinguishable from a smaller grant.
@@ -1190,21 +1236,13 @@ fn a_key_mismatch_stops_the_server_before_it_serves() {
 [[callers]]
 machine_id = "hm_caller"
 capabilities = ["agent", "operator"]
-ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
+ssh_key_fingerprint = "{OTHER_KEY_FINGERPRINT}"
 "#
         ),
     );
-
+    let argv = generated_forced_command_argv(&workspace);
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
-        .args([
-            "mcp",
-            "serve",
-            "--accept-ssh",
-            "--caller",
-            "hm_caller",
-            "--caller-key-fingerprint",
-            OTHER_KEY_FINGERPRINT,
-        ])
+        .args(&argv[1..])
         .stdin(Stdio::null())
         .output()
         .expect("run orbit mcp serve");
@@ -1232,14 +1270,8 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
         ),
     );
 
-    let mut client = workspace.serve_with_args(&[
-        "--accept-ssh",
-        "--caller",
-        "hm_caller",
-        "--caller-key-fingerprint",
-        CALLER_KEY_FINGERPRINT,
-        "--operator",
-    ]);
+    let argv = generated_forced_command_argv(&workspace);
+    let mut client = workspace.serve_with_generated_argv(&argv);
     let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
     assert_eq!(listed["items"], json!([]));
     drop(client);
@@ -1258,14 +1290,7 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
 "#
         ),
     );
-    let mut capped = workspace.serve_with_args(&[
-        "--accept-ssh",
-        "--caller",
-        "hm_caller",
-        "--caller-key-fingerprint",
-        CALLER_KEY_FINGERPRINT,
-        "--operator",
-    ]);
+    let mut capped = workspace.serve_with_generated_argv(&argv);
     let denied = capped.call_tool_err("orbit_workflow_run_list", json!({}));
     assert_eq!(denied["code"], "capability_denied", "{denied}");
     drop(capped);

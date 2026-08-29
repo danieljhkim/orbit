@@ -3,17 +3,18 @@
 //! Tier 1 of destination-side caller authorization keys on a label the caller
 //! chose, so it can only be an accident guard. This module supplies the
 //! missing half: the caller identity is written by the *destination*, next to
-//! a public key, in its own `authorized_keys`, and sshd will not run that
-//! forced command for anyone who cannot complete the key exchange. Orbit holds
-//! no credential of its own — the key is the one SSH already checks.
+//! a public key, in a root-managed `AuthorizedKeysFile`, and sshd will not run
+//! that forced command for anyone who cannot complete the key exchange. A
+//! destination-issued bearer capability prevents the same argv from being
+//! replayed as an ordinary remote command; Orbit persists only its digest.
 //!
 //! Three things live here, and nothing else:
 //!
 //! 1. The `SHA256:` fingerprint of an SSH public key, in the form `ssh-keygen`
 //!    and `sshd` print, so an operator can compare what Orbit says with what
 //!    their own tools say without a conversion step.
-//! 2. Observation of the key that actually authenticated this session, from
-//!    the two places a destination can learn it.
+//! 2. Destination-issued acceptance capabilities and optional observation of
+//!    the key that authenticated a Tier 1 session.
 //! 3. The `authorized_keys` line an operator installs. Orbit renders it and
 //!    never writes it: that file governs shell access to the whole machine,
 //!    which is far more than Orbit's business.
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
 use orbit_common::OrbitError;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Set by sshd to a file listing the authentication methods that succeeded,
@@ -34,6 +36,9 @@ const SSH_USER_AUTH_ENV: &str = "SSH_USER_AUTH";
 /// Named here only so the one place that mentions it can say, in one spot,
 /// that it is never read as input. See [`ignored_original_command`].
 const SSH_ORIGINAL_COMMAND_ENV: &str = "SSH_ORIGINAL_COMMAND";
+
+/// Destination-local capabilities issued into generated forced commands.
+const SSH_ACCEPTANCE_DIR: &str = "mcp-ssh-acceptance";
 
 /// The prefix sshd and `ssh-keygen -l` use for a SHA-256 key fingerprint.
 pub const FINGERPRINT_PREFIX: &str = "SHA256:";
@@ -78,10 +83,18 @@ pub enum SshAcceptance {
     ForcedCommand {
         /// The caller identity the destination wrote next to that key.
         caller: Option<String>,
-        /// The authenticating key's fingerprint, when an
-        /// `AuthorizedKeysCommand` expanded sshd's `%f` into the line.
-        caller_key_fingerprint: Option<String>,
+        /// An unguessable capability issued by this destination alongside the
+        /// generated `authorized_keys` line.
+        acceptance_token: String,
     },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SshAcceptanceRecord {
+    schema_version: u32,
+    machine_id: String,
+    key_fingerprint: String,
+    token_sha256: String,
 }
 
 /// An SSH public key as `authorized_keys` and `*.pub` files spell it.
@@ -111,19 +124,115 @@ impl SshPublicKey {
     /// sshd executes a forced command without a login shell's `PATH`. The
     /// destination requests operator so the matched callers-file grant can be
     /// realized; that grant remains the ceiling and may still cap or deny it.
-    pub fn authorized_keys_line(&self, orbit_command: &str, machine_id: &str) -> String {
+    pub fn authorized_keys_line(
+        &self,
+        orbit_command: &str,
+        machine_id: &str,
+        acceptance_token: &str,
+    ) -> String {
         let comment = self
             .comment
             .as_deref()
             .map(|comment| format!(" {comment}"))
             .unwrap_or_default();
         format!(
-            "command=\"{orbit_command} mcp serve --accept-ssh --caller {machine_id} --operator\",\
+            "command=\"{orbit_command} mcp serve --accept-ssh {acceptance_token} --caller \
+             {machine_id} --operator\",\
              {FORCED_COMMAND_RESTRICTIONS} {algorithm} {blob}{comment}",
             algorithm = self.algorithm,
             blob = self.blob,
         )
     }
+}
+
+/// Issue the destination-only capability embedded in one generated
+/// `authorized_keys` forced command. Only its digest is persisted; the bearer
+/// value exists solely in the line the operator installs.
+pub fn issue_ssh_acceptance(
+    global_root: &Path,
+    machine_id: &str,
+    key_fingerprint: &str,
+) -> Result<String, OrbitError> {
+    let path = acceptance_record_path(global_root, machine_id);
+    std::fs::create_dir_all(global_root).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to create Orbit root '{}': {error}",
+            global_root.display()
+        ))
+    })?;
+    let random = tempfile::Builder::new()
+        .prefix(".orbit-ssh-")
+        .rand_bytes(32)
+        .tempfile_in(global_root)
+        .map_err(|error| {
+            OrbitError::Io(format!("failed to generate SSH acceptance token: {error}"))
+        })?;
+    let token = random
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| OrbitError::Io("generated SSH acceptance token was not UTF-8".to_string()))?
+        .to_string();
+    random.close().map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to finish SSH acceptance token generation: {error}"
+        ))
+    })?;
+
+    let record = SshAcceptanceRecord {
+        schema_version: 1,
+        machine_id: machine_id.to_string(),
+        key_fingerprint: key_fingerprint.to_string(),
+        token_sha256: BASE64_NO_PAD.encode(Sha256::digest(token.as_bytes())),
+    };
+    let contents = toml::to_string(&record).map_err(|error| {
+        OrbitError::Io(format!("failed to encode SSH acceptance record: {error}"))
+    })?;
+    orbit_common::fs::io::atomic_write_text(&path, &contents).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to write SSH acceptance record '{}': {error}",
+            path.display()
+        ))
+    })?;
+    Ok(token)
+}
+
+/// Validate a forced-command capability and recover the key it was issued
+/// beside. Caller-controlled argv can present a token, but cannot mint one.
+pub fn verify_ssh_acceptance(
+    global_root: &Path,
+    machine_id: &str,
+    token: &str,
+) -> Result<ObservedKeys, OrbitError> {
+    let path = acceptance_record_path(global_root, machine_id);
+    let contents = std::fs::read_to_string(&path).map_err(|_| unauthorized_acceptance())?;
+    let record =
+        toml::from_str::<SshAcceptanceRecord>(&contents).map_err(|_| unauthorized_acceptance())?;
+    let presented = BASE64_NO_PAD.encode(Sha256::digest(token.as_bytes()));
+    if record.schema_version != 1
+        || record.machine_id != machine_id
+        || presented != record.token_sha256
+    {
+        return Err(unauthorized_acceptance());
+    }
+    Ok(ObservedKeys {
+        fingerprints: vec![record.key_fingerprint],
+        observation: KeyObservation::DestinationCapability,
+    })
+}
+
+fn unauthorized_acceptance() -> OrbitError {
+    OrbitError::UnauthorizedCaller(
+        "SSH MCP acceptance was not issued by this destination; regenerate the authorized_keys \
+         line with `orbit mcp callers authorize`"
+            .to_string(),
+    )
+}
+
+fn acceptance_record_path(global_root: &Path, machine_id: &str) -> PathBuf {
+    global_root
+        .join(SSH_ACCEPTANCE_DIR)
+        .join(format!("{machine_id}.toml"))
 }
 
 /// Parse one SSH public key, as written in a `*.pub` file.
@@ -200,9 +309,8 @@ pub fn fingerprint_defect(candidate: &str) -> Option<String> {
 /// Where a destination learned the key that authenticated this session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyObservation {
-    /// Supplied in the destination-composed argv, by an
-    /// `AuthorizedKeysCommand` that expanded sshd's `%f` token.
-    ForcedCommandArgv,
+    /// Recovered from a destination-issued forced-command capability.
+    DestinationCapability,
     /// Read from the file sshd wrote for `ExposeAuthInfo`.
     AuthInfoFile,
 }
@@ -211,7 +319,7 @@ impl KeyObservation {
     /// How the source reads in an operator-facing message.
     pub fn label(self) -> &'static str {
         match self {
-            Self::ForcedCommandArgv => "the forced command's --caller-key-fingerprint",
+            Self::DestinationCapability => "the destination-issued authorized_keys capability",
             Self::AuthInfoFile => "sshd's SSH_USER_AUTH",
         }
     }
@@ -251,22 +359,11 @@ impl ObservedKeys {
 /// The key that authenticated this session, or `None` when the destination
 /// cannot see it.
 ///
-/// `None` is the ordinary case on a stock `sshd_config`: `ExposeAuthInfo` is
-/// off by default. It means verification is *unavailable*, which is not the
-/// same as a mismatch and must not be treated as one — a destination that
-/// cannot observe the key still serves the session, and the audit trail
-/// records the identity as key-bound or self-asserted on the strength of the
-/// forced command alone.
-pub fn observe_authenticating_keys(supplied_fingerprint: Option<&str>) -> Option<ObservedKeys> {
-    if let Some(fingerprint) = supplied_fingerprint
-        .map(str::trim)
-        .filter(|fingerprint| !fingerprint.is_empty())
-    {
-        return Some(ObservedKeys {
-            fingerprints: vec![fingerprint.to_string()],
-            observation: KeyObservation::ForcedCommandArgv,
-        });
-    }
+/// `None` is the ordinary Tier 1 case on a stock `sshd_config`:
+/// `ExposeAuthInfo` is off by default. Tier 2 does not rely on this environment
+/// path; its destination capability recovers the fingerprint recorded when the
+/// forced command was generated.
+pub fn observe_authenticating_keys() -> Option<ObservedKeys> {
     let path = PathBuf::from(std::env::var_os(SSH_USER_AUTH_ENV)?);
     read_auth_info(&path)
 }

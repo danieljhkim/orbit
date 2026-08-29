@@ -1,6 +1,7 @@
 use super::super::ssh_auth::{
     FORCED_COMMAND_RESTRICTIONS, KeyObservation, ObservedKeys, SshAcceptance,
-    auth_info_fingerprints, fingerprint_defect, observe_authenticating_keys, parse_public_key,
+    auth_info_fingerprints, fingerprint_defect, issue_ssh_acceptance, parse_public_key,
+    verify_ssh_acceptance,
 };
 
 /// A real `ssh-keygen -t ed25519` key, kept beside the fingerprint
@@ -39,12 +40,16 @@ fn a_comment_and_trailing_whitespace_do_not_change_the_key() {
 fn the_rendered_line_forces_this_machines_own_argv() {
     let key = parse_public_key(KEY).expect("a public key parses");
 
-    let line = key.authorized_keys_line("/usr/local/bin/orbit", "hm_alpha");
+    let line = key.authorized_keys_line(
+        "/usr/local/bin/orbit",
+        "hm_alpha",
+        ".orbit-ssh-destination-capability",
+    );
 
     assert!(
         line.starts_with(
-            "command=\"/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha \
-             --operator\","
+            "command=\"/usr/local/bin/orbit mcp serve --accept-ssh \
+             .orbit-ssh-destination-capability --caller hm_alpha --operator\","
         ),
         "the destination composes the whole operator request, absolute path included: {line}"
     );
@@ -114,12 +119,24 @@ fn a_pin_matches_regardless_of_padding_or_prefix_transcription() {
 }
 
 #[test]
-fn an_authorized_keys_command_may_supply_the_fingerprint_directly() {
-    let observed =
-        observe_authenticating_keys(Some(KEY_FINGERPRINT)).expect("a supplied fingerprint is one");
+fn only_a_destination_issued_capability_recovers_the_bound_key() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let token = issue_ssh_acceptance(dir.path(), "hm_alpha", KEY_FINGERPRINT).expect("issue token");
+    let observed = verify_ssh_acceptance(dir.path(), "hm_alpha", &token).expect("verify token");
+    let record =
+        std::fs::read_to_string(dir.path().join("mcp-ssh-acceptance").join("hm_alpha.toml"))
+            .expect("read verifier record");
 
-    assert_eq!(observed.observation, KeyObservation::ForcedCommandArgv);
+    assert_eq!(observed.observation, KeyObservation::DestinationCapability);
     assert!(observed.matches(KEY_FINGERPRINT));
+    assert!(
+        !record.contains(&token),
+        "only the bearer digest may be persisted"
+    );
+    assert!(
+        verify_ssh_acceptance(dir.path(), "hm_alpha", "caller-controlled").is_err(),
+        "argv alone must not mint a destination capability"
+    );
 }
 
 #[test]
