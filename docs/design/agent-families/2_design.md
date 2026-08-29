@@ -4,7 +4,7 @@ type: design
 title: "Agent Families — Design"
 owner: human
 last_updated: 2026-08-09
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Draft
 feature: agent-families
 doc_role: design
@@ -17,16 +17,16 @@ This document describes the current implementation of Orbit agent families and c
 
 ## 1. Family Registry
 
-The family registry spans `crates/orbit-common/src/types/actor.rs` and `crates/orbit-common/src/types/agent_pair.rs`. `all_agent_families()` returns the supported family identifiers; `agent_from_model()` and `provider_from_model()` infer family and provider from model strings in `actor.rs`; and `infer_agent_family_from_model()` in `agent_pair.rs` remains the conservative recovery helper for older persisted artifacts.
+The family registry spans `crates/orbit-types/src/identity/actor.rs` and `crates/orbit-types/src/identity/agent_pair.rs`. `all_agent_families()` returns the supported family identifiers; `agent_from_model()` and `provider_from_model()` infer family and provider from model strings in `actor.rs`; and `infer_agent_family_from_model()` in `agent_pair.rs` remains the conservative recovery helper for older persisted artifacts.
 
 Adding a family is still a cross-cutting change: executor assets, sandbox behavior, provider inference, review automation, and scoreboard code all need review. The fixed registry forces that audit instead of silently accepting unknown families.
 
 
 ## 2. Crew Registry
 
-Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model`, `provider`, and `backend` fields. A rendered activity input may select a named `crew`; without one, dispatch uses the run's resolved crew. Activity and job schemas reject the retired `role` key.
+Workspace config defines one concrete assignment under each `[crews.<name>]`: flat `model` and `provider` fields. A rendered activity input may select a named `crew`; without one, dispatch uses the run's resolved crew. Activity and job schemas reject the retired `role` key.
 
-`crates/orbit-config/src/raw.rs` owns the TOML shape, and `crates/orbit-config/src/resolved.rs` materializes it into `Crew` values from `orbit-common`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model`, `provider`, and `backend` fields, and `[workflow].default_crew` values that do not name a defined crew.
+`crates/orbit-config/src/raw.rs` owns the TOML shape, and `crates/orbit-config/src/resolved.rs` materializes it into `Crew` values from `orbit-types`. Runtime loading rejects incomplete crews, retired `planner`/`implementer`/`reviewer` role sub-tables with guidance to write flat `model` and `provider` fields, and `[workflow].default_crew` values that do not name a defined crew. A retired `backend` key is accepted only as inert `cli` or rejected with migration guidance.
 
 The built-in runtime registry uses model-specific standard crews: Claude provides `opus`, `sonnet`, and `fable`; Codex provides `sol`, `terra`, and `luna`; Gemini provides `gemini`; Grok provides `grok`; Copilot provides `copilot`; and Cursor provides `cursor`. Fresh `orbit init` config filters that registry by detected provider CLIs and chooses the first emitted standard crew as `[workflow].default_crew` (`opus`, `sol`, `gemini`, `grok`, `copilot`, or `cursor`).
 
