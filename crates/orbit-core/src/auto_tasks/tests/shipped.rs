@@ -536,6 +536,15 @@ fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
                 .contains("github-actions shaped"),
         "description must disclose the GitHub Actions shape to operators on other CI"
     );
+    let description = definition.description.to_lowercase();
+    assert!(
+        description.contains("execution-lane precondition"),
+        "description must state what the execution lane needs before an operator enables it"
+    );
+    assert!(
+        description.contains("github cli") && description.contains("token"),
+        "description must name both ways a lane can satisfy the precondition"
+    );
 
     let body = definition.template.description.to_lowercase();
     for required in [
@@ -555,6 +564,15 @@ fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
         "orbit tool run orbit.search",
         "orbit tool run orbit.task.list",
         "orbit tool run orbit.task.show",
+        // CI discovery is tool-mediated so it stays bounded, redacted, and
+        // usable from an execution lane that holds no GitHub credentials of
+        // its own.
+        "orbit tool run github.auth.status",
+        "orbit tool run github.run.list",
+        "orbit tool run github.run.view",
+        "orbit tool run github.run.logs",
+        "orbit tool run github.pr.list",
+        "capability_unavailable",
     ] {
         assert!(
             body.contains(required),
@@ -563,6 +581,32 @@ fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
     }
     assert!(!body.contains("orbit task list"));
     assert!(!body.contains("orbit task show"));
+
+    // The body must not reach around the tools. A bare vendor-CLI invocation
+    // or a hand-rolled API call skips the output bound and the redaction, and
+    // fails opaquely on a lane with no credentials.
+    for forbidden in [
+        "`gh ",
+        "$(gh ",
+        "gh run ",
+        "gh pr ",
+        "gh auth ",
+        "gh api",
+        "api.github.com",
+        "curl ",
+    ] {
+        assert!(
+            !definition.template.description.contains(forbidden),
+            "template must route CI discovery through the github.* tools; found '{forbidden}'"
+        );
+    }
+
+    // The silent failure this definition exists to avoid: an agent that could
+    // not query CI at all, reporting a clean pipeline.
+    assert!(
+        body.contains("never report \"no current failures\""),
+        "template must forbid reporting a clean result after a failed preflight"
+    );
     assert!(
         definition
             .template
@@ -586,6 +630,18 @@ fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
                 criterion.contains("no-current-failure") && criterion.contains("no-diff")
             }),
         "ci-failure-remediation must treat a successful no-diff outcome as success"
+    );
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("github.auth.status")
+                    && criterion.contains("capability-unavailable")
+            }),
+        "ci-failure-remediation must require the preflight and a distinguishable capability-unavailable outcome"
     );
 }
 

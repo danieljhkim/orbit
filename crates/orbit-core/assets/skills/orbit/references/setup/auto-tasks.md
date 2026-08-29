@@ -91,7 +91,15 @@ wording before enabling it. Over MCP: `orbit_auto_task_list` and
   pull-request heads, clusters by root cause, repairs repository-owned failures
   without weakening a check, and treats a clean current-head pass as a successful
   no-diff outcome. The body is GitHub-Actions-shaped; operators on other CI
-  should adapt it before enabling.
+  should adapt it before enabling. **Execution-lane precondition:** all of its CI
+  discovery goes through the read-only `github.auth.status`, `github.run.list`,
+  `github.run.view`, `github.run.logs`, and `github.pr.list` builtin tools, which
+  run the GitHub CLI as a child of whichever process executes the tool. So the
+  lane that runs the minted task needs one of: an executor whose sandbox permits
+  reading the GitHub CLI's configuration directory, or a GitHub token forwarded
+  through `[execution.env] pass`. Check before enabling — a lane with neither
+  still completes, but every run ends at the preflight with a
+  capability-unavailable summary and no investigation.
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.
