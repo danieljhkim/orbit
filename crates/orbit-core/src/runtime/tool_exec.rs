@@ -41,20 +41,7 @@ impl OrbitRuntime {
             None => resolve_task_id_from_context(self, &tool_context)?,
         };
 
-        // Ensure fs tools always have a workspace boundary for sandboxing.
-        if tool_context.workspace_root.is_none() {
-            tool_context.workspace_root = resolve_workspace_root_from_context(
-                self,
-                resolved_task_id.as_deref(),
-                &tool_context,
-            )?;
-        }
-        if tool_context.policy_engine.is_none() {
-            tool_context.policy_engine = Some(Arc::new(self.policy_engine().clone()));
-        }
-        if tool_context.fs_profile.is_none() {
-            tool_context.fs_profile = read_activity_fs_profile_from_env();
-        }
+        populate_filesystem_policy_context(self, resolved_task_id.as_deref(), &mut tool_context)?;
 
         self.check_tool_enabled(name)?;
 
@@ -165,6 +152,32 @@ impl OrbitRuntime {
         }
         Ok(())
     }
+}
+
+/// Fill the trusted runtime-owned pieces of a registered tool's filesystem
+/// policy context without replacing an explicitly supplied activity context.
+///
+/// CLI-backed activities call this before registry dispatch so `proc.spawn`
+/// receives the same canonical checkout and policy engine as in-process
+/// activities. The registry chokepoint calls it again for ordinary filesystem
+/// tools, making the operation idempotent while preserving fail-closed profile
+/// handling when the managed envelope omitted `ORBIT_ACTIVITY_FS_PROFILE`.
+pub(crate) fn populate_filesystem_policy_context(
+    runtime: &OrbitRuntime,
+    task_id: Option<&str>,
+    tool_context: &mut ToolContext,
+) -> Result<(), OrbitError> {
+    if tool_context.workspace_root.is_none() {
+        tool_context.workspace_root =
+            resolve_workspace_root_from_context(runtime, task_id, tool_context)?;
+    }
+    if tool_context.policy_engine.is_none() {
+        tool_context.policy_engine = Some(Arc::new(runtime.policy_engine().clone()));
+    }
+    if tool_context.fs_profile.is_none() {
+        tool_context.fs_profile = read_activity_fs_profile_from_env();
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_task_id_from_context(

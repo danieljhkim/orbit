@@ -23,7 +23,7 @@ use crate::redact_sensitive_env_text;
 use crate::runtime::run_input::{
     managed_run_context_from_env, managed_run_context_run_id_from_env,
 };
-use crate::runtime::tool_exec::CapabilityEnforcement;
+use crate::runtime::tool_exec::{CapabilityEnforcement, populate_filesystem_policy_context};
 
 #[cfg(test)]
 pub(super) use crate::runtime::run_input::ORBIT_MANAGED_RUN_CONTEXT_ENV;
@@ -228,7 +228,7 @@ impl OrbitRuntime {
                 let cwd = std::env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().into_owned());
-                let tool_context = ToolContext {
+                let mut tool_context = ToolContext {
                     cwd,
                     session_context,
                     allowed_tools,
@@ -241,6 +241,9 @@ impl OrbitRuntime {
                     reservation_owner: reservation_owner_from_env(),
                     ..Default::default()
                 };
+                if proc_spawn_activity_scoped {
+                    populate_filesystem_policy_context(self, None, &mut tool_context)?;
+                }
                 let capability_enforcement = match entry_point {
                     ToolEntryPoint::Cli => CapabilityEnforcement::Enforce,
                     ToolEntryPoint::Mcp => CapabilityEnforcement::McpSessionOnly,

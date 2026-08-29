@@ -9,6 +9,7 @@ use orbit_agent::{
 };
 use orbit_common::process::identity::process_start_identity_token;
 use orbit_common::security::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_types::policy::UNRESTRICTED_FS_PROFILE;
 use orbit_types::workflow::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use serde_json::Value;
 
@@ -227,9 +228,10 @@ pub fn run_cli_backend(
             programs.join(","),
         ));
     }
-    if let Some(profile) = fs_profile {
-        dispatch_env.push(("ORBIT_ACTIVITY_FS_PROFILE".to_string(), profile.to_string()));
-    }
+    dispatch_env.push((
+        "ORBIT_ACTIVITY_FS_PROFILE".to_string(),
+        resolved_activity_fs_profile_name(fs_profile).to_string(),
+    ));
     dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
@@ -607,6 +609,10 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+pub(super) fn resolved_activity_fs_profile_name(fs_profile: Option<&str>) -> &str {
+    fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE)
 }
 
 /// Append the Orbit-owned write-denial attribution to a step message that was
