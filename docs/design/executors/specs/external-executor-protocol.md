@@ -2,14 +2,14 @@
 title: External Executor Protocol v1 (Retired)
 owner: claude
 last_updated: 2026-08-09
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Retired
 feature: executors
 type: design
 summary: "RETIRED: External Executor Protocol v1 was never a supported surface; the executor_type external transport was deleted in ORB-10395. Kept as a historical record of the retired wire contract."
 tags: [executors, extensibility, protocol, retired]
 paths:
-  - "crates/orbit-common/src/types/executor_def.rs"
+  - "crates/orbit-types/src/workflow/executor_def.rs"
 related_features: [executors]
 related_artifacts: [ORB-00384, ORB-10395]
 ---
