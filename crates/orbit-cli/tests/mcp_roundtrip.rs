@@ -1792,6 +1792,192 @@ fn federated_mcp_serve_requires_the_host_qualified_list_selector() {
     );
 }
 
+fn federated_client(workspace: &McpWorkspace) -> McpClient {
+    let child = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--mode", "federated"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn federated MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "federated-roundtrip", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+    client
+}
+
+fn host_identity(home: &Path) -> (String, String) {
+    let parsed: toml::Value = toml::from_str(
+        &std::fs::read_to_string(home.join(".orbit").join("host.toml")).expect("read host.toml"),
+    )
+    .expect("parse host.toml");
+    (
+        parsed["machine_id"]
+            .as_str()
+            .expect("machine_id")
+            .to_string(),
+        parsed["host_id"].as_str().expect("host_id").to_string(),
+    )
+}
+
+fn plant_ssh_stub(bin: &Path, log: &Path) {
+    plant_agent_cli_stub(bin, "ssh");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit 1\n",
+        log.display()
+    );
+    std::fs::write(bin.join("ssh"), script).expect("write ssh stub");
+}
+
+/// ORB-11044: federated mode includes local workspaces with no destinations file.
+#[test]
+fn federated_mcp_serve_lists_and_routes_local_workspaces_without_destinations() {
+    let workspace = McpWorkspace::init();
+    let ssh_log = workspace.home.join("ssh-invocations.log");
+    plant_ssh_stub(&McpWorkspace::stub_bin_dir(&workspace.home), &ssh_log);
+
+    let mut client = federated_client(&workspace);
+    let (machine_id, host_id) = host_identity(&workspace.home);
+    let listed = client.call_tool_ok("orbit_workspace_list", json!({}));
+    let rows = listed["workspaces"].as_array().expect("workspace rows");
+    assert_eq!(
+        rows.len(),
+        1,
+        "local-only membership lists this machine: {listed}"
+    );
+    let row = &rows[0];
+    assert_eq!(row["machine_id"], machine_id);
+    assert_eq!(row["host"], host_id);
+    assert_eq!(row["reachability"], "reachable");
+    assert_eq!(row["checkout_health"], "active");
+    assert!(
+        row["capabilities"]
+            .as_array()
+            .is_some_and(|caps| caps.iter().any(|cap| cap == "control_plane")),
+        "owner checkout advertises control_plane: {row}"
+    );
+    let selector = row["selector"].as_str().expect("selector");
+    assert_eq!(
+        selector,
+        format!("{machine_id}/{}", row["id"].as_str().expect("id"))
+    );
+
+    let crews = client.call_tool_ok("orbit_crew_list", json!({ "workspace": selector }));
+    assert_eq!(
+        crews["workspace_id"], row["id"],
+        "local selector must dispatch through the accepting machine: {crews}"
+    );
+    assert!(
+        !ssh_log.exists()
+            || std::fs::read_to_string(&ssh_log)
+                .expect("read ssh log")
+                .is_empty(),
+        "local federated routing must not spawn SSH"
+    );
+}
+
+/// ORB-11044: an explicit destination naming the local machine is one local route.
+#[test]
+fn federated_mcp_serve_collapses_an_explicit_local_destination_row() {
+    let workspace = McpWorkspace::init();
+    let (machine_id, host_id) = host_identity(&workspace.home);
+    std::fs::write(
+        workspace.home.join(".orbit").join("mcp-destinations.toml"),
+        format!("[[destinations]]\nssh = \"localhost\"\nmachine_id = \"{machine_id}\"\n"),
+    )
+    .expect("write explicit local destination");
+    let ssh_log = workspace.home.join("ssh-invocations.log");
+    plant_ssh_stub(&McpWorkspace::stub_bin_dir(&workspace.home), &ssh_log);
+
+    let mut client = federated_client(&workspace);
+    let listed = client.call_tool_ok("orbit_workspace_list", json!({}));
+    let rows = listed["workspaces"].as_array().expect("workspace rows");
+    let local_rows: Vec<_> = rows
+        .iter()
+        .filter(|row| row["machine_id"] == machine_id)
+        .collect();
+    assert_eq!(
+        local_rows.len(),
+        1,
+        "explicit local SSH row must not duplicate selectors: {listed}"
+    );
+    assert_eq!(local_rows[0]["host"], host_id);
+    let selector = local_rows[0]["selector"].as_str().expect("selector");
+    client.call_tool_ok("orbit_crew_list", json!({ "workspace": selector }));
+    assert!(
+        !ssh_log.exists()
+            || std::fs::read_to_string(&ssh_log)
+                .expect("read ssh log")
+                .is_empty(),
+        "collapsed local route must not spawn SSH"
+    );
+}
+
+/// ORB-11044: mixed membership lists local workspaces beside configured remotes.
+#[test]
+fn federated_mcp_serve_lists_local_workspaces_beside_unreachable_remotes() {
+    let workspace = McpWorkspace::init();
+    std::fs::write(
+        workspace.home.join(".orbit").join("mcp-destinations.toml"),
+        "[[destinations]]\nssh = \"orbit-missing-host\"\nmachine_id = \"hm_remote\"\n",
+    )
+    .expect("write remote destination");
+    let ssh_log = workspace.home.join("ssh-invocations.log");
+    plant_ssh_stub(&McpWorkspace::stub_bin_dir(&workspace.home), &ssh_log);
+
+    let mut client = federated_client(&workspace);
+    let (machine_id, _) = host_identity(&workspace.home);
+    let listed = client.call_tool_ok("orbit_workspace_list", json!({}));
+    let rows = listed["workspaces"].as_array().expect("workspace rows");
+    assert!(
+        rows.iter()
+            .any(|row| row["machine_id"] == machine_id && row["reachability"] == "reachable"),
+        "local workspace must stay listed: {listed}"
+    );
+    let remote = rows
+        .iter()
+        .find(|row| row["machine_id"] == "hm_remote")
+        .expect("configured remote is listed");
+    assert_eq!(remote["reachability"], "unreachable");
+    assert_eq!(remote["checkout_health"], "unknown");
+    assert!(
+        ssh_log.exists(),
+        "the unreachable remote should have attempted SSH"
+    );
+}
+
+/// ORB-11044: a machine-id-only destination row still fails closed.
+#[test]
+fn federated_mcp_serve_rejects_a_machine_id_only_destination_row() {
+    let workspace = McpWorkspace::init();
+    std::fs::write(
+        workspace.home.join(".orbit").join("mcp-destinations.toml"),
+        "[[destinations]]\nmachine_id = \"hm_alpha\"\n",
+    )
+    .expect("write invalid destination");
+
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args(["mcp", "serve", "--mode", "federated"])
+        .output()
+        .expect("run federated serve");
+    assert!(
+        !output.status.success(),
+        "machine-id-only rows must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("ssh") || stderr.contains("invalid"),
+        "the configuration error must be actionable: {stderr}"
+    );
+}
+
 /// ORB-10967 / ORB-10961: the same contract from a linked job worktree whose
 /// checkout identity diverged from the logical `ws_*` the registry knows.
 ///

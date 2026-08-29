@@ -349,9 +349,9 @@ fn destination_registry_discovery_preserves_invalid_owner_and_replica_descriptor
 
 #[test]
 fn the_list_comes_only_from_probed_destinations() {
-    // A mux with no configured destinations lists nothing, whatever workspaces
-    // this machine's own registry happens to hold. The host has no registry
-    // handle at all, which is the structural half of that guarantee.
+    // Membership composition injects the implicit local destination. The mux
+    // itself still lists only the destinations it was given, so a host
+    // constructed with none — tests, not production serve — lists nothing.
     let host = FederatedMcpHost::new(Vec::new(), Arc::new(ScriptedProbe::new()));
 
     assert!(list(&host).is_empty());

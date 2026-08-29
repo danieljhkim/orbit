@@ -295,8 +295,11 @@ workspaces that have a checkout registered on that machine.
 
 ### Federated MCP
 
-The opt-in federated server presents one MCP namespace over SSH destinations
-listed in the operator's machine-global `~/.orbit/mcp-destinations.toml`:
+The opt-in federated server presents one MCP namespace over this machine's
+workspaces plus SSH remotes listed in the operator's machine-global
+`~/.orbit/mcp-destinations.toml`. Local workspaces need no destination row; a
+missing or empty file is a valid local-only federated server. Additional remotes
+are declared as SSH destinations:
 
 ```toml
 [[destinations]]

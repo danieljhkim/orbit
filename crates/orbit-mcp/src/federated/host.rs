@@ -226,9 +226,10 @@ fn federated_workspace_list_definition() -> McpToolDefinition {
     McpToolDefinition::new(
         ToolSchema {
             name: FEDERATED_WORKSPACE_LIST_TOOL.to_string(),
-            description: "List every configured destination's workspaces as live descriptors, \
-                          including destinations that are unreachable right now. Copy a row's \
-                          `selector` to address that workspace; do not parse or construct it."
+            description: "List the accepting machine's workspaces together with every configured \
+                          remote destination's workspaces as live descriptors, including remotes \
+                          that are unreachable right now. Copy a row's `selector` to address that \
+                          workspace; do not parse or construct it."
                 .to_string(),
             parameters: Vec::new(),
             builtin: true,
@@ -248,7 +249,9 @@ fn confirm_pinned_identity(
     }
     Err(OrbitError::UnreachableDestination(format!(
         "'{}' is configured as machine '{}' but answered as '{}'",
-        destination.ssh, destination.machine_id, snapshot.machine_id
+        destination.host_display(),
+        destination.machine_id,
+        snapshot.machine_id
     )))
 }
 

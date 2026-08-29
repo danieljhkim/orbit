@@ -57,9 +57,9 @@ pub struct WorkspaceDescriptor {
     /// was observed, or when the destination reported a workspace ID that is
     /// not host-qualifiable.
     selector: Option<String>,
-    /// Destination display identity. The v1 discovery envelope carries no
-    /// `host_id`, so this is the operator's configured SSH target — the only
-    /// display name the mux can honestly attribute to the destination.
+    /// Destination display identity. Local destinations use the accepting
+    /// machine's `host_id`. Remotes use the operator's configured SSH target:
+    /// the v1 discovery envelope carries no `host_id`.
     host: String,
     /// Destination stable identity, as pinned by the operator's config.
     machine_id: String,
@@ -81,7 +81,7 @@ impl WorkspaceDescriptor {
         );
         Self {
             selector: selector_for(&destination.machine_id, &workspace.id),
-            host: destination.ssh.clone(),
+            host: destination.host_display().to_string(),
             machine_id: destination.machine_id.clone(),
             reachability: Reachability::Reachable,
             checkout_health,
@@ -99,7 +99,7 @@ impl WorkspaceDescriptor {
         Self {
             workspace: None,
             selector: None,
-            host: destination.ssh.clone(),
+            host: destination.host_display().to_string(),
             machine_id: destination.machine_id.clone(),
             reachability: Reachability::Unreachable,
             checkout_health: CheckoutHealth::Unknown,
@@ -115,7 +115,7 @@ impl WorkspaceDescriptor {
         Self {
             workspace: None,
             selector: None,
-            host: destination.ssh.clone(),
+            host: destination.host_display().to_string(),
             machine_id: destination.machine_id.clone(),
             reachability: Reachability::Reachable,
             checkout_health: CheckoutHealth::Unknown,

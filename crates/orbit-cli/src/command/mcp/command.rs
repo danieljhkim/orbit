@@ -74,15 +74,16 @@ pub enum ServeMode {
     /// Present stdio MCP locally and relay it directly to a remote Orbit over
     /// one non-PTY SSH process.
     Remote,
-    /// Present one stdio MCP surface over every destination configured in
-    /// `~/.orbit/mcp-destinations.toml`.
+    /// Present one stdio MCP surface over this machine's workspaces plus every
+    /// SSH destination configured in `~/.orbit/mcp-destinations.toml`.
     ///
-    /// This mode serves no workspace of its own and binds to none. It lists
-    /// each configured destination's workspaces as live descriptors, probing
-    /// the destinations on every call, and includes destinations that are
-    /// unreachable right now rather than hiding them. Workspace-scoped tools
-    /// take the host-qualified `selector` copied from that list; a registered
-    /// name, a bare `ws_*`, or `--workspace` is not a federated selector.
+    /// Local workspaces are included automatically and need no destination
+    /// row. This mode binds to no single workspace. It lists each destination's
+    /// workspaces as live descriptors, probing remotes on every call, and
+    /// includes remotes that are unreachable right now rather than hiding
+    /// them. Workspace-scoped tools take the host-qualified `selector` copied
+    /// from that list; a registered name, a bare `ws_*`, or `--workspace` is
+    /// not a federated selector.
     Federated,
 }
 
@@ -92,8 +93,9 @@ pub struct ServeArgs {
     /// Run as a client to other Orbit servers instead of serving this machine.
     ///
     /// `remote` proxies one chosen SSH destination and requires it as an
-    /// argument. `federated` muxes the destinations configured in
-    /// `~/.orbit/mcp-destinations.toml` and takes no argument.
+    /// argument. `federated` includes this machine automatically and muxes
+    /// additional destinations configured in `~/.orbit/mcp-destinations.toml`;
+    /// it takes no argument.
     #[arg(long, value_name = "MODE")]
     pub mode: Option<ServeMode>,
     /// SSH destination for `--mode remote`, such as a host, `user@host`, or a

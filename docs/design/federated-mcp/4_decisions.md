@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Decisions
 owner: grok
-last_updated: 2026-08-24
-last_validated: 2026-08-24
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 status: Draft
 feature: federated-mcp
 doc_role: decisions
@@ -11,7 +11,7 @@ summary: Standing rules for the proposed federated MCP mux: destinations are con
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access]
-related_artifacts: [ORB-11023, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11044, ORB-11023, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Decisions
@@ -34,6 +34,25 @@ Treat the federated surface as a mux in front of destinations the operator alrea
 
 - Destination membership is an operator configuration problem, not a catalog schema problem.
 - Cost: the mux cannot "just find" an owner or a healthy replica; a missing destination is a configuration gap, not a discovery miss.
+
+## The accepting machine is an implicit local destination
+
+**Recorded:** 2026-08 · [ORB-11044]
+
+### Context
+
+Every `mcp-destinations.toml` row required `ssh` and `machine_id`, so workspaces owned by the machine running `orbit mcp serve --mode federated` were absent unless the operator configured loopback SSH. A machine-id-only row for that host was rejected as a missing `ssh` field. Local federation then depended on Remote Login, SSH authentication, non-interactive PATH, and another process boundary.
+
+### Decision
+
+Always include the accepting machine as a local destination, keyed by its existing stable `machine_id` and listed from its workspace registry. Local selectors keep the host-qualified `hm_…/ws_*` shape and are delivered through the local MCP host in-process — never over SSH. `mcp-destinations.toml` remains the declaration surface for additional SSH remotes. A missing file or empty remote list is a valid local-only federated server. Local workspaces require no destination row; a machine-id-only row is still invalid and fails closed. If a valid configured row already names this machine, expose exactly one route for that identity (the local in-process destination) rather than duplicate selectors or open loopback SSH.
+
+Rejected alternatives: treating a machine-id-only TOML row as local membership (the operator file would then describe both remotes and this host, and a typo would silently change routing); keeping loopback SSH as the local path (that is the problem being removed).
+
+### Consequences
+
+- A federated session on a machine with no destinations file still lists and routes that machine's workspaces.
+- Cost: an operator who previously pointed an SSH row at this machine no longer gets a second, SSH-backed route for the same `machine_id`. Compatibility is "one local route", not "preserve loopback SSH".
 
 ## Host-qualified selectors are structured and caller-uninterpreted
 
@@ -144,5 +163,6 @@ Admit the mux as an explicit exception to v1 byte-transparent / no-relay rules *
 - [ORB-11008] — recorded the prior federated MCP policy that these rules implement
 - [ORB-11009] — recorded these standing rules as the contract home (PR #1139)
 - [ORB-11010] — closed the PR #1139 review holes (selector wording, tool class, error precedence, competing authorities)
+- [ORB-11044] — implicit local membership for federated serve
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
