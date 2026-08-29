@@ -17,8 +17,8 @@
 //! around. Consumed by `orbit-cli` and `orbit-web`.
 //! Command groups that
 //! orbit-core's runtime internals (tool hosts, engine hosts, bootstrap
-//! seeding) invoke remain in `orbit-core::command`; see `ARCHITECTURE.md`
-//! for the boundary.
+//! seeding) invoke remain in `orbit_core::adapter::command`; see
+//! `ARCHITECTURE.md` for the boundary.
 
 pub mod activity_v2;
 pub mod agent_rules;
