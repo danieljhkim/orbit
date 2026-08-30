@@ -246,6 +246,11 @@ struct FailureCluster {
     step: String,
     tested_commit: String,
     signature: String,
+    /// True when `signature` is the failing step name because no error line
+    /// survived in the excerpt. The description must label that as a fallback
+    /// rather than a captured diagnostic; collapsing every distinct failure of
+    /// the step into one `failure_key` is the weaker identity, not a quote.
+    signature_is_step_fallback: bool,
     log_excerpt: String,
     log_truncated: bool,
     runs: Vec<Value>,
@@ -315,10 +320,18 @@ impl FailureCluster {
             "- Commit the runner actually checked out: `{}`\n",
             display(&self.tested_commit)
         ));
-        out.push_str(&format!(
-            "- Normalized error signature (the dedupe identity, not a quote): `{}`\n",
-            display(&self.signature)
-        ));
+        if self.signature_is_step_fallback {
+            out.push_str(&format!(
+                "- Normalized error signature (step-name fallback — no error line was captured; \
+                 the dedupe identity, not a quote): `{}`\n",
+                display(&self.signature)
+            ));
+        } else {
+            out.push_str(&format!(
+                "- Normalized error signature (the dedupe identity, not a quote): `{}`\n",
+                display(&self.signature)
+            ));
+        }
         if let Some(repository) = evidence.get("repository").and_then(Value::as_object) {
             if let Some(full_name) = repository.get("full_name").and_then(Value::as_str) {
                 out.push_str(&format!("- Repository: `{full_name}`\n"));
@@ -355,10 +368,31 @@ impl FailureCluster {
                 "_No log excerpt was captured for this cluster. Reproduce the failing job's \
                  command locally instead of guessing from the step name._\n",
             );
+            let relevant = relevant_log_query_errors(evidence, &self.runs);
+            if !relevant.is_empty() {
+                out.push('\n');
+                for error in relevant {
+                    out.push_str(&format!(
+                        "- `{}` for run `{}`: {}\n",
+                        display(&value_string(error, "query")),
+                        display(&value_string(error, "run_id")),
+                        truncate_chars(&value_string(error, "error"), 300),
+                    ));
+                }
+            }
         } else {
-            out.push_str("```\n");
-            out.push_str(&truncate_bytes(&self.log_excerpt, DESCRIPTION_LOG_BYTES));
-            out.push_str("\n```\n");
+            let excerpt = render_failed_step_excerpt(&self.log_excerpt, DESCRIPTION_LOG_BYTES);
+            if !excerpt.body.trim().is_empty() {
+                out.push_str("```\n");
+                out.push_str(&excerpt.body);
+                out.push_str("\n```\n");
+            }
+            if !excerpt.has_anchor {
+                out.push_str(
+                    "\n_No error anchor was present in the retained excerpt; the env/with dump \
+                     is omitted rather than shown as evidence._\n",
+                );
+            }
             if self.log_truncated {
                 out.push_str(
                     "\n_The excerpt above was truncated at collection. Head and tail are kept; \
@@ -515,8 +549,8 @@ fn cluster_failures(failures: &[Value]) -> Vec<FailureCluster> {
         let signature = error_signature(&log_excerpt, &step);
         let tested_commit = tested_commit(failure);
 
-        let failure_key = digest(&[&workflow, &job, &step, &signature]);
-        let cluster_key = digest(&[&workflow, &job, &step, &signature, &tested_commit]);
+        let failure_key = digest(&[&workflow, &job, &step, &signature.text]);
+        let cluster_key = digest(&[&workflow, &job, &step, &signature.text, &tested_commit]);
 
         let cluster = grouped.entry(cluster_key.clone()).or_insert_with(|| {
             order.push(cluster_key.clone());
@@ -527,7 +561,8 @@ fn cluster_failures(failures: &[Value]) -> Vec<FailureCluster> {
                 job,
                 step,
                 tested_commit,
-                signature,
+                signature: signature.text,
+                signature_is_step_fallback: signature.step_fallback,
                 log_excerpt,
                 log_truncated: failure
                     .get("log_truncated")
@@ -592,17 +627,231 @@ const ERROR_MARKERS: &[&str] = &[
 /// Reruns of the same regression differ in timestamps, durations, run numbers,
 /// and paths under a run-specific temp directory. Normalizing those away is
 /// what lets an hourly sweep recognize the same root cause instead of filing it
-/// again every hour. With no marker line the step name alone is the signature —
-/// weaker, but stable, and still scoped by workflow and job.
-fn error_signature(log_excerpt: &str, step: &str) -> String {
-    for line in log_excerpt.lines() {
-        let payload = log_payload(line);
-        let lowered = payload.to_ascii_lowercase();
-        if ERROR_MARKERS.iter().any(|marker| lowered.contains(marker)) {
-            return normalize_signature(&lowered);
+/// again every hour. Prefer an `##[error]`-annotated line over an unanchored
+/// marker substring, and never sign off runner-bookkeeping (checkout, group
+/// headers, `env:`/`with:` dumps). With no usable line the step name alone is
+/// the signature — weaker, but stable, and still scoped by workflow and job.
+fn error_signature(log_excerpt: &str, step: &str) -> ErrorSignature {
+    let lines = classify_log_lines(log_excerpt);
+    for (kind, line) in &lines {
+        if *kind == LineKind::ErrorAnnotated {
+            return ErrorSignature {
+                text: normalize_signature(&log_payload(line).to_ascii_lowercase()),
+                step_fallback: false,
+            };
         }
     }
-    normalize_signature(&step.to_ascii_lowercase())
+    for (kind, line) in &lines {
+        if *kind == LineKind::Marker {
+            return ErrorSignature {
+                text: normalize_signature(&log_payload(line).to_ascii_lowercase()),
+                step_fallback: false,
+            };
+        }
+    }
+    ErrorSignature {
+        text: normalize_signature(&step.to_ascii_lowercase()),
+        step_fallback: true,
+    }
+}
+
+struct ErrorSignature {
+    text: String,
+    step_fallback: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LineKind {
+    RunCommand,
+    ParamDump,
+    EndGroup,
+    ErrorAnnotated,
+    Marker,
+    Bookkeeping,
+    Content,
+}
+
+impl LineKind {
+    fn skip_from_excerpt(self) -> bool {
+        matches!(self, Self::ParamDump | Self::EndGroup | Self::Bookkeeping)
+    }
+}
+
+struct FailedStepExcerpt {
+    body: String,
+    has_anchor: bool,
+}
+
+/// Command line plus the failure region, never a head-biased env dump.
+///
+/// The `##[group]Run …` line is the command the runner executed and is the
+/// most actionable fact in the log. The `env:` / `with:` dump that follows it
+/// is never the evidence. The rest of the block is a bounded window around
+/// an error anchor, capped at `max_bytes` on that region rather than the
+/// log head.
+fn render_failed_step_excerpt(log: &str, max_bytes: usize) -> FailedStepExcerpt {
+    let lines = classify_log_lines(log);
+    let command = lines
+        .iter()
+        .find(|(kind, _)| *kind == LineKind::RunCommand)
+        .map(|(_, line)| *line);
+
+    let anchor = lines
+        .iter()
+        .position(|(kind, _)| *kind == LineKind::ErrorAnnotated)
+        .or_else(|| lines.iter().position(|(kind, _)| *kind == LineKind::Marker));
+
+    let Some(anchor_idx) = anchor else {
+        return FailedStepExcerpt {
+            body: command.unwrap_or("").to_string(),
+            has_anchor: false,
+        };
+    };
+
+    const LINES_BEFORE: usize = 24;
+    const LINES_AFTER: usize = 12;
+    let kept: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, (kind, _))| !kind.skip_from_excerpt())
+        .map(|(idx, _)| idx)
+        .collect();
+    let anchor_in_kept = kept.iter().position(|idx| *idx == anchor_idx).unwrap_or(0);
+    let start = anchor_in_kept.saturating_sub(LINES_BEFORE);
+    let end = (anchor_in_kept + 1 + LINES_AFTER).min(kept.len());
+    let mut window: Vec<&str> = kept[start..end].iter().map(|idx| lines[*idx].1).collect();
+    if let Some(command) = command
+        && !window.contains(&command)
+    {
+        window.insert(0, command);
+    }
+    let joined = window.join("\n");
+    FailedStepExcerpt {
+        body: cap_bytes_around_line(&joined, lines[anchor_idx].1, max_bytes),
+        has_anchor: true,
+    }
+}
+
+fn classify_log_lines(log: &str) -> Vec<(LineKind, &str)> {
+    let mut in_param_block = false;
+    let mut out = Vec::new();
+    for line in log.lines() {
+        let payload = log_payload(line);
+        let trimmed = payload.trim();
+        let lowered = trimmed.to_ascii_lowercase();
+        let indented = payload.starts_with(' ') || payload.starts_with('\t');
+        let kind = if is_run_command_payload(trimmed) {
+            in_param_block = false;
+            LineKind::RunCommand
+        } else if lowered.contains("##[endgroup]") {
+            in_param_block = false;
+            LineKind::EndGroup
+        } else if lowered == "env:" || lowered == "with:" {
+            in_param_block = true;
+            LineKind::ParamDump
+        } else if in_param_block && (indented || trimmed.is_empty()) {
+            LineKind::ParamDump
+        } else {
+            in_param_block = false;
+            if lowered.contains("##[error]") {
+                LineKind::ErrorAnnotated
+            } else if is_runner_bookkeeping(&lowered) || lowered.contains("##[group]") {
+                LineKind::Bookkeeping
+            } else if ERROR_MARKERS.iter().any(|marker| lowered.contains(marker)) {
+                LineKind::Marker
+            } else {
+                LineKind::Content
+            }
+        };
+        out.push((kind, line));
+    }
+    out
+}
+
+fn is_run_command_payload(payload: &str) -> bool {
+    let lowered = payload.trim().to_ascii_lowercase();
+    lowered.starts_with("##[group]run ") || lowered == "##[group]run"
+}
+
+fn is_runner_bookkeeping(lowered: &str) -> bool {
+    lowered.starts_with("head is now at") || lowered.starts_with("syncing repository")
+}
+
+/// Cap `text` at `max_bytes` while keeping `anchor_line`, not the head.
+fn cap_bytes_around_line(text: &str, anchor_line: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let Some(anchor_start) = text.find(anchor_line) else {
+        return truncate_bytes(text, max_bytes);
+    };
+    let anchor_len = anchor_line.len();
+    if anchor_len >= max_bytes {
+        return truncate_bytes(anchor_line, max_bytes);
+    }
+    let extra = max_bytes - anchor_len;
+    let want_before = extra * 2 / 3;
+    let mut start = anchor_start.saturating_sub(want_before);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    if start > 0
+        && let Some(newline) = text[start..anchor_start].find('\n')
+    {
+        start += newline + 1;
+    }
+    let mut end = start.saturating_add(max_bytes).min(text.len());
+    if end < anchor_start + anchor_len {
+        end = (anchor_start + anchor_len).min(text.len());
+        start = end.saturating_sub(max_bytes);
+        while start > 0 && !text.is_char_boundary(start) {
+            start -= 1;
+        }
+    }
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    if end < text.len()
+        && let Some(newline) = text[anchor_start + anchor_len..end].rfind('\n')
+    {
+        end = anchor_start + anchor_len + newline;
+    }
+    let mut out = String::new();
+    if start > 0 {
+        out.push_str("[...]\n");
+    }
+    out.push_str(&text[start..end]);
+    if end < text.len() {
+        out.push_str(&format!(
+            "\n[... truncated at {max_bytes} B for the task description; the full excerpt is in \
+             the sweep run's step output ...]"
+        ));
+    }
+    out
+}
+
+/// `query_errors` entries for this cluster's failed-step log fetch, if any.
+fn relevant_log_query_errors<'a>(evidence: &'a Value, runs: &[Value]) -> Vec<&'a Value> {
+    let run_ids: BTreeSet<String> = runs
+        .iter()
+        .map(|run| value_string(run, "run_id"))
+        .filter(|id| !id.is_empty())
+        .collect();
+    evidence
+        .get("query_errors")
+        .and_then(Value::as_array)
+        .map(|errors| {
+            errors
+                .iter()
+                .filter(|error| {
+                    let query = value_string(error, "query");
+                    let run_id = value_string(error, "run_id");
+                    matches!(query.as_str(), "run_logs" | "run_logs_all")
+                        && run_ids.contains(&run_id)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Strip the `job<TAB>step<TAB>timestamp ` columns a runner log carries.

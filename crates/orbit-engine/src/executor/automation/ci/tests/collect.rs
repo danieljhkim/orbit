@@ -216,3 +216,40 @@ fn integration_and_release_on_the_same_branch_are_scanned_once() {
     assert_eq!(evidence["heads"].as_array().expect("heads").len(), 1);
     assert_eq!(evidence["heads"][0]["kind"], json!("integration"));
 }
+
+#[test]
+fn empty_failed_step_log_is_recorded_in_query_errors() {
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(
+            "topic",
+            vec![vec![run(
+                10,
+                "ci",
+                HEAD,
+                "completed",
+                Some("failure"),
+                "2026-08-30T01:00:00Z",
+            )]],
+        )
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        );
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+    assert_eq!(failure["log_excerpt"], json!(""));
+    let errors = evidence["query_errors"].as_array().expect("query_errors");
+    assert!(
+        errors.iter().any(|error| {
+            error["query"] == json!("run_logs")
+                && error["run_id"] == json!("10")
+                && error["error"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("no log text"))
+        }),
+        "empty failed-step log must be a query error, got {errors:?}"
+    );
+}

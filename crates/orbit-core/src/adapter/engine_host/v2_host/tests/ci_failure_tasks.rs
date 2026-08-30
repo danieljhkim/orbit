@@ -488,3 +488,264 @@ fn the_filing_cap_reports_what_it_left_unfiled() {
         "a cap must be reported, never a silent truncation"
     );
 }
+
+fn signature_line(description: &str) -> String {
+    description
+        .lines()
+        .find(|line| line.contains("Normalized error signature"))
+        .expect("signature line")
+        .to_string()
+}
+
+fn excerpt_block(description: &str) -> String {
+    let start = description
+        .find("## Failed-step log excerpt")
+        .expect("excerpt heading");
+    let rest = &description[start..];
+    let end = rest.find("\n## ").unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
+/// Realistic GitHub failed-step log: `##[group]Run …`, a large `env:` dump,
+/// then the trailing compiler diagnostic. Each env line is ~90 bytes so 50
+/// lines already sit past the 4,000-byte description budget.
+fn realistic_github_step_log(command: &str, env_lines: usize, trailing: &str) -> String {
+    let prefix = |msg: &str| format!("build\tRun go build\t2026-08-30T01:00:00Z {msg}");
+    let mut out = String::new();
+    out.push_str(&prefix(&format!("##[group]Run {command}")));
+    out.push('\n');
+    out.push_str(&prefix("env:"));
+    out.push('\n');
+    for index in 0..env_lines {
+        out.push_str(&prefix(&format!("  VAR_{index}: {}", "x".repeat(60))));
+        out.push('\n');
+    }
+    out.push_str(&prefix("##[endgroup]"));
+    out.push('\n');
+    out.push_str(trailing);
+    if !trailing.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn dani_10111_style_log(commit_subject: &str, error: Option<&str>) -> String {
+    let prefix = |msg: &str| format!("Vulnerability scan\tCheckout\t2026-08-30T01:00:00Z {msg}\n");
+    let mut out = String::new();
+    out.push_str(&prefix("##[group]Run actions/checkout@v4"));
+    out.push_str(&prefix("with:"));
+    out.push_str(&prefix("  repository: acme/monodev"));
+    out.push_str(&prefix("  token: ***"));
+    out.push_str(&prefix("env:"));
+    out.push_str(&prefix("  GITHUB_TOKEN: ***"));
+    out.push_str(&prefix("##[endgroup]"));
+    out.push_str(&prefix("Syncing repository: acme/monodev"));
+    out.push_str(&prefix(&format!("HEAD is now at e5c1dc9 {commit_subject}")));
+    if let Some(error) = error {
+        out.push_str(&prefix(error));
+    }
+    out
+}
+
+fn filed_description(runtime: &OrbitRuntime, log: &str) -> (Value, String) {
+    let output = file(
+        runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            10,
+            "ci",
+            "build",
+            "cargo build",
+            log,
+            CHECKOUT,
+        )])}),
+    );
+    let task_id = filed_task_ids(&output)
+        .first()
+        .cloned()
+        .expect("one filed task");
+    let task = runtime.get_task(&task_id).expect("read filed task");
+    (output, task.description)
+}
+
+#[test]
+fn excerpt_keeps_the_run_command_and_trailing_error_not_the_env_dump() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let trailing = concat!(
+        "build\tRun go build\t2026-08-30T01:00:00Z ##[command]go build ./...\n",
+        "build\tRun go build\t2026-08-30T01:00:00Z ./main.go:10:2: undefined: Foo\n",
+        "build\tRun go build\t2026-08-30T01:00:00Z ##[error]Process completed with exit code 1.\n",
+    );
+    let log = realistic_github_step_log("go build ./...", 80, trailing);
+    let error_at = log
+        .find("undefined: Foo")
+        .expect("fixture must contain the trailing error");
+    assert!(
+        error_at > 4_000,
+        "fixture must place the error past the 4,000-byte description budget, at {error_at}"
+    );
+
+    let (_output, description) = filed_description(&runtime, &log);
+    let excerpt = excerpt_block(&description);
+    assert!(
+        excerpt.contains("##[group]Run go build ./..."),
+        "excerpt must keep the runner command:\n{excerpt}"
+    );
+    assert!(
+        excerpt.contains("undefined: Foo"),
+        "excerpt must carry the trailing error, not a head window:\n{excerpt}"
+    );
+    assert!(
+        excerpt.contains("##[error]Process completed with exit code 1."),
+        "excerpt must carry the annotated error:\n{excerpt}"
+    );
+    assert!(
+        !excerpt.contains("VAR_0:"),
+        "excerpt must drop the env dump:\n{excerpt}"
+    );
+}
+
+#[test]
+fn excerpt_without_an_error_anchor_says_so_and_still_shows_the_command() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let log = realistic_github_step_log("go build ./...", 80, "");
+
+    let (_output, description) = filed_description(&runtime, &log);
+    let excerpt = excerpt_block(&description);
+    assert!(
+        excerpt.contains("##[group]Run go build ./..."),
+        "command line must still be shown:\n{excerpt}"
+    );
+    assert!(
+        excerpt.contains("No error anchor was present in the retained excerpt"),
+        "missing anchor must be stated, not implied by dumping env:\n{excerpt}"
+    );
+    assert!(
+        !excerpt.contains("VAR_0:"),
+        "env dump must not be presented as evidence:\n{excerpt}"
+    );
+}
+
+#[test]
+fn error_signature_prefers_an_annotated_error_over_a_checkout_commit_message() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let log = dani_10111_style_log(
+        "chore: add ci failure sweep routine",
+        Some("##[error]GO-2024-2611: yaml: vulnerable dependency"),
+    );
+
+    let (_output, description) = filed_description(&runtime, &log);
+    let signature = signature_line(&description);
+    assert!(
+        !signature.to_ascii_lowercase().contains("head is now at"),
+        "checkout bookkeeping must not become the signature: {signature}"
+    );
+    assert!(
+        signature.contains("yaml") && signature.contains("vulnerable"),
+        "signature must come from the ##[error] line: {signature}"
+    );
+}
+
+#[test]
+fn checkout_commit_message_containing_failure_is_not_the_signature() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let log = dani_10111_style_log("chore: add ci failure sweep routine", None);
+
+    let (_output, description) = filed_description(&runtime, &log);
+    let signature = signature_line(&description);
+    assert!(
+        signature.contains("step-name fallback"),
+        "bookkeeping-only excerpt must label the step-name fallback: {signature}"
+    );
+    assert!(
+        !signature.to_ascii_lowercase().contains("head is now at"),
+        "HEAD is now at <hex> chore: … failure … must not be chosen: {signature}"
+    );
+}
+
+#[test]
+fn same_failure_under_a_different_commit_message_reuses_the_failure_key() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let first_log = dani_10111_style_log(
+        "chore: add ci failure sweep routine",
+        Some("##[error]GO-2024-2611: yaml: vulnerable dependency"),
+    );
+    let second_log = dani_10111_style_log(
+        "chore: mention failure in a later commit",
+        Some("##[error]GO-2024-2611: yaml: vulnerable dependency"),
+    );
+
+    let first = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            10, "ci", "build", "cargo build", &first_log, CHECKOUT,
+        )])}),
+    );
+    let task_id = filed_task_ids(&first)
+        .first()
+        .cloned()
+        .expect("first sweep files one task");
+    let first_key = first["filed"][0]["failure_key"].clone();
+
+    let second = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            11, "ci", "build", "cargo build", &second_log, NEXT_HEAD,
+        )])}),
+    );
+
+    assert_eq!(second["filed_count"], json!(0));
+    let skipped = second["skipped_existing"].as_array().expect("skipped");
+    assert!(
+        skipped.iter().any(|entry| {
+            entry["task_id"] == json!(task_id.clone()) && entry["failure_key"] == first_key
+        }),
+        "skip_if_open must suppress the second filing under a different commit message: {skipped:?}"
+    );
+}
+
+#[test]
+fn empty_excerpt_surfaces_the_matching_log_query_error() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let mut missing_log = failure(10, "ci", "build", "Run CI guardrails", "", CHECKOUT);
+    missing_log["log_excerpt"] = json!("");
+    let mut evidence = snapshot(vec![missing_log]);
+    evidence["query_errors"] = json!([
+        {
+            "query": "run_logs",
+            "run_id": "10",
+            "error": "HTTP 404: Not Found — logs for this run are no longer available"
+        },
+        {
+            "query": "run_list",
+            "branch": "other",
+            "error": "unrelated list failure"
+        }
+    ]);
+
+    let output = file(&runtime, json!({"ci_evidence": evidence}));
+    let task_id = filed_task_ids(&output)
+        .first()
+        .cloned()
+        .expect("one filed task");
+    let description = runtime.get_task(&task_id).expect("read").description;
+    let excerpt = excerpt_block(&description);
+    assert!(
+        excerpt.contains("No log excerpt was captured"),
+        "empty excerpt must still be stated:\n{excerpt}"
+    );
+    assert!(
+        excerpt.contains("run_logs")
+            && excerpt.contains("10")
+            && excerpt.contains("logs for this run are no longer available"),
+        "relevant query_errors entry must sit next to the empty excerpt:\n{excerpt}"
+    );
+    assert!(
+        !excerpt.contains("unrelated list failure"),
+        "unrelated query errors must not be inlined into this cluster's excerpt:\n{excerpt}"
+    );
+    let signature = signature_line(&description);
+    assert!(
+        signature.contains("step-name fallback"),
+        "step-name signature must be labeled as a fallback: {signature}"
+    );
+}
