@@ -573,7 +573,7 @@ fn apply_attachment_policy(
     Ok(())
 }
 
-fn validate_jsonl_files(task_id: &str, bundle_dir: &Path) -> Result<(), OrbitError> {
+pub(crate) fn validate_jsonl_files(task_id: &str, bundle_dir: &Path) -> Result<(), OrbitError> {
     for file_name in [TASK_EVENTS_FILE_NAME, TASK_COMMENTS_FILE_NAME] {
         let path = bundle_dir.join(file_name);
         let raw = fs::read_to_string(&path).map_err(|error| {
