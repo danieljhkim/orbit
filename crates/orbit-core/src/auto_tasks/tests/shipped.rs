@@ -323,6 +323,13 @@ fn code_review_default_is_portable_cursor_driven_and_inert() {
         .find(|(name, _)| *name == "code-review")
         .expect("code-review default");
     let definition = parse_auto_task_yaml(yaml).expect("parse code-review");
+    let repository_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".orbit/auto_tasks/code-review.yaml");
+    let repository_yaml = std::fs::read_to_string(&repository_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", repository_path.display()));
+    let repository_definition =
+        parse_auto_task_yaml(&repository_yaml).expect("parse repository code-review");
 
     assert_eq!(definition.name, "code-review");
     assert!(!definition.enabled, "definition must ship disabled");
@@ -357,6 +364,14 @@ fn code_review_default_is_portable_cursor_driven_and_inert() {
         !yaml.contains("/home/") && !yaml.contains("/Users/"),
         "default must not contain a machine-specific path"
     );
+    assert_eq!(
+        repository_definition.template.description, definition.template.description,
+        "repository and embedded code-review instructions must stay synchronized"
+    );
+    assert_eq!(
+        repository_definition.template.acceptance_criteria, definition.template.acceptance_criteria,
+        "repository and embedded code-review criteria must stay synchronized"
+    );
     // The template ships to every workspace, so it must not name this
     // repository's branches or files.
     for repo_specific in ["agent-main", "ORB-", "CLAUDE.md", "make ci"] {
@@ -379,6 +394,11 @@ fn code_review_default_is_portable_cursor_driven_and_inert() {
         "orbit tool run orbit.task.list",
         "orbit tool run orbit.task.show",
         "orbit tool run orbit.search",
+        "code-review-sweep",
+        "both tag filters use and semantics",
+        "lexicographically smaller task id",
+        "never use a `code-review`-only finding",
+        "only that case seeds the cursor",
     ] {
         assert!(
             body.contains(required),
@@ -388,6 +408,15 @@ fn code_review_default_is_portable_cursor_driven_and_inert() {
     assert!(!body.contains("orbit task add"));
     assert!(!body.contains("orbit task list"));
     assert!(!body.contains("orbit task show"));
+    for sweep_query in [
+        r#""tag":["code-review","no-diff-expected"],"limit":1"#,
+        r#""tag":["code-review-sweep","no-diff-expected"],"limit":1"#,
+    ] {
+        assert!(
+            definition.template.description.contains(sweep_query),
+            "code-review must retain deterministic sweep query {sweep_query}"
+        );
+    }
     assert!(
         definition
             .template
@@ -414,6 +443,65 @@ fn code_review_default_is_portable_cursor_driven_and_inert() {
             }),
         "code-review must require verified, evidenced, non-duplicate findings"
     );
+}
+
+#[test]
+fn code_review_cursor_fixture_ignores_newer_finding_and_current_sweep() {
+    struct ReviewTask<'a> {
+        id: &'a str,
+        created_order: u8,
+        completed_order: Option<u8>,
+        task_type: &'a str,
+        tags: &'a [&'a str],
+        cursor: Option<&'a str>,
+    }
+
+    let tasks = [
+        ReviewTask {
+            id: "legacy-sweep",
+            created_order: 1,
+            completed_order: Some(1),
+            task_type: "chore",
+            tags: &["code-review-sweep", "no-diff-expected"],
+            cursor: Some("legacy-sweep-cursor"),
+        },
+        ReviewTask {
+            id: "newer-finding",
+            created_order: 2,
+            completed_order: Some(2),
+            task_type: "bug",
+            tags: &["code-review"],
+            cursor: None,
+        },
+        ReviewTask {
+            id: "current-sweep",
+            created_order: 3,
+            completed_order: None,
+            task_type: "chore",
+            tags: &["code-review", "no-diff-expected"],
+            cursor: None,
+        },
+    ];
+
+    let selected = tasks
+        .iter()
+        .filter(|task| {
+            let current_sweep =
+                task.tags.contains(&"code-review") && task.tags.contains(&"no-diff-expected");
+            let legacy_sweep =
+                task.tags.contains(&"code-review-sweep") && task.tags.contains(&"no-diff-expected");
+            task.completed_order.is_some()
+                && task.task_type == "chore"
+                && (current_sweep || legacy_sweep)
+        })
+        .max_by(|left, right| {
+            left.created_order
+                .cmp(&right.created_order)
+                .then_with(|| right.id.cmp(left.id))
+        })
+        .and_then(|task| task.cursor);
+
+    assert_eq!(selected, Some("legacy-sweep-cursor"));
 }
 
 #[test]
