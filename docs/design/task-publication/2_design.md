@@ -16,9 +16,11 @@ related_artifacts: [ORB-11068, ORB-11074]
 
 # Task Publication — Design
 
-This document specifies a proposed v1 publication protocol. It is not a
-description of shipped behavior. V1 publishes one workspace's authority-owned
-task snapshots to one dedicated private Git repository for remote durability,
+This document specifies the v1 publication protocol. Its implemented
+`orbit-store` primitives cover snapshot construction, owner-only Git transport,
+read-only inspection, and explicit same-authority recovery; entry-point wiring
+is tracked separately. V1 publishes one workspace's authority-owned task
+snapshots to one dedicated private Git repository for remote durability,
 read-only inspection, and explicit recovery. Multi-workspace aggregation,
 authority transfer, and multi-writer synchronization remain deferred to
 [3_vision.md](./3_vision.md).
@@ -226,6 +228,13 @@ Restore is explicit and fail-closed:
 5. Report every omitted attachment; an incomplete publication cannot produce a
    "complete backup restored" result.
 
+The `orbit-store` recovery implementation follows this contract by consuming
+the inspector's validated snapshot, staging bundle and projection trees, and
+rolling back bundle publication, registry indexing, projection replacement,
+and allocator advancement as one recovery operation [ORB-11076]. Exact-content
+retries require the explicit identical-retry mode and do not replay bundle
+streams or advance the allocator.
+
 The existing task importer's `renumber` policy remains useful for migration
 between unrelated registries. It is not valid for same-authority recovery,
 because changing task IDs would break commit, relation, and audit references.
@@ -310,5 +319,6 @@ deleting the current tree erased the data.
 
 - [ORB-11068] — specified the proposed dedicated private task-publication repository protocol.
 - [ORB-11074] — implemented the owner-only Git compare-and-swap publication transport.
+- [ORB-11076] — implemented fail-closed same-authority publication restore with rollback.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

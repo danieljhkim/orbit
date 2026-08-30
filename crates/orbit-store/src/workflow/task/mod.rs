@@ -78,6 +78,7 @@ mod inspect;
 mod publication;
 mod publish;
 mod reindex;
+mod restore;
 
 #[cfg(test)]
 mod tests;
@@ -99,6 +100,10 @@ pub use publish::{
     PublicationPublishRequest, PublicationPublishStatus, publish_task_snapshot,
 };
 pub use reindex::{ReindexOutcome, reindex_workspace};
+pub use restore::{
+    PublicationRecoveryCompleteness, PublicationRestoreMode, PublicationRestoreOutcome,
+    PublicationRestoreRequest, restore_publication,
+};
 
 /// Archive container-format version. Bumped only when the archive *layout*
 /// (manifest shape / entry paths) changes incompatibly.

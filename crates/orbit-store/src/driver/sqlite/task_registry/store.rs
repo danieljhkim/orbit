@@ -1313,6 +1313,39 @@ impl TaskRegistryStore {
         }
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
     }
+
+    /// Restore an allocator value after a larger workflow failed after its
+    /// final allocator advance. This is deliberately crate-private and guarded
+    /// by the exact value the workflow observed after advancing, so it cannot
+    /// rewind over a concurrent allocation.
+    pub(crate) fn restore_allocator_after_failed_restore(
+        &self,
+        expected_current: u32,
+        previous: u32,
+    ) -> Result<(), OrbitError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let current = read_allocator_next_number(&tx)?;
+        if current != expected_current {
+            return Err(OrbitError::Store(format!(
+                "cannot roll back failed publication restore allocator: expected {expected_current}, found {current}"
+            )));
+        }
+        if previous > current {
+            return Err(OrbitError::Store(format!(
+                "invalid publication restore allocator rollback from {current} to {previous}"
+            )));
+        }
+        if previous != current {
+            set_allocator_next_number(&tx, previous)?;
+        }
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
 }
 
 fn read_allocator_next_number(conn: &Connection) -> Result<u32, OrbitError> {
