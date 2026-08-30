@@ -33,6 +33,14 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
     ),
     (
+        "classify_ci_evidence",
+        include_str!("../../assets/activities/classify_ci_evidence.yaml"),
+    ),
+    (
+        "collect_ci_evidence",
+        include_str!("../../assets/activities/collect_ci_evidence.yaml"),
+    ),
+    (
         "drain_window",
         include_str!("../../assets/activities/drain_window.yaml"),
     ),
@@ -140,6 +148,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "validate_bundles",
         include_str!("../../assets/activities/validate_bundles.yaml"),
+    ),
+    (
+        "verify_candidate_ci",
+        include_str!("../../assets/activities/verify_candidate_ci.yaml"),
     ),
     (
         "worktree_setup",

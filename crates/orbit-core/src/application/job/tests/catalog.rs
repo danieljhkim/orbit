@@ -30,6 +30,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/task_auto_pipeline.yaml"),
     ),
     (
+        "task_ci_remediation_pipeline",
+        include_str!("../../../../assets/jobs/task_ci_remediation_pipeline.yaml"),
+    ),
+    (
         "task_gate_pipeline",
         include_str!("../../../../assets/jobs/task_gate_pipeline.yaml"),
     ),
@@ -1759,4 +1763,236 @@ fn malformed_job_assets_remain_hard_catalog_errors() {
         .expect_err("malformed job should fail catalog loading");
     assert!(err.to_string().contains("malformed.yaml"), "{err}");
     assert!(err.to_string().contains("parse"), "{err}");
+}
+
+/// [ORB-11101] The CI-remediation pipeline's whole reason to exist is that the
+/// two host-owned stages sit on either side of the agent: discovery before it,
+/// candidate verification after publication. This pins that ordering, and pins
+/// that everything between them is the shipped delivery chain rather than a
+/// second copy of it.
+#[test]
+fn ci_remediation_pipeline_brackets_the_agent_with_host_owned_ci_stages() {
+    let asset = load_job_asset(ci_remediation_yaml()).expect("parse CI remediation pipeline");
+    let phases = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| match &step.body {
+            JobV2StepBody::TargetRef(target) => (step.id.as_str(), target.target.as_str()),
+            JobV2StepBody::Loop { loop_ } => {
+                let [inner] = loop_.steps.as_slice() else {
+                    panic!("the implement loop runs exactly one activity per task");
+                };
+                let JobV2StepBody::TargetRef(target) = &inner.body else {
+                    panic!("the implement loop must reference a focused activity");
+                };
+                (step.id.as_str(), target.target.as_str())
+            }
+            other => panic!("unexpected step body in {}: {other:?}", step.id),
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        phases,
+        vec![
+            ("worktree", "activity:worktree_setup"),
+            // Discovery runs on the host, before an agent can be dispatched.
+            ("collect_evidence", "activity:collect_ci_evidence"),
+            ("triage", "activity:classify_ci_evidence"),
+            ("implement_bundle", "activity:agent_implement"),
+            // Shipped delivery chain, reused as-is.
+            ("commit", "activity:git_commit"),
+            ("prepare_branch", "activity:pr_prepare"),
+            ("sync_base", "activity:git_rebase"),
+            ("push", "activity:git_push"),
+            ("pr_open", "activity:pr_open"),
+            // Verification only becomes possible once the candidate exists.
+            ("verify_ci", "activity:verify_candidate_ci"),
+            ("promote_tasks", "activity:pr_promote"),
+            ("promote_no_diff", "activity:pr_promote"),
+        ]
+    );
+}
+
+#[test]
+fn ci_remediation_hands_evidence_to_an_unmodified_agent_implement() {
+    let asset = load_job_asset(ci_remediation_yaml()).expect("parse CI remediation pipeline");
+    let implement = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "implement_bundle")
+        .expect("implement phase");
+
+    // The agent runs only when there is something to repair, and it is skipped
+    // entirely on both no-agent endings.
+    assert_eq!(
+        implement.when.as_deref(),
+        Some("{{ steps.triage.output.outcome }} == current_failures")
+    );
+
+    let JobV2StepBody::Loop { loop_ } = &implement.body else {
+        panic!("implement_bundle iterates the bundle");
+    };
+    let JobV2StepBody::TargetRef(target) = &loop_.steps[0].body else {
+        panic!("implement loop targets an activity");
+    };
+    let input = target.default_input.as_ref().expect("implement input");
+    assert_eq!(
+        input["ci_evidence"],
+        json!("{{ steps.collect_evidence.output.ci_evidence }}"),
+        "the snapshot reaches the agent through the job input, not a tool call"
+    );
+
+    // The activity itself is the shipped baseline: no GitHub tool, no
+    // credential, no sandbox carve-out.
+    let (_, activity_yaml) = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find(|(name, _)| *name == "agent_implement")
+        .expect("agent_implement is seeded");
+    let ActivityV2Spec::AgentLoop(spec) = load_activity_asset(activity_yaml)
+        .expect("parse agent_implement")
+        .spec
+        .spec
+    else {
+        panic!("agent_implement must remain an agent_loop activity");
+    };
+    assert_eq!(
+        spec.tools,
+        [
+            "orbit.task.*",
+            "orbit.friction.*",
+            "orbit.search",
+            "proc.spawn"
+        ]
+    );
+    assert!(
+        !yaml_without_comments(ci_remediation_yaml()).contains("github."),
+        "the CI pipeline must not name a github.* tool anywhere"
+    );
+    assert!(
+        !yaml_without_comments(ci_remediation_yaml()).contains("required_tools"),
+        "the CI pipeline must not widen the agent's tool surface"
+    );
+}
+
+/// The three endings must reach three different places. `capability_unavailable`
+/// stops at `triage` (which fails rather than returning, so nothing downstream
+/// runs), `no_current_failure` falls through to the shipped no-diff promotion,
+/// and only `current_failures` reaches the agent.
+#[test]
+fn ci_remediation_gates_delivery_on_always_recorded_step_outputs() {
+    let asset = load_job_asset(ci_remediation_yaml()).expect("parse CI remediation pipeline");
+    let conditions = asset
+        .spec
+        .steps
+        .iter()
+        .filter_map(|step| step.when.as_deref().map(|when| (step.id.as_str(), when)))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        conditions,
+        vec![
+            (
+                "implement_bundle",
+                "{{ steps.triage.output.outcome }} == current_failures"
+            ),
+            (
+                "prepare_branch",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "sync_base",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "push",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "pr_open",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "verify_ci",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "promote_tasks",
+                "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+            ),
+            (
+                "promote_no_diff",
+                "{{ steps.commit.output.skipped_no_diff_expected }} == true"
+            ),
+        ],
+        "conditions render before they evaluate, so every referenced step \
+         (`triage`, `commit`) must be one that always runs"
+    );
+
+    let unconditional = asset
+        .spec
+        .steps
+        .iter()
+        .filter(|step| step.when.is_none())
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        unconditional,
+        vec!["worktree", "collect_evidence", "triage", "commit"]
+    );
+}
+
+#[test]
+fn ci_remediation_verifies_the_exact_published_commit_before_promotion() {
+    let asset = load_job_asset(ci_remediation_yaml()).expect("parse CI remediation pipeline");
+    let verify = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "verify_ci")
+        .expect("verification phase");
+    let JobV2StepBody::TargetRef(target) = &verify.body else {
+        panic!("verify_ci targets an activity");
+    };
+    let input = target.default_input.as_ref().expect("verify input");
+
+    // The pushed commit, not the branch it landed on: a branch can move again
+    // before CI reports.
+    assert_eq!(
+        input["candidate_sha"],
+        json!("{{ steps.push.output.local_sha }}")
+    );
+    assert_eq!(
+        input["expected_workflows"],
+        json!("{{ steps.triage.output.affected_workflows }}")
+    );
+
+    let step_ids = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    let position = |id: &str| step_ids.iter().position(|step| *step == id).expect(id);
+    assert!(position("pr_open") < position("verify_ci"));
+    assert!(position("verify_ci") < position("promote_tasks"));
+}
+
+/// The shipped ADR-0246 handoff publishes a blocked PR out of a mid-delivery
+/// failure. Both of this pipeline's designed failure endings have already
+/// written a final verdict to the task, so layering that on top would restate
+/// a CI verdict as a delivery failure — and, for the preflight ending, publish
+/// a branch for a run that never produced a commit.
+#[test]
+fn ci_remediation_declines_the_pr_failure_handoff() {
+    let asset = load_job_asset(ci_remediation_yaml()).expect("parse CI remediation pipeline");
+    assert_eq!(asset.spec.failure_activity, None);
+}
+
+fn ci_remediation_yaml() -> &'static str {
+    DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_ci_remediation_pipeline").then_some(*yaml))
+        .expect("CI remediation pipeline default exists")
 }

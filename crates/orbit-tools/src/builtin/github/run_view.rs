@@ -7,7 +7,7 @@ use crate::{TIMEOUT_DEFAULT_MS, check_exec_result};
 /// The `gh run view --json` fields this tool projects.
 const RUN_VIEW_FIELDS: &str = "databaseId,number,workflowName,displayTitle,status,conclusion,event,headBranch,headSha,createdAt,startedAt,updatedAt,url,jobs";
 
-pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
     let mut args = vec![
         "run".to_string(),
         "view".to_string(),
@@ -70,7 +70,7 @@ fn is_unsuccessful(conclusion: &Value) -> bool {
     )
 }
 
-pub(super) fn project_run_view(run: &Value) -> Value {
+pub fn project_run_view(run: &Value) -> Value {
     let jobs: Vec<Value> = run["jobs"]
         .as_array()
         .map(|jobs| {

@@ -7,7 +7,7 @@ use orbit_tools::ToolContext;
 use orbit_types::policy::Role;
 use orbit_types::task::TaskStatus;
 use orbit_types::telemetry::AuditEventStatus;
-use orbit_types::workflow::ChildDispatchPhase;
+use orbit_types::workflow::{ChildDispatchPhase, PipelineMode};
 use serde_json::Value;
 
 use super::child_dispatch;
@@ -72,6 +72,7 @@ pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, Dis
         }
         bundles.push(bundle_ids);
     }
+    let dispatch_bundles = validated_dispatch_bundles(action, input, &bundles, &mut violations)?;
     if !violations.is_empty() {
         return Err(DispatchError::DeterministicActionFailed {
             action: action.to_string(),
@@ -80,8 +81,114 @@ pub(super) fn validate_bundles(action: &str, input: &Value) -> Result<Value, Dis
     }
     Ok(serde_json::json!({
         "bundles": bundles,
+        "dispatch_bundles": dispatch_bundles,
         "bundle_count": bundles.len(),
     }))
+}
+
+/// Validate the per-bundle routing decisions, or synthesize them.
+///
+/// A caller that supplies `dispatch_bundles` must supply exactly one entry per
+/// bundle, covering exactly the same task ids: a mismatch would let a routing
+/// decision be silently dropped and the task ship through the default pipeline.
+/// A caller that supplies none gets `default_mode` for every bundle, which is
+/// what an explicitly selected `pr` or `local` dispatch does today.
+///
+/// A bundle routed anywhere but the default mode must be a singleton. Modes are
+/// a per-bundle property, so two tasks that need different pipelines cannot
+/// travel together — and a specially-routed task quietly acquiring a
+/// neighbour is exactly the mis-bundling this guard exists to prevent.
+fn validated_dispatch_bundles(
+    action: &str,
+    input: &Value,
+    bundles: &[Vec<String>],
+    violations: &mut Vec<String>,
+) -> Result<Vec<Value>, DispatchError> {
+    let default_mode = input
+        .get("default_mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(PipelineMode::Pr.as_input_value());
+    let default_mode = parse_pipeline_mode(action, default_mode)?;
+
+    let Some(entries) = input
+        .get("dispatch_bundles")
+        .filter(|value| !value.is_null())
+    else {
+        return Ok(bundles
+            .iter()
+            .map(|task_ids| {
+                serde_json::json!({
+                    "task_ids": task_ids,
+                    "mode": default_mode.as_input_value(),
+                })
+            })
+            .collect());
+    };
+    let entries = entries
+        .as_array()
+        .ok_or_else(|| DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: "`dispatch_bundles` must be an array".to_string(),
+        })?;
+    if entries.len() != bundles.len() {
+        violations.push(format!(
+            "dispatch_bundles has {} entries for {} bundles",
+            entries.len(),
+            bundles.len()
+        ));
+        return Ok(Vec::new());
+    }
+
+    let mut dispatch_bundles = Vec::with_capacity(entries.len());
+    for (idx, entry) in entries.iter().enumerate() {
+        let task_ids: Vec<String> = entry
+            .get("task_ids")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if task_ids != bundles[idx] {
+            violations.push(format!(
+                "dispatch_bundles[{idx}] task_ids {task_ids:?} do not match bundle[{idx}] {:?}",
+                bundles[idx]
+            ));
+            continue;
+        }
+        let mode = entry
+            .get("mode")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(default_mode.as_input_value());
+        let mode = parse_pipeline_mode(action, mode)?;
+        if mode != default_mode && task_ids.len() > 1 {
+            violations.push(format!(
+                "dispatch_bundles[{idx}] routes {} tasks to '{}'; a bundle routed off the default \
+                 pipeline must contain exactly one task",
+                task_ids.len(),
+                mode.as_input_value()
+            ));
+            continue;
+        }
+        dispatch_bundles.push(serde_json::json!({
+            "task_ids": task_ids,
+            "mode": mode.as_input_value(),
+        }));
+    }
+    Ok(dispatch_bundles)
+}
+
+fn parse_pipeline_mode(action: &str, value: &str) -> Result<PipelineMode, DispatchError> {
+    PipelineMode::parse(value).map_err(|error| DispatchError::DeterministicActionFailed {
+        action: action.to_string(),
+        message: format!("{error}"),
+    })
 }
 
 /// Submit a child v2 Job, link it durably, then block on its terminal state.

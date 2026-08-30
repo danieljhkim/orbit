@@ -12,6 +12,12 @@ spec:
     set. Pass-through on success so the fan_out can consume the same
     `bundles` shape without unwrapping a wrapper object — prevents a
     misgrouped backlog from silently dispatching.
+    Also validates per-bundle routing: `dispatch_bundles` must carry exactly one
+    entry per bundle covering the same task ids, so a routing decision cannot be
+    silently dropped, and a bundle routed off `default_mode` must contain
+    exactly one task, so a specially-routed task cannot acquire a neighbour and
+    ship through the wrong pipeline. Callers that supply no `dispatch_bundles`
+    get `default_mode` for every bundle.
   input_schema_json:
     type: object
     required: [bundles, max_bundle_size, known_task_ids]
@@ -22,6 +28,21 @@ spec:
           type: array
           items:
             type: string
+      dispatch_bundles:
+        type: [array, "null"]
+        items:
+          type: object
+          properties:
+            task_ids:
+              type: array
+              items:
+                type: string
+            mode:
+              type: string
+              enum: [pr, local, ci_remediation]
+      default_mode:
+        type: string
+        enum: [pr, local, ci_remediation]
       max_bundle_size:
         type: number
       known_task_ids:
@@ -30,7 +51,7 @@ spec:
           type: string
   output_schema_json:
     type: object
-    required: [bundles, bundle_count]
+    required: [bundles, dispatch_bundles, bundle_count]
     properties:
       bundles:
         type: array
@@ -38,6 +59,19 @@ spec:
           type: array
           items:
             type: string
+      dispatch_bundles:
+        type: array
+        items:
+          type: object
+          required: [task_ids, mode]
+          properties:
+            task_ids:
+              type: array
+              items:
+                type: string
+            mode:
+              type: string
+              enum: [pr, local, ci_remediation]
       bundle_count:
         type: number
   action: validate_bundles

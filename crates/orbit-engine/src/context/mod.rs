@@ -21,6 +21,6 @@ pub use hosts::{
     TaskAutomationUpdate,
 };
 pub use outcome::{
-    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, WORKFLOW_RUN_FAILED_EVENT,
-    blocked_workflow_failure_update,
+    AGENT_INVOCATION_FAILED, AGENT_TIMEOUT, ActivityInvocationResult, MAX_NOTE_ERROR_BYTES,
+    WORKFLOW_RUN_FAILED_EVENT, blocked_workflow_failure_update,
 };

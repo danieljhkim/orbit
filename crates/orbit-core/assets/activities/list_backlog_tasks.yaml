@@ -19,7 +19,11 @@ spec:
     older high-priority work ships first. Caps at `max_tasks` (default 50) to
     keep the agent's context window bounded. Also emits conservative singleton
     `bundles` so downstream dispatch can proceed without depending on an
-    agent's final response payload.
+    agent's final response payload, and `dispatch_bundles`, which pairs each
+    bundle with the pipeline mode it must ship through. The run's `mode` is the
+    default; a task whose shape needs its own pipeline (today, a
+    `ci-failure-remediation` task under `pr` mode) refines it here, where the
+    task record is in hand. Ordinary `pr` and `local` dispatch is unchanged.
   input_schema_json:
     type: object
     properties:
@@ -31,9 +35,13 @@ spec:
         type: array
         items:
           type: string
+      mode:
+        type: string
+        enum: [pr, local, ci_remediation]
+        description: Run-level default pipeline mode. Defaults to `pr`.
   output_schema_json:
     type: object
-    required: [tasks, task_ids, task_count, bundles]
+    required: [tasks, task_ids, task_count, bundles, dispatch_bundles]
     properties:
       task_count:
         type: number
@@ -47,6 +55,19 @@ spec:
           type: array
           items:
             type: string
+      dispatch_bundles:
+        type: array
+        items:
+          type: object
+          required: [task_ids, mode]
+          properties:
+            task_ids:
+              type: array
+              items:
+                type: string
+            mode:
+              type: string
+              enum: [pr, local, ci_remediation]
       tasks:
         type: array
         items:

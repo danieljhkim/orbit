@@ -43,6 +43,8 @@ macro_rules! deterministic_action_catalog {
                 ValidateBundles => "validate_bundles",
             }
             engine {
+                ClassifyCiEvidence => "classify_ci_evidence",
+                CollectCiEvidence => "collect_ci_evidence",
                 GitCommit => "git_commit",
                 GitMerge => "git_merge",
                 GitPush => "git_push",
@@ -52,6 +54,7 @@ macro_rules! deterministic_action_catalog {
                 PrPrepare => "pr_prepare",
                 PrPromote => "pr_promote",
                 UpdateTask => "update_task",
+                VerifyCandidateCi => "verify_candidate_ci",
                 WorktreeGc => "worktree_gc",
                 WorktreeSetup => "worktree_setup",
             }

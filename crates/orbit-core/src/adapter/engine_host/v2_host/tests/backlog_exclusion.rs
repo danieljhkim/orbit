@@ -575,3 +575,87 @@ fn list_backlog_tasks_excludes_epic_roots_and_descendants_with_reasons() {
         assert_eq!(excluded_entry(&output, &child.id)["conflicts"], json!([]));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Per-task pipeline routing [ORB-11101]
+
+fn seed_ci_remediation_task(runtime: &OrbitRuntime, title: &str) -> Task {
+    runtime
+        .add_task(TaskAddParams {
+            title: title.to_string(),
+            description: "Investigate and remediate current GitHub Actions failures.".to_string(),
+            acceptance_criteria: vec!["Current failures are repaired.".to_string()],
+            tags: vec![
+                "ci-failure-remediation".to_string(),
+                "no-diff-expected".to_string(),
+            ],
+            plan: "Follow the deterministic CI remediation pipeline.".to_string(),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed CI remediation task")
+}
+
+fn dispatch_mode<'a>(output: &'a Value, task_id: &str) -> &'a str {
+    output["dispatch_bundles"]
+        .as_array()
+        .expect("dispatch_bundles array")
+        .iter()
+        .find(|entry| entry["task_ids"][0] == task_id)
+        .and_then(|entry| entry["mode"].as_str())
+        .expect("dispatch mode for task")
+}
+
+#[test]
+fn a_ci_shaped_task_routes_to_its_own_pipeline_and_leaves_neighbours_alone() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let ordinary = seed_list_backlog_task(
+        &runtime,
+        "Ordinary work",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let ci = seed_ci_remediation_task(&runtime, "Remediate current GitHub Actions failures");
+
+    let output = list_backlog_tasks(&runtime, json!({"mode": "pr"}));
+
+    assert_eq!(dispatch_mode(&output, &ci.id), "ci_remediation");
+    assert_eq!(dispatch_mode(&output, &ordinary.id), "pr");
+    // Bundles stay singletons, so nothing can ride along into the wrong
+    // pipeline; `bundles` itself is unchanged for every existing consumer.
+    for bundle in output["bundles"].as_array().expect("bundles") {
+        assert_eq!(bundle.as_array().expect("bundle").len(), 1);
+    }
+}
+
+#[test]
+fn local_dispatch_is_untouched_by_ci_shaped_work() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let ci = seed_ci_remediation_task(&runtime, "Remediate current GitHub Actions failures");
+
+    // The CI pipeline publishes and then verifies a candidate on GitHub, so it
+    // is a refinement of publishing delivery and has nothing to refine when the
+    // caller explicitly asked for local-only delivery.
+    let output = list_backlog_tasks(&runtime, json!({"mode": "local"}));
+    assert_eq!(dispatch_mode(&output, &ci.id), "local");
+}
+
+#[test]
+fn an_absent_mode_still_means_pr() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let ordinary = seed_list_backlog_task(
+        &runtime,
+        "Ordinary work",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+    assert_eq!(dispatch_mode(&output, &ordinary.id), "pr");
+}

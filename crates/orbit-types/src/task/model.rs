@@ -52,6 +52,14 @@ use crate::task::artifacts::{
 /// QA validation tasks file follow-up Orbit tasks).
 pub const NO_DIFF_EXPECTED_TAG: &str = "no-diff-expected";
 
+/// Tasks carrying this tag are CI-failure remediation work: they discover
+/// current GitHub Actions failures, repair them, and must have the repaired
+/// candidate commit verified on CI before promotion. Dispatch routes them to
+/// their own pipeline (`PipelineMode::CiRemediation`) because that discovery
+/// and that verification are host-owned deterministic stages, not something an
+/// implementation agent can perform from inside its sandbox.
+pub const CI_FAILURE_REMEDIATION_TAG: &str = "ci-failure-remediation";
+
 /// Operator-facing projection for a valid task reference whose prefix is not
 /// represented in this machine's coordination registry.
 pub const TASK_REFERENCE_NOT_VERIFIABLE_HERE: &str = "not verifiable here";

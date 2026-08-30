@@ -1,0 +1,54 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: classify_ci_evidence
+spec:
+  type: deterministic
+  description: >
+    Triage one CI evidence snapshot into exactly one of three outcomes, which
+    must never collapse into each other or into a clean pass:
+    `capability_unavailable` (the preflight failed, nothing was queried, the
+    bundle is blocked with that evidence and no agent runs),
+    `no_current_failure` (the queries ran and nothing current is failing, so the
+    bundle completes through the ordinary no-diff route without an agent), and
+    `current_failures` (continue to implementation, carrying the affected
+    workflow names forward for candidate verification).
+  input_schema_json:
+    type: object
+    required: [ci_evidence]
+    properties:
+      ci_evidence:
+        type: object
+      completed_task_ids:
+        type: array
+        items:
+          type: string
+      task_ids:
+        type: array
+        items:
+          type: string
+  output_schema_json:
+    type: object
+    required: [phase, outcome, current_failure_count, blocked_task_ids, detail]
+    properties:
+      phase:
+        type: string
+      outcome:
+        type: string
+        enum: [capability_unavailable, no_current_failure, current_failures]
+      current_failure_count:
+        type: number
+      capability:
+        type: object
+      affected_workflows:
+        type: array
+        items:
+          type: string
+      blocked_task_ids:
+        type: array
+        items:
+          type: string
+      detail:
+        type: string
+  action: classify_ci_evidence
+  config: {}

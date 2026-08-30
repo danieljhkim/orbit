@@ -32,7 +32,7 @@ fn log_scope(input: &Value) -> Result<&'static str, OrbitError> {
     }
 }
 
-pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
     let mut args = vec![
         "run".to_string(),
         "view".to_string(),

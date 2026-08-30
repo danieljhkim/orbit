@@ -13,7 +13,7 @@ tags: ["activity-job"]
 
 # Activity / Job — Overview
 
-Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions. The planned opt-in durability contract for automatic task recovery is specified in [recoverable-auto-workflows.md](./specs/recoverable-auto-workflows.md).
+Activity / Job is Orbit's execution substrate. Activities describe runnable units; jobs compose them sequentially, in parallel, across collections, or through bounded loops. Orbit's product story is moving toward goals, graphs, sessions, and locks, but this layer remains the runtime underneath. [2_design.md](./2_design.md) is the current contract; [3_vision.md](./3_vision.md) captures open questions. The planned opt-in durability contract for automatic task recovery is specified in [recoverable-auto-workflows.md](./specs/recoverable-auto-workflows.md). The CI-remediation pipeline, which brackets the implementing agent with host-owned GitHub discovery and post-publication candidate verification, is specified in [ci-remediation-pipeline.md](./specs/ci-remediation-pipeline.md).
 
 > **Release scope.** Orbit executes agent activities through the CLI agent path only. The `backend: http | cli | auto` selector and the engine-driven HTTP agent loop were removed in [ORB-10801]; see [specs/backend-resolution.md](./specs/backend-resolution.md) for the migration.
 

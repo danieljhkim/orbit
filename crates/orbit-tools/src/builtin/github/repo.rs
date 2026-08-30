@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::{TIMEOUT_DEFAULT_MS, check_exec_result};
 
-pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
     let mut args = vec!["repo".to_string(), "view".to_string()];
 
     if let Some(repo) = input.get("repo").and_then(Value::as_str) {
@@ -13,9 +13,22 @@ pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitErro
     }
 
     args.push("--json".to_string());
-    args.push("name,defaultBranchRef".to_string());
+    args.push("name,nameWithOwner,defaultBranchRef".to_string());
 
     Ok(super::gh_exec_request(args, None, TIMEOUT_DEFAULT_MS))
+}
+
+/// Reshape `gh repo view --json` into this surface's own field names.
+///
+/// `default_branch` is the repository's *release* branch as GitHub itself
+/// reports it. Deriving it here is the reason nothing downstream has to guess
+/// a branch name from convention.
+pub fn project_repo_view(parsed: &Value) -> Value {
+    json!({
+        "name": parsed["name"],
+        "full_name": parsed["nameWithOwner"],
+        "default_branch": parsed["defaultBranchRef"]["name"],
+    })
 }
 
 super::gh_tool! {
@@ -40,9 +53,6 @@ super::gh_tool! {
             OrbitError::Execution(format!("failed to parse gh repo view output: {e}"))
         })?;
 
-        Ok(json!({
-            "name": parsed["name"],
-            "default_branch": parsed["defaultBranchRef"]["name"],
-        }))
+        Ok(project_repo_view(&parsed))
     }
 }

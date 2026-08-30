@@ -4,6 +4,7 @@ use std::path::Path;
 use orbit_common::fs::path::workspace_relative_paths_overlap;
 use orbit_engine::DispatchError;
 use orbit_types::task::{Task, TaskStatus, task_dependencies_ready};
+use orbit_types::workflow::{PipelineMode, pipeline_mode_for_task};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -209,6 +210,21 @@ pub(super) fn list_backlog_tasks(
     tasks.truncate(max_tasks);
     let ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
     let bundles: Vec<Vec<String>> = ids.iter().map(|task_id| vec![task_id.clone()]).collect();
+    // Per-task routing. The run's `mode` is the default; a task whose shape
+    // needs its own pipeline refines it here, at the one place that has the
+    // task record in hand. Bundles are singletons, so a bundle's mode is
+    // unambiguous — `validate_bundles` refuses any grouping that would make it
+    // ambiguous.
+    let default_mode = requested_pipeline_mode(input)?;
+    let dispatch_bundles: Vec<Value> = tasks
+        .iter()
+        .map(|task| {
+            serde_json::json!({
+                "task_ids": [task.id.clone()],
+                "mode": pipeline_mode_for_task(default_mode, &task.tags).as_input_value(),
+            })
+        })
+        .collect();
     let task_objs: Vec<Value> = tasks
         .iter()
         .map(|t| {
@@ -227,6 +243,10 @@ pub(super) fn list_backlog_tasks(
     payload.insert("task_ids".to_string(), serde_json::json!(ids));
     payload.insert("tasks".to_string(), serde_json::json!(task_objs));
     payload.insert("bundles".to_string(), serde_json::json!(bundles));
+    payload.insert(
+        "dispatch_bundles".to_string(),
+        serde_json::json!(dispatch_bundles),
+    );
     // Keep this Rust serialization contract in sync with
     // crates/orbit-core/assets/activities/list_backlog_tasks.yaml.
     if let Some(excluded) = excluded_entries {
@@ -241,6 +261,26 @@ pub(super) fn list_backlog_tasks(
         );
     }
     Ok(Value::Object(payload))
+}
+
+/// The run-level pipeline mode a dispatch asked for, defaulting to `pr`.
+///
+/// Rejects an unknown mode rather than silently falling back: a typo that
+/// quietly became `pr` would ship work through a pipeline the caller did not
+/// ask for.
+fn requested_pipeline_mode(input: &Value) -> Result<PipelineMode, DispatchError> {
+    let Some(mode) = input
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(PipelineMode::Pr);
+    };
+    PipelineMode::parse(mode).map_err(|error| DispatchError::DeterministicActionFailed {
+        action: "list_backlog_tasks".to_string(),
+        message: format!("{error}"),
+    })
 }
 
 pub(super) fn sort_tasks_by_priority_age(tasks: &mut [Task]) {

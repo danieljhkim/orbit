@@ -1,0 +1,98 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: verify_candidate_ci
+spec:
+  type: deterministic
+  description: >
+    After publication, wait a bounded time for GitHub Actions runs on the exact
+    candidate commit and decide whether the bundle may be promoted. Every
+    workflow run observed on that SHA counts, so informational checks are
+    covered alongside required ones. `promotable` is true only when every one of
+    them completed successfully. Queued, in-progress, cancelled, red, a workflow
+    that never appeared, and a wait that ran out of budget stay distinguishable
+    in the result; none of them is reported as a pass, and a wait timeout is not
+    reported as a CI failure. On any non-green verdict the bundle is moved to
+    `blocked` with the verdict, and the red runs' failed jobs and bounded log
+    excerpts travel in `failure_evidence`.
+  input_schema_json:
+    type: object
+    required: [candidate_sha, head_branch]
+    properties:
+      workspace_path:
+        type: string
+      candidate_sha:
+        type: string
+        description: The exact published commit to verify. 40 or 64 hex characters.
+      head_branch:
+        type: string
+      expected_workflows:
+        type: array
+        items:
+          type: string
+        description: >
+          Workflows the repair must re-run green, from the discovery stage. A
+          workflow in this list with no run on the candidate is `missing`, not
+          green.
+      completed_task_ids:
+        type: array
+        items:
+          type: string
+      max_wait_seconds:
+        type: number
+      poll_interval_seconds:
+        type: number
+      runs_limit:
+        type: number
+      log_max_bytes:
+        type: number
+  output_schema_json:
+    type: object
+    required: [phase, verdict, promotable, candidate_sha, blocked_task_ids]
+    properties:
+      phase:
+        type: string
+      verdict:
+        type: string
+        enum: [green, red, cancelled, queued, in_progress, missing, wait_timeout]
+      pending_state:
+        type: [string, "null"]
+        enum: [queued, in_progress, missing, null]
+      promotable:
+        type: boolean
+      candidate_sha:
+        type: string
+      head_branch:
+        type: string
+      expected_workflows:
+        type: array
+      observed_workflows:
+        type: array
+      missing_workflows:
+        type: array
+      checks:
+        type: array
+      red:
+        type: array
+      cancelled:
+        type: array
+      queued:
+        type: array
+      in_progress:
+        type: array
+      failure_evidence:
+        type: array
+      waited_seconds:
+        type: number
+      polls:
+        type: number
+      max_wait_seconds:
+        type: number
+      blocked_task_ids:
+        type: array
+        items:
+          type: string
+      detail:
+        type: string
+  action: verify_candidate_ci
+  config: {}

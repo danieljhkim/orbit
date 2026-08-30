@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{ToolRegistry, require_str};
 
-pub(super) fn gh_exec_request(
+pub fn gh_exec_request(
     args: Vec<String>,
     current_dir: Option<String>,
     timeout_ms: u64,
@@ -237,17 +237,17 @@ pub(super) fn bounded_limit(
 }
 
 /// Parse a `gh --json` payload, naming the command in the failure.
-pub(super) fn parse_gh_json(stdout: &str, label: &str) -> Result<Value, OrbitError> {
+pub fn parse_gh_json(stdout: &str, label: &str) -> Result<Value, OrbitError> {
     serde_json::from_str(stdout)
         .map_err(|error| OrbitError::Execution(format!("failed to parse {label} output: {error}")))
 }
 
 /// One log excerpt, already redacted and bounded.
-pub(super) struct BoundedLog {
-    pub(super) text: String,
-    pub(super) truncated: bool,
-    pub(super) total_bytes: usize,
-    pub(super) returned_bytes: usize,
+pub struct BoundedLog {
+    pub text: String,
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub returned_bytes: usize,
 }
 
 /// Cap a log excerpt at `max_bytes`, keeping the head and the tail.
@@ -257,7 +257,7 @@ pub(super) struct BoundedLog {
 /// so a plain prefix truncation loses the part the reader came for. The gap is
 /// marked inline, and `truncated` lets a caller ask for more rather than
 /// silently reasoning over a partial log.
-pub(super) fn bound_log_text(raw: &str, max_bytes: usize) -> BoundedLog {
+pub fn bound_log_text(raw: &str, max_bytes: usize) -> BoundedLog {
     let redacted = redact_all(raw);
     let total_bytes = redacted.len();
     if total_bytes <= max_bytes {
@@ -274,7 +274,7 @@ pub(super) fn bound_log_text(raw: &str, max_bytes: usize) -> BoundedLog {
         ceil_char_boundary(&redacted, total_bytes.saturating_sub(max_bytes - head_len));
     let omitted = tail_start - head_len;
     let text = format!(
-        "{}\n[... {omitted} bytes omitted by github.run.logs; raise `max_bytes` for more ...]\n{}",
+        "{}\n[... {omitted} bytes omitted; raise the byte budget for more ...]\n{}",
         &redacted[..head_len],
         &redacted[tail_start..]
     );
@@ -321,9 +321,9 @@ const MAX_SHA_LEN: usize = 40;
 /// disagree whenever a merge-queue or pull-request merge commit is what got
 /// tested, so the two travel as separate fields and are never merged into one
 /// `sha`.
-pub(super) struct CheckoutEvidence {
-    pub(super) commits: Vec<String>,
-    pub(super) lines: Vec<String>,
+pub struct CheckoutEvidence {
+    pub commits: Vec<String>,
+    pub lines: Vec<String>,
 }
 
 /// Split one `gh run view --log` line into its step column and its payload.
@@ -391,7 +391,7 @@ fn commit_sha_tokens(payload: &str) -> Vec<&str> {
 }
 
 /// Scan a runner log for checkout evidence, keeping at most `max_lines` lines.
-pub(super) fn scan_checkout_evidence(log: &str, max_lines: usize) -> CheckoutEvidence {
+pub fn scan_checkout_evidence(log: &str, max_lines: usize) -> CheckoutEvidence {
     let mut commits: Vec<String> = Vec::new();
     let mut lines = Vec::new();
     for line in log.lines() {

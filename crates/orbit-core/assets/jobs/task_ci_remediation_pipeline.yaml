@@ -1,0 +1,241 @@
+# CI-failure remediation pipeline.
+#
+# `task_pr_pipeline` with two host-owned deterministic stages wrapped around
+# the agent, because the two halves of CI remediation are structurally
+# impossible where the agent runs:
+#
+#   - Discovery needs GitHub credentials inside a sandbox that denies them, so
+#     `collect_evidence` runs every query on the host, before any agent is
+#     launched, and hands one bounded redacted snapshot in through the job
+#     input. `agent_implement` is reused *unchanged*: same activity, same
+#     ordinary tool baseline, no `github.*` requirement, no credential, no
+#     sandbox carve-out. It gets the evidence and cannot ask for more, which is
+#     why `collect_evidence` is generous and reports every bound it hit.
+#   - The candidate commit does not exist while the agent is running — it is
+#     created by `commit` and published by `push`, both of which come after.
+#     `verify_ci` therefore runs after `pr_open` and *before* `promote_tasks`,
+#     and fails the run on any non-green verdict, so promotion on an unverified
+#     candidate is unreachable rather than merely skipped.
+#
+# `commit`, `prepare_branch`, `sync_base`, `push`, `pr_open`, `pr_promote` are
+# the shipped stages, used as-is.
+#
+# Routing: `list_backlog_tasks` derives `ci_remediation` for a task tagged
+# `ci-failure-remediation`, `validate_bundles` refuses to let such a task share
+# a bundle with anything else, and `task_gate_pipeline` dispatches
+# `task_{{ input.mode }}_pipeline`. Ordinary `pr` and `local` dispatch is
+# untouched.
+#
+# Three endings, and none of them may be reported as another:
+#   - `capability_unavailable` — no GitHub client, or no credentials. `triage`
+#     blocks the bundle with the exact preflight detail and fails, ending the
+#     run before an agent is dispatched. No agent run is spent. A failed run is
+#     the honest report: the host was asked whether CI is red and could not
+#     find out. This is never a clean pass.
+#   - `no_current_failure` — the queries ran and nothing current is failing.
+#     `triage` persists the evidenced account as the task's durable
+#     `execution_summary` and skips the agent. `commit` then finds no diff on a
+#     task carrying `no-diff-expected` and reports `skipped_no_diff_expected`,
+#     which is the ordinary no-diff promotion route, entered with no agent run
+#     and no change to any shipped stage.
+#   - `current_failures` — implement, publish, verify, promote.
+#
+# No `failure_activity`: the ADR-0246 recoverable-candidate handoff exists to
+# publish a blocked PR out of a mid-delivery failure, and both of this
+# pipeline's designed failure endings have already written a precise, final
+# verdict to the task. Layering a blocked-PR handoff on top of that would
+# publish a branch for a capability preflight that never produced a commit, and
+# would restate an already-durable CI verdict as a delivery failure. Genuine
+# mid-delivery failures still reach `step_failure_recovery`, and a terminally
+# failed run still blocks its coupled tasks.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: task_ci_remediation_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 4
+  default_input:
+    task_ids: []
+    base_branch: main
+    base_sync: remote
+    landing_branch: ""
+    title: null
+    body: null
+    # Discovery bounds. Everything crossing into the agent sandbox is bounded
+    # and redacted; raising these widens the snapshot, never the sandbox.
+    runs_per_ref: 20
+    max_pull_requests: 10
+    max_investigated_runs: 6
+    log_max_bytes: 16384
+    # Candidate verification bounds.
+    ci_max_wait_seconds: 2700
+    ci_poll_interval_seconds: 45
+
+  steps:
+    - id: worktree
+      target: activity:worktree_setup
+      retry:
+        max_attempts: 4
+        initial_backoff_ms: 200
+        backoff_cap_ms: 2000
+        backoff_strategy: exponential
+      default_input:
+        task_ids: "{{ input.task_ids }}"
+        base: "{{ input.base_branch }}"
+        base_sync: "{{ input.base_sync }}"
+
+    - id: collect_evidence
+      target: activity:collect_ci_evidence
+      default_input:
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        integration_branch: "{{ input.base_branch }}"
+        runs_per_ref: "{{ input.runs_per_ref }}"
+        max_pull_requests: "{{ input.max_pull_requests }}"
+        max_investigated_runs: "{{ input.max_investigated_runs }}"
+        log_max_bytes: "{{ input.log_max_bytes }}"
+
+    - id: triage
+      target: activity:classify_ci_evidence
+      default_input:
+        ci_evidence: "{{ steps.collect_evidence.output.ci_evidence }}"
+        completed_task_ids: "{{ input.task_ids }}"
+
+    # The agent never sees a GitHub credential; it sees this snapshot.
+    - id: implement_bundle
+      when: "{{ steps.triage.output.outcome }} == current_failures"
+      loop:
+        items: "{{ input.task_ids }}"
+        max_iterations: 256
+        steps:
+          - id: implement_one
+            recovery_activity: step_failure_recovery
+            target: activity:agent_implement
+            default_input:
+              task_id: "{{ item }}"
+              workspace_path: "{{ steps.worktree.output.workspace_path }}"
+              repo_root: "{{ steps.worktree.output.workspace_path }}"
+              ci_evidence: "{{ steps.collect_evidence.output.ci_evidence }}"
+
+    # Always runs, on every surviving outcome. `when:` conditions render before
+    # they evaluate, so a step whose output later conditions read must never be
+    # skipped; that is why `capability_unavailable` ends the run at `triage`
+    # instead of skipping its way down the pipeline.
+    - id: commit
+      recovery_activity: step_failure_recovery
+      target: activity:git_commit
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        scope: all
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        base_ref: "{{ steps.worktree.output.base_ref }}"
+        base_sha: "{{ steps.worktree.output.base_sha }}"
+
+    - id: prepare_branch
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_prepare
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        base: "{{ input.base_branch }}"
+        base_sync: "{{ input.base_sync }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+
+    - id: sync_base
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:git_rebase
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        head: "{{ steps.prepare_branch.output.head }}"
+        head_sha: "{{ steps.prepare_branch.output.head_sha }}"
+        base: "{{ steps.prepare_branch.output.base }}"
+        base_ref: "{{ steps.prepare_branch.output.base_ref }}"
+        base_sha: "{{ steps.prepare_branch.output.base_sha }}"
+        remote_sha: "{{ steps.prepare_branch.output.remote_sha }}"
+        commits_behind: "{{ steps.prepare_branch.output.commits_behind }}"
+        sync_required: "{{ steps.prepare_branch.output.sync_required }}"
+
+    - id: push
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:git_push
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        branch: "{{ steps.sync_base.output.head }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        rewrite_performed: "{{ steps.sync_base.output.rewritten }}"
+        rewrite_head_before: "{{ steps.sync_base.output.head_sha_before }}"
+        expected_remote_sha: "{{ steps.sync_base.output.remote_sha_before }}"
+
+    - id: pr_open
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_open
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        base_sha: "{{ steps.sync_base.output.base_sha }}"
+        base_sync: "{{ input.base_sync }}"
+        landing_branch: "{{ input.landing_branch }}"
+        head: "{{ steps.sync_base.output.head }}"
+        body: "{{ input.body }}"
+        title: "{{ input.title }}"
+
+    # Publication happened, so the candidate commit finally exists and can be
+    # verified. `push.output.local_sha` is the exact commit published, not the
+    # branch it was published under: a branch can move again before CI reports.
+    - id: verify_ci
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      target: activity:verify_candidate_ci
+      default_input:
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        candidate_sha: "{{ steps.push.output.local_sha }}"
+        head_branch: "{{ steps.sync_base.output.head }}"
+        expected_workflows: "{{ steps.triage.output.affected_workflows }}"
+        max_wait_seconds: "{{ input.ci_max_wait_seconds }}"
+        poll_interval_seconds: "{{ input.ci_poll_interval_seconds }}"
+        log_max_bytes: "{{ input.log_max_bytes }}"
+
+    # Only reachable once `verify_ci` returned green: any other verdict already
+    # blocked the bundle and failed the run.
+    - id: promote_tasks
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} != true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_promote
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        head: "{{ steps.sync_base.output.head }}"
+        base: "{{ steps.sync_base.output.base }}"
+        base_ref: "{{ steps.sync_base.output.base_ref }}"
+        base_sha: "{{ steps.sync_base.output.base_sha }}"
+        base_sync: "{{ input.base_sync }}"
+        landing_branch: "{{ input.landing_branch }}"
+        pr_number: "{{ steps.pr_open.output.pr_number }}"
+        pr_url: "{{ steps.pr_open.output.pr_url }}"
+
+    # The evidenced no-current-failure ending, and the ending where the agent
+    # legitimately produced no diff. Same shipped route as `task_pr_pipeline`.
+    - id: promote_no_diff
+      when: "{{ steps.commit.output.skipped_no_diff_expected }} == true"
+      recovery_activity: step_failure_recovery
+      target: activity:pr_promote
+      default_input:
+        job_run_id: "{{ steps.worktree.output.job_run_id }}"
+        completed_task_ids: "{{ input.task_ids }}"
+        workspace_path: "{{ steps.worktree.output.workspace_path }}"
+        no_diff_expected: true

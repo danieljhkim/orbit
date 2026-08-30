@@ -1,3 +1,4 @@
+mod ci;
 mod input;
 pub(crate) mod review;
 mod task_update;
@@ -58,6 +59,14 @@ pub(crate) fn execute_engine_action<
         EngineDeterministicAction::UpdateTask => {
             task_update::update_task(host, input, state_context)
         }
+
+        // ---- CI remediation: host-owned discovery and verification ----
+        // These run `gh` on the host, outside any agent sandbox, on the same
+        // engine-private boundary as `automation::vcs`. No agent-facing tool
+        // is added and no GitHub credential is exposed to one.
+        EngineDeterministicAction::CollectCiEvidence => ci::collect_ci_evidence(host, input),
+        EngineDeterministicAction::ClassifyCiEvidence => ci::classify_ci_evidence(host, input),
+        EngineDeterministicAction::VerifyCandidateCi => ci::verify_candidate_ci(host, input),
 
         // ---- generic built-in actions ----
         EngineDeterministicAction::GitCommit => vcs::git_commit(host, input),

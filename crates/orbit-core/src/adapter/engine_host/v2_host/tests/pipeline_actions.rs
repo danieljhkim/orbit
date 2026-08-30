@@ -550,3 +550,136 @@ fn a_detached_child_is_recorded_as_non_blocking() {
         "a detached child was dispatched to outlive its parent's step"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Per-task pipeline routing [ORB-11101]
+
+#[test]
+fn ordinary_dispatch_without_routing_keeps_the_run_level_mode() {
+    for mode in ["pr", "local"] {
+        let output = validate_bundles(
+            "validate_bundles",
+            &json!({
+                "bundles": [["ORB-1"], ["ORB-2"]],
+                "default_mode": mode,
+                "max_bundle_size": 5,
+                "known_task_ids": ["ORB-1", "ORB-2"],
+            }),
+        )
+        .expect("ordinary dispatch validates");
+
+        assert_eq!(output["bundles"], json!([["ORB-1"], ["ORB-2"]]));
+        assert_eq!(
+            output["dispatch_bundles"],
+            json!([
+                {"task_ids": ["ORB-1"], "mode": mode},
+                {"task_ids": ["ORB-2"], "mode": mode},
+            ]),
+            "an unrouted {mode} dispatch must be unchanged"
+        );
+    }
+}
+
+#[test]
+fn a_ci_shaped_bundle_travels_beside_ordinary_pr_bundles() {
+    let output = validate_bundles(
+        "validate_bundles",
+        &json!({
+            "bundles": [["ORB-1"], ["ORB-2"]],
+            "dispatch_bundles": [
+                {"task_ids": ["ORB-1"], "mode": "ci_remediation"},
+                {"task_ids": ["ORB-2"], "mode": "pr"},
+            ],
+            "default_mode": "pr",
+            "max_bundle_size": 5,
+            "known_task_ids": ["ORB-1", "ORB-2"],
+        }),
+    )
+    .expect("mixed routing validates");
+
+    assert_eq!(
+        output["dispatch_bundles"][0]["mode"],
+        json!("ci_remediation")
+    );
+    assert_eq!(output["dispatch_bundles"][1]["mode"], json!("pr"));
+}
+
+#[test]
+fn a_specially_routed_bundle_may_not_carry_a_neighbour() {
+    let message = action_failure_message(
+        validate_bundles(
+            "validate_bundles",
+            &json!({
+                "bundles": [["ORB-1", "ORB-2"]],
+                "dispatch_bundles": [
+                    {"task_ids": ["ORB-1", "ORB-2"], "mode": "ci_remediation"},
+                ],
+                "default_mode": "pr",
+                "max_bundle_size": 5,
+                "known_task_ids": ["ORB-1", "ORB-2"],
+            }),
+        )
+        .expect_err("a CI-shaped task must not bundle with ordinary work"),
+        "validate_bundles",
+    );
+    assert!(
+        message.contains("must contain exactly one task"),
+        "{message}"
+    );
+}
+
+#[test]
+fn routing_that_disagrees_with_the_bundles_is_refused_rather_than_dropped() {
+    let message = action_failure_message(
+        validate_bundles(
+            "validate_bundles",
+            &json!({
+                "bundles": [["ORB-1"], ["ORB-2"]],
+                "dispatch_bundles": [{"task_ids": ["ORB-1"], "mode": "ci_remediation"}],
+                "default_mode": "pr",
+                "max_bundle_size": 5,
+                "known_task_ids": ["ORB-1", "ORB-2"],
+            }),
+        )
+        .expect_err("a dropped routing decision must fail closed"),
+        "validate_bundles",
+    );
+    assert!(message.contains("2 bundles"), "{message}");
+
+    let message = action_failure_message(
+        validate_bundles(
+            "validate_bundles",
+            &json!({
+                "bundles": [["ORB-1"]],
+                "dispatch_bundles": [{"task_ids": ["ORB-9"], "mode": "pr"}],
+                "default_mode": "pr",
+                "max_bundle_size": 5,
+                "known_task_ids": ["ORB-1"],
+            }),
+        )
+        .expect_err("routing must name the same tasks as the bundle"),
+        "validate_bundles",
+    );
+    assert!(message.contains("do not match bundle[0]"), "{message}");
+}
+
+#[test]
+fn an_unknown_pipeline_mode_is_refused_rather_than_defaulted() {
+    let message = action_failure_message(
+        validate_bundles(
+            "validate_bundles",
+            &json!({
+                "bundles": [["ORB-1"]],
+                "dispatch_bundles": [{"task_ids": ["ORB-1"], "mode": "yolo"}],
+                "max_bundle_size": 5,
+                "known_task_ids": ["ORB-1"],
+            }),
+        )
+        .expect_err("an unknown mode must not silently become pr"),
+        "validate_bundles",
+    );
+    assert!(
+        message.contains("unknown pipeline mode 'yolo'"),
+        "{message}"
+    );
+}

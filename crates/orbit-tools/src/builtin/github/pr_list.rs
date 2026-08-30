@@ -11,7 +11,7 @@ const PR_LIST_FIELDS: &str =
 const DEFAULT_LIMIT: u64 = 30;
 const MAX_LIMIT: u64 = 100;
 
-pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
     let mut args = vec!["pr".to_string(), "list".to_string()];
     super::push_optional_flag(&mut args, input, "state", "--state")?;
     super::push_optional_flag(&mut args, input, "base", "--base")?;
@@ -26,7 +26,7 @@ pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitErro
 
 /// Reshape one `gh pr list` entry, keeping the pull request's current head SHA
 /// under a name that cannot be confused with a run's tested commit.
-pub(super) fn project_pull_request(pr: &Value) -> Value {
+pub fn project_pull_request(pr: &Value) -> Value {
     json!({
         "number": pr["number"],
         "title": pr["title"],
