@@ -461,3 +461,55 @@ fn inspect_does_not_mutate_canonical_or_source_state() {
     assert!(!repo.root.path().join("audit").exists());
     assert!(!repo.root.path().join("runs").exists());
 }
+
+#[test]
+fn inspect_preserves_crlf_bytes_and_skips_configured_filters() {
+    let root = TempDir::new().unwrap();
+    let registry = open_registry(root.path());
+    let workspace_id = "ws_inspect_crlf_attr";
+    let binding = bind(&registry, root.path(), workspace_id);
+    let store = bundle_store(&registry, &binding);
+    seed_one(&store, &registry, workspace_id, "ORB-00001", &[]);
+    seed_crlf_gitattributes_attachments(&store, "ORB-00001");
+
+    let snap = root.path().join("snap");
+    build_publication_snapshot(
+        &registry,
+        &snap,
+        metadata(workspace_id, 1, None),
+        &policy(AttachmentPolicyKind::Include),
+        None,
+    )
+    .unwrap();
+
+    let remote = root.path().join("publication.git");
+    init_repo(&remote);
+    replace_worktree(&remote, &snap);
+    git_add_literal(&remote);
+    git(&remote, &["commit", "-m", "generation 1"]);
+    let commit = git(&remote, &["rev-parse", "HEAD"]);
+
+    let cache = root.path().join("consumer-cache");
+    let (env, sentinel) = poison_publication_git_filters(root.path());
+    let inspection = inspect_publication(request(workspace_id, &remote, &cache, None)).unwrap();
+    drop(env);
+
+    assert_label(
+        &inspection,
+        workspace_id,
+        1,
+        &commit,
+        PublicationFreshness::Current,
+        false,
+    );
+    assert!(
+        !sentinel.exists(),
+        "inspection executed an external Git filter"
+    );
+    let tree = cache.join("pub_orbit_primary").join("tree");
+    assert_eq!(
+        fs::read(tree.join("tasks/ORB-00001/artifacts/files/payload.txt")).unwrap(),
+        CRLF_PAYLOAD
+    );
+    read_bundle_at(&tree.join("tasks/ORB-00001")).expect("inspected bundle validates");
+}

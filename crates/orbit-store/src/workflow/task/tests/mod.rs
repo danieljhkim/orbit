@@ -49,6 +49,97 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// Raw Git stdout, including trailing CR/LF. `git()` trims and must not be
+/// used to assert snapshot attachment bytes.
+fn git_binary(dir: &Path, args: &[&str]) -> Vec<u8> {
+    let output = Command::new("git")
+        .args(["-c", "core.hooksPath=/dev/null"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "orbit-test")
+        .env("GIT_AUTHOR_EMAIL", "orbit-test@example.test")
+        .env("GIT_COMMITTER_NAME", "orbit-test")
+        .env("GIT_COMMITTER_EMAIL", "orbit-test@example.test")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+/// Six-byte CRLF payload used to detect Git text conversion (`61 0d 0a 62 0d 0a`).
+const CRLF_PAYLOAD: &[u8] = b"a\r\nb\r\n";
+const GITATTRIBUTES_CRLF: &[u8] = b"payload.txt text filter=orbit-sentinel\n";
+
+fn include_attachment_policy() -> AttachmentPolicy {
+    AttachmentPolicy {
+        kind: AttachmentPolicyKind::Include,
+        max_file_bytes: 1024,
+        max_total_bytes: 4096,
+        deny_patterns: Vec::new(),
+        scanner_failure_behavior: ScannerFailureBehavior::AllowUnchecked,
+    }
+}
+
+fn seed_crlf_gitattributes_attachments(
+    store: &TaskBundleStoreV2,
+    task_id: &str,
+) -> ArtifactManifestV2 {
+    let attrs = seed_artifact_blob(
+        store,
+        task_id,
+        ".gitattributes",
+        GITATTRIBUTES_CRLF,
+        "codex",
+    );
+    let payload = seed_artifact_blob(store, task_id, "payload.txt", CRLF_PAYLOAD, "codex");
+    let manifest = ArtifactManifestV2 {
+        schema_version: TASK_ARTIFACT_SCHEMA_VERSION,
+        files: vec![attrs, payload],
+    };
+    store
+        .rewrite_artifact_manifest(task_id, &manifest)
+        .expect("rewrite crlf artifact manifest");
+    manifest
+}
+
+fn git_add_literal(dir: &Path) {
+    for (rel, _) in tree_bytes(dir) {
+        let oid = git(dir, &["hash-object", "-w", "--no-filters", "--", &rel]);
+        let cacheinfo = format!("100644,{oid},{rel}");
+        git(dir, &["update-index", "--add", "--cacheinfo", &cacheinfo]);
+    }
+}
+
+fn write_sentinel_gitconfig(dir: &Path) -> (PathBuf, PathBuf) {
+    let sentinel = dir.join("orbit-sentinel-ran");
+    let config = dir.join("poisoned.gitconfig");
+    let sentinel_path = sentinel.to_str().expect("utf-8 sentinel path");
+    fs::write(
+        &config,
+        format!(
+            "[filter \"orbit-sentinel\"]\n\
+             \tclean = sh -c \"echo ran >> '{sentinel_path}'; cat\"\n\
+             \tsmudge = sh -c \"echo ran >> '{sentinel_path}'; cat\"\n\
+             \trequired = true\n"
+        ),
+    )
+    .expect("write poisoned gitconfig");
+    (config, sentinel)
+}
+
+fn poison_publication_git_filters(dir: &Path) -> (orbit_common::test_env::ScopedEnv, PathBuf) {
+    let (config, sentinel) = write_sentinel_gitconfig(dir);
+    let config_path = config.to_str().expect("utf-8 gitconfig path").to_string();
+    let env = orbit_common::test_env::scoped([("GIT_CONFIG_GLOBAL", Some(config_path.as_str()))]);
+    (env, sentinel)
+}
+
 fn copy_tree(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
     for entry in fs::read_dir(src).unwrap() {

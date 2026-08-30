@@ -8,11 +8,23 @@
 //! per-invocation environment (index file, deterministic commit identity). That
 //! is a different contract, so it keeps its own runner here.
 
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 use orbit_common::OrbitError;
 use orbit_types::workspace::git_remotes_equivalent;
+
+/// Highest-precedence attributes for an Orbit-owned cache. Unsets every
+/// conversion Git would otherwise apply from a published `.gitattributes`,
+/// `$GIT_DIR/info/attributes` leftover, or ambient attributes file.
+///
+/// `core.attributesFile=/dev/null` only disables the *global* attributes
+/// file. `attr.tree` (empty or invalid) still leaves worktree attributes
+/// active on Git 2.43 during `add` and `checkout`. `info/attributes` is the
+/// layer that actually wins over `artifacts/files/.gitattributes`.
+const LITERAL_ATTRIBUTES: &str =
+    "* -text -eol -crlf -ident -filter -diff -merge -working-tree-encoding\n";
 
 /// Result of a Git invocation that is allowed to fail.
 pub(super) struct GitAttempt {
@@ -56,6 +68,9 @@ impl<'a> GitRunner<'a> {
 
     /// Run `git` and return the outcome even when the command exits non-zero.
     pub(super) fn try_run(&self, args: &[&str]) -> Result<GitAttempt, OrbitError> {
+        if let Some(git_dir) = git_dir_from_args(args) {
+            isolate_git_dir(git_dir)?;
+        }
         let mut command = Command::new("git");
         command
             .args([
@@ -70,13 +85,22 @@ impl<'a> GitRunner<'a> {
                 "-c",
                 "core.safecrlf=false",
             ])
-            .args(args)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GCM_INTERACTIVE", "never");
+            .args(args);
         for (key, value) in &self.env {
             command.env(key, value);
         }
+        // Isolation wins over caller env and the ambient process: publication
+        // must not read operator Git config or honor GIT_CONFIG_COUNT filters.
+        command
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_ATTR_NOSYSTEM", "1")
+            .env("GCM_INTERACTIVE", "never")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env_remove("GIT_CONFIG_PARAMETERS")
+            .env_remove("GIT_ATTR_SOURCE");
         let output = command.output().map_err(|error| {
             OrbitError::Execution(format!(
                 "{} failed to run `git {}`: {error}",
@@ -121,6 +145,31 @@ impl<'a> GitRunner<'a> {
     pub(super) fn error(&self, message: impl Into<String>) -> OrbitError {
         OrbitError::InvalidInput(format!("{}: {}", self.label, message.into()))
     }
+}
+
+fn git_dir_from_args<'a>(args: &'a [&'a str]) -> Option<&'a Path> {
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if let Some(path) = arg.strip_prefix("--git-dir=") {
+            return Some(Path::new(path));
+        }
+        if *arg == "--git-dir" {
+            return args.next().map(Path::new);
+        }
+    }
+    None
+}
+
+fn isolate_git_dir(git_dir: &Path) -> Result<(), OrbitError> {
+    if !git_dir.is_dir() {
+        return Ok(());
+    }
+    let info = git_dir.join("info");
+    fs::create_dir_all(&info).map_err(|error| OrbitError::from_write_io(&info, error))?;
+    let path = info.join("attributes");
+    fs::write(&path, LITERAL_ATTRIBUTES)
+        .map_err(|error| OrbitError::from_write_io(&path, error))?;
+    Ok(())
 }
 
 /// Absolute paths are local filesystem detail; keep them out of error text.
