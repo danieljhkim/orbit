@@ -39,7 +39,12 @@ pub struct AutoTaskAddArgs {
     #[arg(long = "tag", action = ArgAction::Append)]
     pub tags: Vec<String>,
     /// Exact canonical tool names copied to every minted task.
-    #[arg(long = "required-tool", action = ArgAction::Append, value_delimiter = ',')]
+    #[arg(
+        long = "required-tools",
+        alias = "required-tool",
+        action = ArgAction::Append,
+        value_delimiter = ','
+    )]
     pub required_tools: Vec<String>,
     /// Priority (defaults to medium)
     #[arg(long, value_enum, default_value_t = TaskPriority::Medium)]

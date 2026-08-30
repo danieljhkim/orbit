@@ -82,3 +82,28 @@ fn task_update_complexity_uses_add_spellings() {
         assert_eq!(args.complexity.expect("complexity").to_string(), complexity);
     }
 }
+
+#[test]
+fn task_update_accepts_required_tools() {
+    let cli = Cli::try_parse_from([
+        "orbit",
+        "task",
+        "update",
+        "ORB-00001",
+        "--required-tools",
+        "proc.spawn,orbit.task.show",
+    ])
+    .expect("parse task update required tools");
+
+    let Commands::Task(task) = cli.command else {
+        panic!("expected task command");
+    };
+    let TaskSubcommand::Update(args) = task.command else {
+        panic!("expected task update command");
+    };
+
+    assert_eq!(
+        args.required_tools.as_deref(),
+        Some("proc.spawn,orbit.task.show")
+    );
+}
