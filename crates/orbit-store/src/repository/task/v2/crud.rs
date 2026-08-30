@@ -47,6 +47,7 @@ impl TaskV2Store {
                 orchestrator: params.orchestrator,
                 relations,
                 tags: normalize_task_tags(params.tags),
+                required_tools: orbit_types::task::normalize_required_tools(params.required_tools),
                 context_files: params.context_files,
                 external_refs: params.external_refs,
                 created_by: params.created_by,

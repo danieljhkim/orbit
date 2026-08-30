@@ -125,6 +125,14 @@ pub enum DispatchError {
     #[error("tool `{tool_name}` denied at iteration {iteration}")]
     ToolDenied { tool_name: String, iteration: u32 },
 
+    /// A task asked for a tool that cannot enter an agent activity allowlist.
+    #[error("task `{task_id}` required tool `{tool_name}` failed admission: {reason}")]
+    RequiredToolAdmission {
+        task_id: String,
+        tool_name: String,
+        reason: String,
+    },
+
     /// Job validation rejected the spec at load time.
     #[error("job validation failed: {0}")]
     JobValidation(String),
@@ -157,6 +165,7 @@ impl DispatchError {
         matches!(
             self,
             DispatchError::ToolDenied { .. }
+                | DispatchError::RequiredToolAdmission { .. }
                 | DispatchError::DeterministicActionNotRegistered(_)
                 | DispatchError::DeterministicActionUnavailable { .. }
                 | DispatchError::JobValidation(_)

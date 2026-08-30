@@ -375,6 +375,7 @@ fn definition_json(
             "crew": definition.template.crew,
             "status": definition.template.status,
             "priority": definition.template.priority,
+            "required_tools": definition.template.required_tools,
         },
         "dedupe": match definition.dedupe {
             DedupePolicy::SkipIfOpen => "skip_if_open",

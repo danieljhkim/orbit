@@ -3,6 +3,48 @@ use serde_json::json;
 use super::super::audit_envelope::*;
 
 #[test]
+fn tool_allowlist_audit_records_requested_and_effective_lists_compatibly() {
+    let encoded = serde_json::to_value(V2AuditEventKind::ToolAllowlistHarnessDelegated {
+        provider: "codex".to_string(),
+        task_id: Some("ORB-11069".to_string()),
+        task_ids: vec!["ORB-11069".to_string(), "ORB-11070".to_string()],
+        requested_tools: vec!["github.run.list".to_string()],
+        effective_tools: vec!["orbit.task.show".to_string(), "github.run.list".to_string()],
+        tools: vec!["orbit.task.show".to_string(), "github.run.list".to_string()],
+    })
+    .expect("serialize tool allowlist audit");
+    assert_eq!(encoded["task_id"], "ORB-11069");
+    assert_eq!(encoded["task_ids"], json!(["ORB-11069", "ORB-11070"]));
+    assert_eq!(encoded["requested_tools"], json!(["github.run.list"]));
+    assert_eq!(
+        encoded["effective_tools"],
+        json!(["orbit.task.show", "github.run.list"])
+    );
+    assert_eq!(encoded["tools"], encoded["effective_tools"]);
+
+    let decoded: V2AuditEventKind = serde_json::from_value(json!({
+        "body_kind": "tool_allowlist_harness_delegated",
+        "provider": "codex",
+        "tools": ["orbit.task.show"]
+    }))
+    .expect("deserialize legacy tool allowlist audit");
+    assert!(matches!(
+        decoded,
+        V2AuditEventKind::ToolAllowlistHarnessDelegated {
+            task_id: None,
+            task_ids,
+            requested_tools,
+            effective_tools,
+            tools,
+            ..
+        } if task_ids.is_empty()
+            && requested_tools.is_empty()
+            && effective_tools.is_empty()
+            && tools == ["orbit.task.show"]
+    ));
+}
+
+#[test]
 fn step_finished_error_message_round_trips_and_absence_defaults_to_none() {
     let encoded = serde_json::to_value(V2AuditEventKind::StepFinished {
         step_id: "plan".to_string(),

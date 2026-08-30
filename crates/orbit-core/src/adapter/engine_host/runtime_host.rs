@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use orbit_common::{NotFoundKind, OrbitError};
 use orbit_engine::{
-    CrewConfig, DispatchError, ResolvedCliExecutor, ResolvedSandbox, RuntimeHost,
-    TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter,
+    CrewConfig, DispatchError, ResolvedActivityTools, ResolvedCliExecutor, ResolvedSandbox,
+    RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter,
 };
 use orbit_store::contracts::{
     InvocationInsertParams, InvocationQuery, InvocationRecord, JobRunStepParams,
@@ -22,6 +22,7 @@ use orbit_types::task::{
     push_external_ref_if_missing,
 };
 use orbit_types::telemetry::InvocationTrace;
+use orbit_types::tool::is_exact_canonical_tool_name;
 use orbit_types::workflow::{ActivityV2, JobRun, JobRunStartOutcome, JobRunState};
 use serde_json::Value;
 
@@ -456,6 +457,77 @@ impl RuntimeHost for OrbitRuntime {
 
     fn task_context_for_agent_input(&self, input: &Value) -> Result<Option<Value>, DispatchError> {
         task_context::task_context_for_agent_input(self, input)
+    }
+
+    fn resolve_activity_tools(
+        &self,
+        task_ids: &[String],
+        baseline_tools: &[String],
+    ) -> Result<ResolvedActivityTools, DispatchError> {
+        if task_ids.is_empty() {
+            return Ok(ResolvedActivityTools {
+                requested_tools: Vec::new(),
+                effective_tools: baseline_tools.to_vec(),
+            });
+        }
+        let mut requested_tools = std::collections::BTreeSet::new();
+        for task_id in task_ids {
+            let task = self.get_task(task_id).map_err(|error| {
+                DispatchError::CliInvocationFailed(format!(
+                    "load task `{task_id}` tool requirements: {error}"
+                ))
+            })?;
+            for tool_name in task.required_tools {
+                let reason = if tool_name.contains('*') {
+                    Some("wildcard and prefix requirements are not allowed".to_string())
+                } else if !is_exact_canonical_tool_name(&tool_name) {
+                    Some("malformed canonical tool name".to_string())
+                } else if !self.tool_registry().has(&tool_name) {
+                    Some("unknown registered tool".to_string())
+                } else if !self.tool_registry().is_active(&tool_name) {
+                    Some("tool is not agent-facing".to_string())
+                } else {
+                    self.stores()
+                        .tools()
+                        .get_tool(&tool_name)
+                        .map_err(|error| {
+                            DispatchError::CliInvocationFailed(format!(
+                                "read tool `{tool_name}` admission state for task `{task_id}`: {error}"
+                            ))
+                        })?
+                        .filter(|tool| !tool.enabled)
+                        .map(|_| "tool is inactive".to_string())
+                };
+                if let Some(reason) = reason {
+                    return Err(DispatchError::RequiredToolAdmission {
+                        task_id: task_id.clone(),
+                        tool_name,
+                        reason,
+                    });
+                }
+                requested_tools.insert(tool_name);
+            }
+        }
+        let requested_tools = requested_tools.into_iter().collect::<Vec<_>>();
+
+        if requested_tools.is_empty() {
+            return Ok(ResolvedActivityTools {
+                requested_tools,
+                effective_tools: baseline_tools.to_vec(),
+            });
+        }
+
+        let mut seen = std::collections::BTreeSet::new();
+        let mut effective_tools = Vec::with_capacity(baseline_tools.len() + requested_tools.len());
+        for tool in baseline_tools.iter().chain(requested_tools.iter()) {
+            if seen.insert(tool.clone()) {
+                effective_tools.push(tool.clone());
+            }
+        }
+        Ok(ResolvedActivityTools {
+            requested_tools,
+            effective_tools,
+        })
     }
 
     /// [ORB-10002] Persist a per-step checkpoint into the run's

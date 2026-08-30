@@ -56,6 +56,11 @@ fn create_get_and_list_task_round_trip_through_v2_bundle() {
 
     let mut params = create_params("Build task v2", TaskStatus::Backlog);
     params.orchestrator = Some("orchestration".to_string());
+    params.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
     let created = store.create_task(params).expect("create task");
 
     assert_eq!(created.id, "ORB-00000");
@@ -86,10 +91,15 @@ fn create_get_and_list_task_round_trip_through_v2_bundle() {
         .expect("task exists");
     assert_eq!(fetched.title, created.title);
     assert_eq!(fetched.orchestrator.as_deref(), Some("orchestration"));
+    assert_eq!(
+        fetched.required_tools,
+        vec!["github.auth.status", "github.run.list"]
+    );
 
     let listed = store.list_tasks().expect("list tasks");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, "ORB-00000");
+    assert_eq!(listed[0].required_tools, fetched.required_tools);
 }
 
 #[test]

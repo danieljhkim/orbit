@@ -218,6 +218,7 @@ pub(super) fn mint_task(
         description: template.description.clone(),
         acceptance_criteria: template.acceptance_criteria.clone(),
         tags,
+        required_tools: template.required_tools.clone(),
         priority: template.priority,
         // Automated mint has no operator to assess; persist the explicit
         // non-answer so aggregates can separate it from low/medium/hard.

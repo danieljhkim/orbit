@@ -3,8 +3,8 @@ summary: "Auditability — Design"
 type: design
 title: "Auditability — Design"
 owner: codex
-last_updated: 2026-08-22
-last_validated: 2026-08-22
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Draft
 feature: auditability
 doc_role: design
@@ -86,7 +86,7 @@ After [T20260427-0023], selected canonical stores also project live tracing even
 
 ## 4. Activity/Job Envelope Events
 
-`V2AuditEnvelope` lives in `crates/orbit-common/src/types/activity_job/audit_envelope.rs`. Each envelope carries `schemaVersion`, `event_type`, `event_id`, timestamp, `run_id`, `agent_identity`, optional `parent_event_id`, optional `workspace_path`, and a tagged `V2AuditEventKind`. Event families cover run, step, retry, skip, denial, join, fan-out/fan-in, loop, activity, filesystem, tool denial, CLI-backend delegation, and subprocess lifecycle. After [T20260508-8], `CliInvocationStarted` also records the resolved subprocess `cwd` when one is supplied by the Activity/Job workspace resolver.
+`V2AuditEnvelope` lives in `crates/orbit-common/src/types/activity_job/audit_envelope.rs`. Each envelope carries `schemaVersion`, `event_type`, `event_id`, timestamp, `run_id`, `agent_identity`, optional `parent_event_id`, optional `workspace_path`, and a tagged `V2AuditEventKind`. Event families cover run, step, retry, skip, denial, join, fan-out/fan-in, loop, activity, filesystem, tool denial, CLI-backend delegation, and subprocess lifecycle. After [T20260508-8], `CliInvocationStarted` also records the resolved subprocess `cwd` when one is supplied by the Activity/Job workspace resolver. [ORB-11069] extends `ToolAllowlistHarnessDelegated` with the selected task ids, their requested `required_tools`, and the computed effective baseline-plus-task list; its compatibility `tools` field is the same effective list. This evidence is emitted before provider launch, while the CLI stdin envelope records requested and effective lists separately and `ORBIT_ACTIVITY_TOOLS` exports the effective list.
 
 `V2AuditWriter` in `crates/orbit-engine/src/activity_job/audit_writer.rs` assigns event ids, maintains per-thread parent stacks, emits through `V2SqliteSink` in `crates/orbit-engine/src/activity_job/sqlite_sink.rs`, keeps a smoke-verification snapshot, and exposes the inner loop sink for provider/tool events. CLI-launched v2 runs stamp envelope `agent_identity` as `system`; concrete agent identity lives in activity configuration, CLI invocation events, and invocation metrics.
 

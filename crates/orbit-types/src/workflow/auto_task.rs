@@ -97,6 +97,13 @@ pub struct AutoTaskTemplate {
     /// Tags applied in addition to the provenance tag.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Exact canonical tools copied onto every task minted from this template.
+    #[serde(
+        default,
+        deserialize_with = "crate::task::deserialize_required_tools",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub required_tools: Vec<String>,
     /// Priority (defaults to `medium`).
     #[serde(default = "default_priority")]
     pub priority: TaskPriority,

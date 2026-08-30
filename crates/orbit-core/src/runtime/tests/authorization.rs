@@ -44,6 +44,7 @@ fn seed_task(runtime: &OrbitRuntime) -> String {
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: Vec::new(),

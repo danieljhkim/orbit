@@ -159,6 +159,18 @@ pub enum V2AuditEventKind {
     /// provider harness (Orbit does not enforce it in CLI mode).
     ToolAllowlistHarnessDelegated {
         provider: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
+        /// Every task whose requirements contributed to this dispatch.
+        #[serde(default)]
+        task_ids: Vec<String>,
+        /// Task-scoped exact names requested at admission.
+        #[serde(default)]
+        requested_tools: Vec<String>,
+        /// Deduplicated activity baseline plus task requirements.
+        #[serde(default)]
+        effective_tools: Vec<String>,
+        /// Compatibility projection of `effective_tools`.
         tools: Vec<String>,
     },
     /// §7.6 — CLI backend subprocess starting. Emitted after redaction has been

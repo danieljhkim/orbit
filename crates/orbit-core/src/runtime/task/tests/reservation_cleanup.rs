@@ -63,6 +63,7 @@ fn create_context_task_with_status(
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: vec![context_file.to_string()],

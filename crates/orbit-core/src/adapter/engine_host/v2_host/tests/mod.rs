@@ -2,6 +2,7 @@ mod backlog_exclusion;
 mod cli_executor;
 mod dispatch;
 mod pipeline_actions;
+mod required_tools;
 mod sandbox;
 mod sandbox_nested;
 mod scan_unresolved;

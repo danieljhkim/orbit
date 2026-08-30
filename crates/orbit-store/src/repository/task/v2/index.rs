@@ -150,6 +150,9 @@ impl TaskV2Store {
             description: bundle.description,
             acceptance_criteria: parse_acceptance(&bundle.acceptance),
             tags: normalize_task_tags(bundle.envelope.tags),
+            required_tools: orbit_types::task::normalize_required_tools(
+                bundle.envelope.required_tools,
+            ),
             plan: bundle.plan,
             execution_summary: bundle.execution_summary,
             context_files: bundle.envelope.context_files,

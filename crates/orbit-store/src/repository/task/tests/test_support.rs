@@ -34,6 +34,7 @@ pub(crate) fn sample_bundle(id: &str) -> TaskBundleV2 {
             orchestrator: None,
             relations: Vec::new(),
             tags: vec!["task-artifacts".to_string()],
+            required_tools: Vec::new(),
             context_files: vec!["docs/design/task-artifacts/2_design.md".to_string()],
             external_refs: Vec::new(),
             created_by: Some("codex:gpt-5.5".to_string()),

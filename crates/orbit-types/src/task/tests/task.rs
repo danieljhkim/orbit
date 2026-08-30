@@ -96,7 +96,7 @@ mod serialization {
     use crate::task::{Task, TaskStatus, normalize_task_tags};
 
     #[test]
-    fn task_deserializes_missing_tags_as_empty_vec() {
+    fn task_deserializes_missing_collection_fields_as_empty_vecs() {
         let task = serde_yaml::from_str::<Task>(
             r#"id: T20260101-1
 title: Legacy task
@@ -116,6 +116,7 @@ updated_at: 2026-01-01T00:00:00Z
         .expect("task without tags deserializes");
 
         assert_eq!(task.tags, Vec::<String>::new());
+        assert_eq!(task.required_tools, Vec::<String>::new());
         assert_eq!(task.crew, None);
     }
 

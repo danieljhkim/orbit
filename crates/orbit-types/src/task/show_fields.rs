@@ -14,7 +14,7 @@ use crate::task::Task;
 #[macro_export]
 macro_rules! task_show_projection_fields_csv {
     () => {
-        "id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts"
+        "id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts"
     };
 }
 
@@ -33,6 +33,7 @@ pub const TASK_SHOW_PROJECTION_FIELDS: &[&str] = &[
     "dependencies",
     "resolved_dependencies",
     "tags",
+    "required_tools",
     "plan",
     "execution_summary",
     "context_files",

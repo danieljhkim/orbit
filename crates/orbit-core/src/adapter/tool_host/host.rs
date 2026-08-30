@@ -31,9 +31,10 @@ use orbit_tools::{
 use orbit_types::identity::{is_valid_friction_id, normalize_optional_attribution_label};
 use orbit_types::record::FrictionStatus;
 use orbit_types::task::{
-    Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_task_dependencies,
-    normalize_task_tags, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
-    task_show_record_field_json, unknown_task_show_field_message, validate_task_dependencies,
+    Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_required_tools,
+    normalize_task_dependencies, normalize_task_tags, resolve_task_dependencies,
+    task_dependencies_ready, task_matches_tags, task_show_record_field_json,
+    unknown_task_show_field_message, validate_task_dependencies,
 };
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Map, Value, json};
@@ -276,6 +277,13 @@ impl HubCoordinationExecutor {
             tags: normalize_task_tags(
                 optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             ),
+            required_tools: normalize_required_tools(
+                optional_csv_or_string_list_alias(
+                    &input,
+                    &["required_tools", "requiredTools", "required-tool"],
+                )?
+                .unwrap_or_default(),
+            ),
             plan: String::new(),
             execution_summary: String::new(),
             context_files,
@@ -322,6 +330,7 @@ impl HubCoordinationExecutor {
             "dependencies",
             "relations",
             "tags",
+            "required_tools",
             "plan",
             "execution_summary",
             "type",
@@ -431,6 +440,32 @@ impl HubCoordinationExecutor {
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
         let orchestrator = raw_clearable(&input, "orchestrator")?;
+        let required_tools = optional_csv_or_string_list_alias(
+            &input,
+            &["required_tools", "requiredTools", "required-tool"],
+        )?
+        .map(normalize_required_tools);
+        if required_tools
+            .as_ref()
+            .is_some_and(|tools| tools != &current.required_tools)
+        {
+            let entering_in_progress =
+                status == Some(TaskStatus::InProgress) && current.status != TaskStatus::InProgress;
+            let reached_in_progress = current.status == TaskStatus::InProgress
+                || self
+                    .inner
+                    .tasks
+                    .history
+                    .get_task_history(&id)?
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|entry| entry.to_status == Some(TaskStatus::InProgress));
+            if entering_in_progress || reached_in_progress {
+                return Err(OrbitError::InvalidInput(format!(
+                    "task {id} required_tools are frozen once the task enters in-progress"
+                )));
+            }
+        }
         if orchestrator.is_some()
             && !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog)
         {
@@ -458,6 +493,7 @@ impl HubCoordinationExecutor {
                 relations,
                 tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
                     .map(normalize_task_tags),
+                required_tools,
                 plan,
                 execution_summary: optional_raw_string(&input, "execution_summary")?
                     .map(|value| redact_all(&value)),

@@ -526,6 +526,20 @@
           "description": "Optional typed task relations as an array of {type, target} objects",
           "type": "array"
         },
+        "required_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional exact canonical tool names the task adds to its agent activity baseline, as a string or array of strings"
+        },
         "tags": {
           "anyOf": [
             {
@@ -756,7 +770,7 @@
               "type": "string"
             }
           ],
-          "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution."
+          "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution."
         },
         "id": {
           "description": "Globally unique task ID. Resolved through the host task registry by default; a workspace argument is not required.",
@@ -951,6 +965,20 @@
         "relations": {
           "description": "Replacement typed task relations as an array of {type, target} objects",
           "type": "array"
+        },
+        "required_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Replacement exact canonical tool requirements. Frozen once the task enters in-progress"
         },
         "source_task_id": {
           "description": "For bug tasks: originating task ID that introduced the defect (empty string clears)",

@@ -17,6 +17,16 @@ dispatch see [orchestration.md](orchestration.md), and for scheduling it see
 - **Run** — one execution, with a `jrun-*` id, a durable state bundle under
   `.orbit/state/job-runs/`, and an audit trail.
 
+For every task-backed agent activity, Orbit computes
+`effective_tools = deduplicate(activity.tools union task.required_tools)`. The
+activity list remains the baseline; an empty task requirement list preserves it
+exactly. When one agent activity selects a batch, Orbit unions the requirements
+from every selected task into that same effective list. Admission rejects
+invalid required names before provider launch, and
+the run envelope, `ORBIT_ACTIVITY_TOOLS`, and audit evidence carry the effective
+list. Tool inclusion does not bypass later role, capability, policy, sandbox,
+subprocess, or authentication checks.
+
 ## Running a job
 
 ```bash

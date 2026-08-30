@@ -485,6 +485,7 @@ fn task_fixture(id: &str, status: TaskStatus) -> Task {
         description: String::new(),
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
+        required_tools: Vec::new(),
         plan: String::new(),
         execution_summary: String::new(),
         context_files: Vec::new(),

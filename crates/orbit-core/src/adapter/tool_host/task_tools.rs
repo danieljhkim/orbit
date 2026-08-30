@@ -53,6 +53,11 @@ pub(super) fn add(
             dependencies: Vec::new(),
             relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
+            required_tools: optional_csv_or_string_list_alias(
+                &input,
+                &["required_tools", "requiredTools", "required-tool"],
+            )?
+            .unwrap_or_default(),
             plan: String::new(),
             comment: None,
             context_files: raw_context_files.clone(),
@@ -293,6 +298,10 @@ pub(super) fn update(
             dependencies: optional_csv_or_string_list_alias(&input, &["dependencies"])?,
             relations: parse_relations(&input)?,
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?,
+            required_tools: optional_csv_or_string_list_alias(
+                &input,
+                &["required_tools", "requiredTools", "required-tool"],
+            )?,
             plan: input
                 .get("plan")
                 .map(|value| {

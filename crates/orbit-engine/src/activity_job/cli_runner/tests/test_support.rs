@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 
-use crate::context::CrewConfig;
+use crate::context::{CrewConfig, ResolvedActivityTools};
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::observability::logging::RedactingFields;
 #[cfg(target_os = "macos")]
@@ -291,6 +291,40 @@ impl RuntimeHost for TestHost {
 
     fn task_context_for_agent_input(&self, _input: &Value) -> Result<Option<Value>, DispatchError> {
         Ok(self.task_context.clone())
+    }
+
+    fn resolve_activity_tools(
+        &self,
+        _task_ids: &[String],
+        baseline_tools: &[String],
+    ) -> Result<ResolvedActivityTools, DispatchError> {
+        let requested_tools = self
+            .task_context
+            .as_ref()
+            .and_then(|task| task.get("required_tools"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if requested_tools.is_empty() {
+            return Ok(ResolvedActivityTools {
+                requested_tools,
+                effective_tools: baseline_tools.to_vec(),
+            });
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let effective_tools = baseline_tools
+            .iter()
+            .chain(requested_tools.iter())
+            .filter(|tool| seen.insert((*tool).clone()))
+            .cloned()
+            .collect();
+        Ok(ResolvedActivityTools {
+            requested_tools,
+            effective_tools,
+        })
     }
 
     fn agent_crew_config_for_input(
