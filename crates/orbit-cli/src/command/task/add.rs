@@ -29,7 +29,12 @@ pub struct TaskAddArgs {
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
     pub tags: Vec<String>,
     /// Exact canonical tool names the task adds to its agent activity baseline.
-    #[arg(long = "required-tool", action = ArgAction::Append, value_delimiter = ',')]
+    #[arg(
+        long = "required-tools",
+        alias = "required-tool",
+        action = ArgAction::Append,
+        value_delimiter = ','
+    )]
     pub required_tools: Vec<String>,
     /// Optional task plan payload. Leave blank for the executing agent or planning activity to author later.
     #[arg(long, default_value = "")]
