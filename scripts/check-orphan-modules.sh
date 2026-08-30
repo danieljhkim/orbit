@@ -8,6 +8,12 @@ set -euo pipefail
 # referenced by a `#[path = "...stem.rs"]` attribute anywhere in the crate.
 # Otherwise the file is never compiled, linted, or tested — see
 # docs/design/orbit-cleanup/orbitenginecleanup.md §1/§11.
+#
+# Under the sibling-test layout (docs/design-patterns/test_layout.md), every
+# src/**/tests/<name>.rs file must likewise be declared as `mod <name>` in its
+# own tests/mod.rs (or reached via a `#[path]` attribute). A file that looks
+# like a registered test but isn't compiles to nothing and silently drops its
+# coverage — see F2026-08-108.
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
@@ -30,7 +36,7 @@ is_declared() {
     "$dir/lib.rs" \
     "$dir/main.rs" \
     "$(dirname "$dir")/$(basename "$dir").rs"; do
-    if [[ -f "$owner" ]] && rg -q "\\bmod[[:space:]]+${stem}\\b[[:space:]]*[;{]" "$owner"; then
+    if [[ -f "$owner" ]] && rg -q "\\bmod[[:space:]]+(r#)?${stem}\\b[[:space:]]*[;{]" "$owner"; then
       return 0
     fi
   done
@@ -64,6 +70,19 @@ while IFS= read -r -d '' file; do
   fi
 done < <(find crates/*/src -type f -name '*.rs' \
   ! -name 'mod.rs' ! -name 'lib.rs' ! -name 'main.rs' -print0)
+
+# Sibling tests/<name>.rs files must themselves be declared in their owning
+# tests/mod.rs (or via #[path]) — see docs/design-patterns/test_layout.md.
+while IFS= read -r -d '' file; do
+  dir="$(dirname "$file")"
+  base="$(basename "$file")"
+  stem="${base%.rs}"
+
+  if ! is_declared "$stem" "$dir" "$file"; then
+    echo "orphan test module: ${file} — no mod ${stem}; declaration in ${dir}/mod.rs and no matching #[path] attribute"
+    fail=1
+  fi
+done < <(find crates/*/src -type f -path '*/tests/*.rs' ! -name 'mod.rs' -print0)
 
 if [[ "$fail" -ne 0 ]]; then
   exit 1
