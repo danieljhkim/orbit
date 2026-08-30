@@ -50,6 +50,7 @@ fn binding_preserves_logical_and_runtime_ids_and_ship_mode() {
 
     let resolved = resolved_workspace_binding(&workspace, &checkout).expect("resolved binding");
     assert_eq!(resolved.logical_workspace_id, "logical-abc123");
+    assert_eq!(resolved.runtime.logical_workspace_id, "logical-abc123");
     assert_eq!(resolved.runtime.workspace_id, "ws_runtime_config");
     assert_eq!(resolved.runtime.repo_root, repo);
     assert_eq!(resolved.runtime.ship_mode.as_input_value(), "pr");
@@ -810,6 +811,122 @@ fn managed_registry_locator_routes_linked_worktree_to_authoritative_store() {
             "managed registry discovery must not create global workspace-only path {workspace_only}"
         );
     }
+}
+
+#[test]
+fn managed_workspace_envelope_routes_linked_worktree_tools_to_canonical_workspace() {
+    let fixture = managed_worktree_fixture();
+    let worktree_state = fixture.worktree_root.join(".orbit");
+    set_readonly(&worktree_state, false);
+    write_workspace_config(
+        &worktree_state,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "daniel-e9c542".to_string(),
+        },
+    )
+    .expect("shadow worktree identity");
+    set_readonly(&worktree_state, true);
+
+    let provider_home = fixture._root.path().join("provider-home");
+    std::fs::create_dir_all(&provider_home).expect("provider home");
+    let home_var = provider_home.to_string_lossy().into_owned();
+    let registry_var = fixture.registry_root.to_string_lossy().into_owned();
+    let _env = orbit_common::test_env::scoped([
+        ("HOME", Some(home_var.as_str())),
+        ("ORBIT_ROOT", None),
+        ("ORBIT_REGISTRY_ROOT", Some(registry_var.as_str())),
+        ("ORBIT_MANAGED_RUN_CONTEXT", Some("1")),
+        ("ORBIT_RUN_ID", Some("jrun-managed-fixture")),
+        ("ORBIT_WORKSPACE", Some("ws_managed")),
+    ]);
+
+    let runtime = RegisteredRuntimeFactory::initialize_with_overrides(None, None)
+        .expect("managed envelope must bind the canonical workspace");
+    let binding = runtime
+        .workspace_runtime_binding()
+        .expect("managed envelope runtime is bound");
+    assert_eq!(binding.logical_workspace_id, "ws_managed");
+    assert_ne!(
+        binding.logical_workspace_id, "daniel-e9c542",
+        "linked-worktree identity must not become the durable workspace"
+    );
+
+    run_tool(
+        &runtime,
+        "orbit.task.update",
+        json!({
+            "id": fixture.task_id,
+            "plan": "Authored through the managed envelope."
+        }),
+    )
+    .expect("task update without a payload workspace must use the envelope");
+
+    let friction = run_tool(
+        &runtime,
+        "orbit.friction.add",
+        json!({
+            "body": "Managed routing must not mint a shadow workspace.",
+            "model": "codex"
+        }),
+    )
+    .expect("friction add without a payload workspace must use the envelope");
+    assert!(
+        friction.get("id").and_then(Value::as_str).is_some(),
+        "friction add must persist a record: {friction}"
+    );
+
+    let listed = run_tool(&runtime, "orbit.task.list", json!({ "limit": 10 }))
+        .expect("task list without a payload workspace must use the envelope");
+    assert!(
+        task_ids(&listed).contains(&fixture.task_id),
+        "canonical workspace list must include the injected task: {listed}"
+    );
+
+    let after = run_tool(
+        &fixture.show_runtime(),
+        "orbit.task.show",
+        json!({ "id": fixture.task_id, "field": "plan" }),
+    )
+    .expect("re-read through the registry");
+    assert_eq!(
+        after, "Authored through the managed envelope.",
+        "the update must land in the authoritative registered store: {after}"
+    );
+
+    assert!(
+        !fixture.worktree_root.join(".orbit/tasks").exists(),
+        "managed routing must not create a worktree-local shadow task store"
+    );
+
+    let unknown = match RegisteredRuntimeFactory::initialize_with_overrides(
+        None,
+        Some("no-such-managed-workspace"),
+    ) {
+        Ok(_) => panic!("an explicit invalid selector must fail closed without cwd fallback"),
+        Err(error) => error,
+    };
+    unsupported_workspace_message(unknown, "no-such-managed-workspace");
+
+    let rebound = execute_cli_tool(
+        &runtime,
+        "orbit.task.list",
+        json!({ "workspace": "ws_managed", "limit": 10 }),
+    )
+    .expect("explicit valid selector continues to route");
+    assert!(task_ids(&rebound).contains(&fixture.task_id));
+
+    let mismatched = execute_cli_tool(
+        &runtime,
+        "orbit.task.update",
+        json!({
+            "id": fixture.task_id,
+            "plan": "must not fall back",
+            "workspace": "ws_not_registered"
+        }),
+    )
+    .expect_err("mismatched selector must fail closed");
+    unsupported_workspace_message(mismatched, "ws_not_registered");
 }
 
 #[test]

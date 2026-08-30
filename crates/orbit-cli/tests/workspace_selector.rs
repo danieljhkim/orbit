@@ -410,6 +410,7 @@ fn run_orbit(cwd: &Path, home: &Path, args: &[&str]) -> assert_cmd::assert::Asse
         .env_remove("ORBIT_AGENT_MODEL")
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_WORKSPACE")
         .args(args);
     command.assert()
 }

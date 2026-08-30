@@ -10,12 +10,15 @@ use chrono::Utc;
 use orbit_engine::{
     RuntimeHost, TaskActivityUpdate, TaskAutomationUpdate, V2AuditWriter, V2DispatchInput,
 };
+use orbit_store::maintenance::task_registry::{WorkspaceConfig, write_workspace_config};
 use orbit_types::task::{Task, TaskStatus};
 use orbit_types::workflow::activity_job::{ActivityV2Spec, DeterministicSpec};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use crate::application::task::{SYSTEM_ACTOR_LABEL, TaskAddParams, TaskUpdateParams};
+use crate::application::workflow::ShipMode;
+use crate::runtime::WorkspaceRuntimeBinding;
 use crate::{ActorIdentity, OrbitRuntime};
 
 fn test_runtime() -> (tempfile::TempDir, OrbitRuntime) {
@@ -1101,5 +1104,44 @@ fn orbit_registry_root_reports_the_registry_not_a_workspace_state_root() {
         Path::new(&reported),
         worktree_state_root,
         "the worktree-local state root is read-only in a managed run and is not the registry"
+    );
+}
+
+#[test]
+fn orbit_workspace_selector_reports_the_logical_catalog_id() {
+    let root = tempdir().expect("create tempdir");
+    let global = root.path().join("global");
+    let repo = root.path().join("repo");
+    let orbit_dir = repo.join(".orbit");
+    fs::create_dir_all(&global).expect("global");
+    fs::create_dir_all(&orbit_dir).expect("orbit dir");
+    write_workspace_config(
+        &orbit_dir,
+        &WorkspaceConfig {
+            schema_version: 1,
+            workspace_id: "daniel-e9c542".to_string(),
+        },
+    )
+    .expect("checkout identity");
+
+    let runtime = OrbitRuntime::from_roots_with_binding(
+        &global,
+        &orbit_dir,
+        WorkspaceRuntimeBinding {
+            logical_workspace_id: "ws_orbit".to_string(),
+            workspace_id: "daniel-e9c542".to_string(),
+            repo_root: repo,
+            ship_mode: ShipMode::Local,
+        },
+    )
+    .expect("bound runtime");
+    assert_eq!(
+        RuntimeHost::orbit_workspace_selector(&runtime).as_deref(),
+        Some("ws_orbit")
+    );
+    assert_ne!(
+        RuntimeHost::orbit_workspace_selector(&runtime).as_deref(),
+        Some("daniel-e9c542"),
+        "nested tool calls must carry the logical catalog ID, not the checkout identity"
     );
 }

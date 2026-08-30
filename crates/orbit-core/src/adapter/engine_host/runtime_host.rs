@@ -283,6 +283,13 @@ impl RuntimeHost for OrbitRuntime {
         )
     }
 
+    fn orbit_workspace_selector(&self) -> Option<String> {
+        self.workspace_runtime_binding()
+            .map(|binding| binding.logical_workspace_id.trim())
+            .filter(|selector| !selector.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
     fn missing_required_environment_vars(&self, required_env_vars: &[&str]) -> Vec<String> {
         self.execution_env_policy()
             .missing_required(required_env_vars)

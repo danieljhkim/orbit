@@ -1,5 +1,6 @@
 use clap::{Args, ValueEnum};
 use orbit_cmd::registry_runtime::RegisteredRuntimeFactory;
+use orbit_cmd::task_owner::bound_workspace_identity;
 use orbit_common::observability::audit_id::audit_execution_id;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::{HostIdentityState, inspect_host_identity};
@@ -158,7 +159,9 @@ pub(super) fn local_tool_session_context(
 ) -> Result<ToolSessionContext, OrbitError> {
     let (machine_id, host_id) = local_machine_identity(&runtime.global_root())?;
     Ok(ToolSessionContext {
-        workspace_id: runtime.workspace_id().ok(),
+        workspace_id: bound_workspace_identity(runtime)
+            .map(|owner| owner.id)
+            .or_else(|| runtime.workspace_id().ok()),
         caller_machine_id: Some(machine_id.clone()),
         caller_host_id: host_id.clone(),
         process_machine_id: Some(machine_id),

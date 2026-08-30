@@ -60,6 +60,7 @@ fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, Path
 
 fn workspace_entry(id: &str, repo_root: PathBuf, orbit_dir: PathBuf, active: bool) -> WsEntry {
     let binding = active.then(|| WorkspaceRuntimeBinding {
+        logical_workspace_id: format!("ws_{id}"),
         workspace_id: format!("ws_{id}"),
         repo_root: repo_root.clone(),
         ship_mode: ShipMode::Local,

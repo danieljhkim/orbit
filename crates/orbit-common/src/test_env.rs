@@ -39,6 +39,7 @@ pub const MANAGED_RUN_ENV: &[&str] = &[
     "ORBIT_ACTIVE_TASK_ID",
     "ORBIT_SESSION_ID",
     "ORBIT_MANAGED_RUN_CONTEXT",
+    "ORBIT_WORKSPACE",
 ];
 
 /// Restores the variables captured by [`unset`] when dropped.

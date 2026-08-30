@@ -50,6 +50,7 @@ pub(crate) struct EnvGuard {
     userprofile: Option<Option<OsString>>,
     orbit_root: Option<Option<OsString>>,
     orbit_registry_root: Option<Option<OsString>>,
+    orbit_workspace: Option<Option<OsString>>,
     managed_run_context: Option<Option<OsString>>,
     run_id: Option<Option<OsString>>,
     cwd: Option<PathBuf>,
@@ -72,6 +73,7 @@ impl EnvGuard {
             userprofile: None,
             orbit_root: None,
             orbit_registry_root: None,
+            orbit_workspace: None,
             managed_run_context: None,
             run_id: None,
             cwd: None,
@@ -105,9 +107,10 @@ impl EnvGuard {
     /// Point `HOME` and `USERPROFILE` at `home`, capturing the prior values the
     /// first time either is set.
     ///
-    /// Also clears `ORBIT_ROOT` and `ORBIT_REGISTRY_ROOT`, capturing their
-    /// prior values. The former is an explicit workspace-root escape hatch;
-    /// the latter selects a managed child's host registry. Either would
+    /// Also clears `ORBIT_ROOT`, `ORBIT_REGISTRY_ROOT`, and `ORBIT_WORKSPACE`,
+    /// capturing their prior values. The first is an explicit workspace-root
+    /// escape hatch; the second selects a managed child's host registry; the
+    /// third is the trusted logical workspace selector. Any of them would
     /// otherwise route an isolated fixture through real shared state.
     pub(crate) fn home(mut self, home: &Path) -> Self {
         if self.home.is_none() {
@@ -122,11 +125,15 @@ impl EnvGuard {
         if self.orbit_registry_root.is_none() {
             self.orbit_registry_root = Some(std::env::var_os("ORBIT_REGISTRY_ROOT"));
         }
+        if self.orbit_workspace.is_none() {
+            self.orbit_workspace = Some(std::env::var_os("ORBIT_WORKSPACE"));
+        }
         unsafe {
             std::env::set_var("HOME", home);
             std::env::set_var("USERPROFILE", home);
             std::env::remove_var("ORBIT_ROOT");
             std::env::remove_var("ORBIT_REGISTRY_ROOT");
+            std::env::remove_var("ORBIT_WORKSPACE");
         }
         self
     }
@@ -172,6 +179,9 @@ impl Drop for EnvGuard {
         }
         if let Some(previous) = self.orbit_registry_root.take() {
             restore_var("ORBIT_REGISTRY_ROOT", previous);
+        }
+        if let Some(previous) = self.orbit_workspace.take() {
+            restore_var("ORBIT_WORKSPACE", previous);
         }
         if let Some(previous) = self.run_id.take() {
             restore_var("ORBIT_RUN_ID", previous);
