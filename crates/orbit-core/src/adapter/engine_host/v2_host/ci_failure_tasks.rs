@@ -51,6 +51,15 @@ const SUPPORTED_SCHEMA_VERSION: u64 = 1;
 pub(crate) const CI_FAILURE_TAG: &str = "ci-failure-sweep";
 /// Prefix of the dedupe tag, completed by the failure key.
 pub(crate) const CI_FAILURE_KEY_TAG_PREFIX: &str = "ci-failure:";
+/// Title prefix on every task this step files, so a sweep-filed task is
+/// identifiable in a backlog listing without reading its tags.
+const CI_FAILURE_SWEEP_TITLE_PREFIX: &str = "[ci-failure-sweep] ";
+/// The system crew name. Filed tasks belong on the system lane, matching the
+/// shipped `ci-failure-remediation` auto-task — but this is a plain default,
+/// not a hard-coded assumption that the lane is configured: a workspace whose
+/// crew roster has no `system` entry still gets its task filed, just without
+/// a crew set.
+const SYSTEM_CREW: &str = "system";
 
 const DEFAULT_MAX_TASKS: u64 = 5;
 const MAX_MAX_TASKS: u64 = 20;
@@ -137,6 +146,14 @@ pub(crate) fn file_ci_failure_tasks(
     // Two clusters in one snapshot can share a failure key when the same root
     // cause was tested at two commits. The first filing closes the second.
     let mut filed_keys: BTreeSet<String> = BTreeSet::new();
+    // Probed once per sweep rather than assumed: a workspace whose crew
+    // roster has no `system` entry still needs filing to succeed, degrading
+    // the same way any other task with an unrecognized crew does instead of
+    // failing the sweep.
+    let system_crew = runtime
+        .validate_crew_name(Some(SYSTEM_CREW))
+        .is_ok()
+        .then(|| SYSTEM_CREW.to_string());
 
     for cluster in &clusters {
         if let Some(task_id) = open_task_for_key(runtime, &cluster.failure_key)? {
@@ -183,6 +200,7 @@ pub(crate) fn file_ci_failure_tasks(
             // Deliberately empty: the evidence is already in the description,
             // so the task ships on the ordinary agent baseline.
             required_tools: Vec::new(),
+            crew: system_crew.clone(),
             priority: TaskPriority::High,
             complexity: TaskComplexity::Unassessed,
             task_type: Some(TaskType::Bug),
@@ -249,7 +267,12 @@ impl FailureCluster {
             ("", step) => format!("{} / {step}", self.workflow),
             (job, step) => format!("{} / {job} / {step}", self.workflow),
         };
-        truncate_chars(&format!("Fix red CI: {where_}"), 120)
+        // Cap the body, not the whole string, so a long workflow/job/step
+        // never eats into the prefix and the final title still respects the
+        // existing 120-character bound.
+        let body_budget = 120usize.saturating_sub(CI_FAILURE_SWEEP_TITLE_PREFIX.chars().count());
+        let body = truncate_chars(&format!("Fix red CI: {where_}"), body_budget);
+        format!("{CI_FAILURE_SWEEP_TITLE_PREFIX}{body}")
     }
 
     fn acceptance_criteria(&self) -> Vec<String> {
