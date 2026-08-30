@@ -11,8 +11,9 @@ use serde_json::json;
 use super::support::{clear_identity_env, env_guard, fresh_runtime, set_identity_env};
 use crate::adapter::command::dispatch::{
     ORBIT_MANAGED_RUN_CONTEXT_ENV, ToolEntryPoint, audit_role_label,
-    audit_role_label_for_entry_point, finalize_successful_dispatch, reservation_owner_from_env,
-    resolve_audit_context, take_tool_audit_recorded, trusted_mcp_audit_context,
+    audit_role_label_for_entry_point, finalize_successful_dispatch,
+    override_activity_tools_for_test, reservation_owner_from_env, resolve_audit_context,
+    take_tool_audit_recorded, trusted_mcp_audit_context,
 };
 
 #[test]
@@ -236,6 +237,23 @@ fn cli_entry_point_records_run_subcommand() {
         .expect("list audit events");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].subcommand.as_deref(), Some("run"));
+}
+
+#[test]
+fn managed_agent_activity_allowlist_denies_an_omitted_tool() {
+    let runtime = crate::OrbitRuntime::in_memory().expect("build in-memory runtime");
+    let _activity_tools = override_activity_tools_for_test(["orbit.search"]);
+
+    let error = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({ "id": "ORB-00001" }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect_err("an omitted managed-agent tool must remain denied");
+
+    assert!(matches!(error, OrbitError::PolicyDenied(_)), "{error:?}");
 }
 
 #[test]
