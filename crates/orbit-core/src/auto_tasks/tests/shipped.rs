@@ -85,6 +85,87 @@ fn repository_definitions_all_parse() {
 }
 
 #[test]
+fn release_prep_probe_stays_no_diff_and_keeps_canonical_task_non_dispatchable() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".orbit/auto_tasks/release-prep.yaml");
+    let yaml = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let definition = parse_auto_task_yaml(&yaml).expect("parse release-prep");
+
+    assert_eq!(definition.name, "release-prep");
+    assert!(!definition.enabled, "definition must ship disabled");
+    assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
+    assert_eq!(
+        definition.template.status,
+        orbit_types::task::TaskStatus::Backlog
+    );
+    assert!(
+        definition
+            .template
+            .tags
+            .iter()
+            .any(|tag| tag == "no-diff-expected"),
+        "probe must stay a successful no-diff outcome"
+    );
+    assert!(
+        !definition
+            .template
+            .tags
+            .iter()
+            .any(|tag| tag == "release" || tag == "awaiting-release-approval"),
+        "the probe itself is not the canonical release task"
+    );
+
+    let body = definition
+        .template
+        .description
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for required in [
+        "no-diff-expected",
+        "successful no-diff",
+        "never enter a commit-required delivery tail",
+        "status `proposed`",
+        "awaiting-release-approval",
+        "authorized bounded diff",
+        "before any backlog or in-progress admission",
+        "tag, publish, promotion, and merge",
+        "do not dispatch",
+    ] {
+        assert!(
+            body.contains(required),
+            "release-prep template should retain '{required}'"
+        );
+    }
+
+    let joined = definition
+        .template
+        .acceptance_criteria
+        .iter()
+        .map(|criterion| criterion.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for required in [
+        "successful no-diff outcome",
+        "never enter a commit-required delivery tail",
+        "awaiting-release-approval",
+        "status proposed",
+        "non-dispatchable",
+        "authorized bounded diff",
+        "before backlog or in-progress admission",
+        "tag, publish, promotion, and merge remain unauthorized",
+    ] {
+        assert!(
+            joined.contains(required),
+            "release-prep criteria should retain '{required}'"
+        );
+    }
+}
+
+#[test]
 fn model_price_audit_is_weekly_report_only_and_routes_to_terra() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

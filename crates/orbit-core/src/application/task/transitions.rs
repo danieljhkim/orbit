@@ -61,6 +61,9 @@ impl OrbitRuntime {
         let implemented_by =
             implementation_label(&task, effective_label.as_str(), canonical_model.as_deref());
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
+        if task.status == TaskStatus::Proposed {
+            ensure_release_task_is_dispatchable(&task)?;
+        }
 
         let result = match task.status {
             TaskStatus::Proposed => self.with_mutation(|| {
@@ -276,6 +279,7 @@ impl OrbitRuntime {
                 )));
             }
         }
+        ensure_release_task_is_dispatchable(&task)?;
         self.resolve_and_log_crew_for_task_start(
             id,
             crew_override.as_deref(),
@@ -397,6 +401,9 @@ impl OrbitRuntime {
         workflow: &str,
     ) -> Result<Task, OrbitError> {
         let task = self.get_task(id)?;
+        if task.status != TaskStatus::InProgress {
+            ensure_release_task_is_dispatchable(&task)?;
+        }
         if matches!(
             task.status,
             TaskStatus::Proposed
@@ -709,6 +716,15 @@ impl OrbitRuntime {
         ensure_task_delete_allowed(&task.id, task.status, force)?;
         self.delete_task(id)
     }
+}
+
+pub(crate) fn ensure_release_task_is_dispatchable(task: &Task) -> Result<(), OrbitError> {
+    if task.awaits_release_approval() {
+        return Err(OrbitError::InvalidInput(
+            task.release_approval_block_reason(),
+        ));
+    }
+    Ok(())
 }
 
 fn ensure_task_delete_allowed(id: &str, status: TaskStatus, force: bool) -> Result<(), OrbitError> {

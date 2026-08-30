@@ -4,6 +4,7 @@ mod artifacts;
 mod error;
 mod model;
 mod plan;
+mod release_approval;
 mod show_fields;
 pub use error::TaskError;
 
@@ -34,6 +35,7 @@ pub use model::{
     unsatisfiable_task_dependencies, validate_task_dependencies,
 };
 pub use plan::{TaskPlan, TaskPlanCheckpoint, TaskPlanSuccessCriterion};
+pub use release_approval::{AWAITING_RELEASE_APPROVAL_TAG, RELEASE_TASK_TAG};
 pub use show_fields::{
     TASK_SHOW_PROJECTION_FIELDS, TASK_SHOW_PROJECTION_FIELDS_CSV, is_task_show_projection_field,
     task_show_record_field_json, unknown_task_show_field_message,

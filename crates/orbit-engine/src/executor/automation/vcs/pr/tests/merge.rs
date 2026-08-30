@@ -81,6 +81,22 @@ fn merge_batch_pr_actorless_task_falls_back_to_system() {
 }
 
 #[test]
+fn merge_batch_pr_rejects_tasks_that_lack_separate_human_authorization() {
+    let workspace = pr_workspace();
+    let mut unauthorized = review_batch_task("T-UNAPPROVED", Some("codex"), None);
+    unauthorized.pr_status = Some("commented".to_string());
+    let host = PrOpenTestHost::new(vec![unauthorized], workspace.repo.clone());
+
+    let error = merge_batch_pr(&host, &merge_batch_pr_input(&workspace.repo))
+        .expect_err("merge still requires separate human PR approval");
+    assert!(error.to_string().contains("is not approved"), "{error}");
+    assert_eq!(
+        host.get_task("T-UNAPPROVED").expect("task").status,
+        TaskStatus::Review
+    );
+}
+
+#[test]
 fn merge_batch_pr_propagates_private_vcs_failure_before_task_updates() {
     let workspace = pr_workspace();
     let host = PrOpenTestHost::new(

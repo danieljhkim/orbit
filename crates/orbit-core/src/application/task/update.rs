@@ -19,7 +19,10 @@ use super::paths::{
     canonicalize_context_files_for_read, context_files_pruned_history_entry,
     context_workspace_root, normalize_context_files_for_write,
 };
-use super::transitions::{ensure_task_has_execution_plan, in_progress_transition_requires_plan};
+use super::transitions::{
+    ensure_release_task_is_dispatchable, ensure_task_has_execution_plan,
+    in_progress_transition_requires_plan,
+};
 
 impl OrbitRuntime {
     pub fn update_task(&self, id: &str, params: TaskUpdateParams) -> Result<Task, OrbitError> {
@@ -175,6 +178,21 @@ impl OrbitRuntime {
         }
 
         if let Some(target_status) = params.status {
+            if matches!(target_status, TaskStatus::Backlog | TaskStatus::InProgress)
+                && target_status != task.status
+            {
+                let mut projected = task.clone();
+                if let Some(description) = &params.description {
+                    projected.description = description.clone();
+                }
+                if let Some(criteria) = &params.acceptance_criteria {
+                    projected.acceptance_criteria = criteria.clone();
+                }
+                if let Some(tags) = &params.tags {
+                    projected.tags = tags.clone();
+                }
+                ensure_release_task_is_dispatchable(&projected)?;
+            }
             if target_status == TaskStatus::Archived {
                 return Err(OrbitError::InvalidInput(
                     "use `orbit task archive <id>` instead of setting status to archived"

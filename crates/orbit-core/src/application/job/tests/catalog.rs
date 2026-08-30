@@ -630,6 +630,14 @@ fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
         })
         .collect::<Vec<_>>();
 
+    assert!(
+        phases.iter().all(|(_, target, _)| {
+            !target.contains("git_merge")
+                && !target.contains("git_tag")
+                && !target.contains("publish")
+        }),
+        "task_pr_pipeline must not tag, publish, or merge without a separate human-authorized job: {phases:?}"
+    );
     assert_eq!(
         phases,
         vec![

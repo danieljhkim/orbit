@@ -13,6 +13,16 @@ template:
     task only after the workspace is eligible. It must never edit repository
     files or release state during the gate.
 
+    ## Delivery contract
+
+    This probe carries `no-diff-expected`. Blocked, no-release, and eligible
+    probe scenarios are all successful no-diff outcomes: persist evidence in
+    this probe's `execution_summary` and stop. Never enter a commit-required delivery tail.
+    Do not drop `no-diff-expected`. Do not commit, tag, push,
+    publish, promote, merge, bump versions, or edit CHANGELOG.md from this
+    probe. If a workflow still offers `git_commit`, the tag must cause it to
+    skip rather than fail; never dispatch this probe without that tag.
+
     ## 1. Deterministic unfinished-work gate
 
     Query all tasks in `backlog`, `in-progress`, and `review` through the Orbit
@@ -57,24 +67,44 @@ template:
     title pattern `Prepare v<X.Y.Z> release` and the `release` tag. Search
     deterministically and select the lexicographically smallest matching task
     ID if more than one already exists; never create a second canonical task.
-    If none exists, create exactly one task with that title, the `release` tag,
-    type `chore`, and the candidate version and evidence in its description.
-    Carry the release runbook context selectors
-    `file:CHANGELOG.md`, `file:Cargo.toml`, `file:Cargo.lock`, and
+    If none exists, create exactly one task with that title, type `chore`,
+    status `proposed` (never `backlog` or `in-progress`), tags `release` and
+    `awaiting-release-approval` (never `no-diff-expected`), and the candidate
+    version and evidence in its description. Carry the release runbook context
+    selectors `file:CHANGELOG.md`, `file:Cargo.toml`, `file:Cargo.lock`, and
     `file:npm/package.json` onto that canonical task.
     If one exists, update only that canonical task with the fresh candidate,
-    survey evidence, and breaking-change candidates. Preserve the human review
-    boundary and do not change it to done. Report the selected or newly-created
-    task ID, and any pre-existing duplicate candidates, in this probe's
-    `execution_summary`.
+    survey evidence, and breaking-change candidates. Keep it `proposed`, keep
+    `awaiting-release-approval`, and do not move it to backlog or in-progress.
+    Preserve the human review boundary and do not change it to done. Report the
+    selected or newly-created task ID, and any pre-existing duplicate
+    candidates, in this probe's `execution_summary`.
 
-    The canonical task must instruct its executor to follow `RELEASING.md`,
-    including the release checklist and all versioned release files. The
-    handoff stops after surveying, candidate semver analysis, and creating or
-    updating that one task. It must not commit, tag, push, publish, promote or
-    merge branches, bump versions, edit `CHANGELOG.md`, or ask for or record
-    human confirmation that a breaking-change candidate is accepted. Those
-    actions require the later human-approved release task.
+    The canonical task's durable description and acceptance criteria must stay
+    report-only while classification or approval is pending: instruct its
+    executor to follow `RELEASING.md` for survey evidence only, stop at the
+    human approval boundary, and not commit, tag, push, publish, promote,
+    merge, bump versions, edit CHANGELOG.md, or record human confirmation that
+    a breaking-change candidate is accepted. The canonical task is not
+    dispatchable in this phase. Do not ship it, start it, or admit it to
+    `task_pr_pipeline`.
+
+    The probe handoff stops after surveying, candidate semver analysis, and
+    creating or updating that one proposed task. It must not commit, tag,
+    push, publish, promote or merge branches, bump versions, edit
+    `CHANGELOG.md`, or ask for or record human confirmation that a
+    breaking-change candidate is accepted.
+
+    ## 4. Approval handoff (not this probe)
+
+    A later human or operator approval handoff — not this probe — rewrites the
+    canonical task's durable description and acceptance criteria to the
+    authorized bounded diff (version bump, CHANGELOG, and task PR) and removes
+    `awaiting-release-approval` before any backlog or in-progress admission.
+    That rewrite is what makes the implementation phase dispatchable. Tag,
+    publish, promotion, and merge still require their own separate human
+    authorization and must not be granted by this probe or by the bounded
+    implementation mandate.
 
     ## Deterministic validation scenarios
 
@@ -82,24 +112,28 @@ template:
 
     - With another unfinished task, report its ID and make no release-state or
       repository changes; only exact `auto-task:release-prep` instances are
-      excluded.
+      excluded. Complete as a successful no-diff outcome.
     - With no other unfinished task and no commits after the latest reachable
       `v*` tag, report the tag and "nothing to release" and make no release
-      changes.
+      changes. Complete as a successful no-diff outcome.
     - With an eligible commit range, record the survey, candidate bump, and
       breaking candidates, then create or update exactly one canonical
-      `release` task.
+      `release` task in `proposed` with `awaiting-release-approval`. Complete
+      as a successful no-diff outcome. Do not dispatch that canonical task.
 
     A repeated pass must reuse the open `release-prep` probe via
     `skip_if_open` and reuse the one canonical release task rather than
     creating duplicates.
   acceptance_criteria:
   - The unfinished-work gate reports sorted blocking task IDs and exempts only open tasks carrying the exact auto-task:release-prep provenance tag.
-  - A blocked or no-release pass changes no repository or release state and completes with evidence in execution_summary.
+  - A blocked or no-release pass changes no repository or release state and completes with evidence in execution_summary as a successful no-diff outcome.
   - An eligible pass records the latest reachable v* tag, commit survey, candidate semver bump, and breaking-change candidates with exact evidence.
-  - An eligible pass creates or updates exactly one canonical Prepare v<X.Y.Z> release task carrying the release tag and reports its task ID.
+  - An eligible pass creates or updates exactly one canonical Prepare v<X.Y.Z> release task carrying the release and awaiting-release-approval tags, status proposed, and reports its task ID.
   - The canonical release task carries `file:npm/package.json` alongside CHANGELOG.md, Cargo.toml, and Cargo.lock.
-  - The canonical task stops before commits, tags, pushes, publishing, branch promotion, version bumps, CHANGELOG edits, or human confirmation of breaking-change classification, and points to RELEASING.md.
+  - The canonical task stays non-dispatchable while human classification or approval is pending; its durable mandate forbids commits, tags, pushes, publishing, branch promotion, version bumps, CHANGELOG edits, and human confirmation of breaking-change classification, and points to RELEASING.md.
+  - Blocked, no-release, and eligible probe scenarios complete as successful no-diff outcomes and never enter a commit-required delivery tail.
+  - Approval handoff updates the canonical task's durable description and criteria to the authorized bounded diff and removes awaiting-release-approval before backlog or in-progress admission.
+  - Tag, publish, promotion, and merge remain unauthorized without a separate explicit human approval.
   - Repeated passes do not duplicate the open probe or the canonical release-preparation task.
   task_type: chore
   tags:
@@ -111,5 +145,5 @@ template:
 dedupe: skip_if_open
 created_by: codex
 created_at: 2026-08-14T04:40:00Z
-updated_by: unknown
-updated_at: 2026-08-16T17:24:10.982767150+00:00
+updated_by: grok
+updated_at: 2026-08-30T00:00:00Z

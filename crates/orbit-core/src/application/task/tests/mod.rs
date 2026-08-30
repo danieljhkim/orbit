@@ -4,6 +4,7 @@ mod add;
 mod params;
 mod paths;
 mod records;
+mod release_approval;
 mod update;
 
 use crate::OrbitRuntime;

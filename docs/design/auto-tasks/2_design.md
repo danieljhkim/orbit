@@ -1,8 +1,8 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-08-16
-last_validated: 2026-08-16
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Accepted
 feature: auto-tasks
 doc_role: design
@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**", "crates/orbit-web/src/api/auto_tasks.rs", "crates/orbit-web/assets/dashboard/operations.js"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800, ORB-10876]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800, ORB-10876, ORB-11081]
 ---
 
 # Auto-tasks — Design
@@ -200,6 +200,17 @@ use scheduler dry-run inspection before the weekly slot. The generated task's
 observed models, checked sources, and effective periods when the table is
 accurate.
 
+The workspace-local `release-prep` definition is a no-diff probe
+(`no-diff-expected`): blocked, empty-range, and eligible passes all complete
+as successful evidence-only outcomes and must never enter a commit-required
+delivery tail. An eligible pass creates or updates one canonical
+`Prepare v<X.Y.Z> release` task in `proposed` with `release` and
+`awaiting-release-approval`. That canonical task stays non-dispatchable until
+a later approval handoff rewrites its durable mandate to the bounded
+version/changelog/PR diff and drops the awaiting tag (ORB-11081). Tag,
+publish, promotion, and merge remain behind their existing separate human
+gates.
+
 - **Definitions are not full-text indexed.** Unlike indexed docs, auto-task
   YAML is not in a SQLite/search index; discovery is a directory scan. Acceptable
   at the expected cardinality (a handful of chores per workspace).
@@ -218,5 +229,6 @@ accurate.
 - ORB-10441 — mint-time visible title provenance.
 - ORB-10472 — worktree-local, atomic definition refresh.
 - ORB-10583 — workspace-local weekly official model-price audit definition.
+- ORB-11081 — release-prep probe stays no-diff; canonical release task is non-dispatchable until approval rewrites its mandate.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

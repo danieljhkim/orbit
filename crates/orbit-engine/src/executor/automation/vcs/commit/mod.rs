@@ -181,6 +181,11 @@ pub(super) fn commit_batch_changes<H: RuntimeHost + ?Sized>(
             batch_tasks.len()
         )));
     };
+    if task.awaits_release_approval() {
+        return Err(OrbitError::InvalidInput(
+            task.release_approval_block_reason(),
+        ));
+    }
 
     let workspace_path = resolve_workspace_path(host, input, batch_id)?;
     ensure_named_branch(&workspace_path)?;
