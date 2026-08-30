@@ -1,8 +1,8 @@
 ---
 title: Task Publication — Design
 owner: codex
-last_updated: 2026-08-29
-last_validated: 2026-08-29
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Draft
 feature: task-publication
 doc_role: design
@@ -11,7 +11,7 @@ summary: Proposed contract for publishing validated task snapshots to a dedicate
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
-related_artifacts: [ORB-11068]
+related_artifacts: [ORB-11068, ORB-11074]
 ---
 
 # Task Publication — Design
@@ -160,6 +160,18 @@ The owner performs these phases:
 8. Record the successful generation and commit ID in owner-local publication
    state. Failed publication does not change the last-success record.
 
+Phases 6 through 8 are refined by the implemented transport [ORB-11074]. The
+snapshot is built and indexed inside the private cache, so a re-run whose
+projection is byte-identical to the branch tip creates no commit and pushes
+nothing; only `generation`, `published_at`, and `previous_publication` differ
+across such a re-run, and they are lineage bookkeeping rather than content.
+Before pushing, the owner writes a private pending record — publication id,
+workspace, branch, generation, and the commit id it is about to push — into the
+same Orbit-owned cache. That record is what phase 8's "reconcile by commit ID"
+reads on the next run: a branch tip equal to the pending commit that the owner
+never recorded is reconciled and reported without republishing, while any other
+unexpected tip is an authority conflict.
+
 Task bundles have per-bundle durability rather than one workspace-wide read
 transaction. A v1 publication is therefore a validated set of individually
 consistent bundle observations, not a claim that every task was captured at
@@ -297,5 +309,6 @@ deleting the current tree erased the data.
 ## Task References
 
 - [ORB-11068] — specified the proposed dedicated private task-publication repository protocol.
+- [ORB-11074] — implemented the owner-only Git compare-and-swap publication transport.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

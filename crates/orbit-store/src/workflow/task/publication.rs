@@ -573,6 +573,24 @@ fn apply_attachment_policy(
     Ok(())
 }
 
+/// The Git parent is the commit-graph authority; `previous_publication`
+/// duplicates it so a detached snapshot stays self-describing. They must agree.
+pub(crate) fn assert_envelope_parent_lineage(
+    envelope: &PublicationEnvelope,
+    parent: Option<&str>,
+    label: &str,
+) -> Result<(), OrbitError> {
+    match (envelope.previous_publication.as_deref(), parent) {
+        (None, None) => Ok(()),
+        (Some(previous), Some(parent)) if previous.eq_ignore_ascii_case(parent) => Ok(()),
+        (previous, parent) => Err(OrbitError::InvalidInput(format!(
+            "{label}: Git parent/previous-publication mismatch: envelope previous_publication is {}, Git parent is {}",
+            previous.unwrap_or("null"),
+            parent.unwrap_or("null")
+        ))),
+    }
+}
+
 pub(crate) fn validate_jsonl_files(task_id: &str, bundle_dir: &Path) -> Result<(), OrbitError> {
     for file_name in [TASK_EVENTS_FILE_NAME, TASK_COMMENTS_FILE_NAME] {
         let path = bundle_dir.join(file_name);

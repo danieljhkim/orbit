@@ -1,7 +1,5 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use orbit_types::task::{ArtifactManifestV2, TASK_ARTIFACT_SCHEMA_VERSION, TASK_EVENTS_FILE_NAME};
 use tempfile::TempDir;
@@ -54,59 +52,9 @@ fn request(
     }
 }
 
-fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(["-c", "core.hooksPath=/dev/null"])
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_AUTHOR_NAME", "orbit-test")
-        .env("GIT_AUTHOR_EMAIL", "orbit-test@example.test")
-        .env("GIT_COMMITTER_NAME", "orbit-test")
-        .env("GIT_COMMITTER_EMAIL", "orbit-test@example.test")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
 fn init_repo(dir: &Path) {
     fs::create_dir_all(dir).unwrap();
     git(dir, &["init", "-b", "main"]);
-}
-
-fn copy_tree(src: &Path, dst: &Path) {
-    fs::create_dir_all(dst).unwrap();
-    for entry in fs::read_dir(src).unwrap() {
-        let entry = entry.unwrap();
-        let dest = dst.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_tree(&entry.path(), &dest);
-        } else {
-            fs::copy(entry.path(), dest).unwrap();
-        }
-    }
-}
-
-fn replace_worktree(repo: &Path, snapshot: &Path) {
-    for entry in fs::read_dir(repo).unwrap() {
-        let entry = entry.unwrap();
-        if entry.file_name() == ".git" {
-            continue;
-        }
-        let path = entry.path();
-        if path.is_dir() {
-            fs::remove_dir_all(&path).unwrap();
-        } else {
-            fs::remove_file(&path).unwrap();
-        }
-    }
-    copy_tree(snapshot, repo);
 }
 
 fn commit_snapshot(repo: &Path, snapshot: &Path, message: &str) -> String {
@@ -119,37 +67,6 @@ fn commit_snapshot(repo: &Path, snapshot: &Path, message: &str) -> String {
 fn amend_current(repo: &Path) {
     git(repo, &["add", "-A"]);
     git(repo, &["commit", "--amend", "--no-edit"]);
-}
-
-fn tree_bytes(root: &Path) -> BTreeMap<String, Vec<u8>> {
-    fn visit(root: &Path, path: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
-        let mut entries: Vec<_> = fs::read_dir(path)
-            .unwrap()
-            .map(|entry| entry.unwrap())
-            .collect();
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            if entry.file_name() == ".git" {
-                continue;
-            }
-            let path = entry.path();
-            let file_type = entry.file_type().unwrap();
-            if file_type.is_dir() || (file_type.is_symlink() && path.is_dir()) {
-                visit(root, &path, output);
-            } else if file_type.is_file() {
-                output.insert(
-                    path.strip_prefix(root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace('\\', "/"),
-                    fs::read(path).unwrap(),
-                );
-            }
-        }
-    }
-    let mut output = BTreeMap::new();
-    visit(root, root, &mut output);
-    output
 }
 
 fn seed_one(
