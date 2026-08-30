@@ -1857,11 +1857,16 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
             "tags": ["mcp-roundtrip"],
             "crew": "sol",
             "orchestrator": "terra",
+            "relations": [{"type": "related_to", "target": "DK-00042"}],
         }),
     );
     let task_id = created["id"].as_str().expect("task id").to_string();
     assert_eq!(created["title"], "MCP round-trip task");
     assert_eq!(created["status"], "proposed");
+    client.call_tool_ok(
+        "orbit_task_update",
+        json!({"id": task_id, "job_run_id": "jrun-mcp-projection"}),
+    );
 
     let shown = client.call_tool_ok("orbit_task_show", json!({ "id": task_id }));
     assert_eq!(shown["id"], json!(task_id));
@@ -1870,6 +1875,7 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     assert_eq!(shown["tags"], json!(["mcp-roundtrip"]));
     assert_eq!(shown["crew"], "sol");
     assert_eq!(shown["orchestrator"], "terra");
+    assert_eq!(shown["job_run_id"], "jrun-mcp-projection");
     assert_eq!(
         client.call_tool_ok(
             "orbit_task_show",
@@ -1887,12 +1893,33 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     assert_eq!(
         client.call_tool_ok(
             "orbit_task_show",
-            json!({ "id": task_id, "fields": ["status", "title", "plan"] }),
+            json!({
+                "id": task_id,
+                "fields": ["status", "relations", "external_refs", "job_run_id"],
+            }),
         ),
         json!({
             "status": "proposed",
-            "title": "MCP round-trip task",
-            "plan": "",
+            "relations": [{
+                "type": "related_to",
+                "target": "DK-00042",
+                "verification": "not verifiable here",
+            }],
+            "external_refs": [],
+            "job_run_id": "jrun-mcp-projection",
+        })
+    );
+    assert_eq!(
+        client.call_tool_ok(
+            "orbit_task_show",
+            json!({ "id": task_id, "field": "relations" }),
+        ),
+        json!({
+            "items": [{
+                "type": "related_to",
+                "target": "DK-00042",
+                "verification": "not verifiable here",
+            }],
         })
     );
 
@@ -1960,6 +1987,51 @@ fn mcp_serve_round_trips_records_against_a_temp_workspace() {
     assert_eq!(
         serde_json::from_slice::<Value>(&tool_run.stdout).expect("tool-run status JSON"),
         json!("proposed")
+    );
+
+    let expected_projection = json!({
+        "status": "proposed",
+        "relations": [{
+            "type": "related_to",
+            "target": "DK-00042",
+            "verification": "not verifiable here",
+        }],
+        "external_refs": [],
+        "job_run_id": "jrun-mcp-projection",
+    });
+    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "task",
+            "show",
+            &task_id,
+            "--json",
+            "--fields",
+            "status,relations,external_refs,job_run_id",
+        ])
+        .output()
+        .expect("show mixed public DTO fields through the CLI");
+    assert_command_succeeded("mixed CLI task-show projection", &output);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("mixed CLI projection JSON"),
+        expected_projection
+    );
+
+    let tool_run = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .args([
+            "tool",
+            "run",
+            "orbit.task.show",
+            "--input",
+            &format!(
+                r#"{{"id":"{task_id}","fields":["status","relations","external_refs","job_run_id"]}}"#
+            ),
+        ])
+        .output()
+        .expect("show mixed public DTO fields through orbit tool run");
+    assert_command_succeeded("mixed tool-run task-show projection", &tool_run);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&tool_run.stdout).expect("mixed tool-run projection JSON"),
+        expected_projection
     );
 
     let listed = client.call_tool_ok("orbit_task_list", json!({}));

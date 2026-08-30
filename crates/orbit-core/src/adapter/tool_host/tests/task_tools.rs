@@ -5,11 +5,12 @@ use std::sync::{Arc, Barrier, Mutex, MutexGuard, OnceLock};
 use orbit_store::maintenance::task_registry::{
     TaskRegistryStore, read_workspace_config, task_registry_path,
 };
-use orbit_types::task::TaskStatus;
+use orbit_types::task::{TASK_SHOW_PUBLIC_DTO_FIELDS, TaskStatus};
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Value, json};
 
 use super::super::HubCoordinationExecutor;
+use super::super::json::task_to_json;
 use super::super::test_support::{
     create_task, create_task_with_crew, invalid_input_message, run_tool_as_operator, test_runtime,
 };
@@ -2315,12 +2316,30 @@ fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
         &["file:src/lib.rs"],
     );
 
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "relations": [{"type": "related_to", "target": "DK-00042"}],
+                "job_run_id": "jrun-projection",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("projection fixture metadata update succeeds");
+
     let output = runtime
         .execute_tool_command(
             "orbit.task.show",
             json!({
                 "id": task.id,
-                "fields": ["status", "title", "context_files", "plan"],
+                "fields": [
+                    "status",
+                    "relations",
+                    "external_refs",
+                    "job_run_id",
+                ],
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
@@ -2331,11 +2350,42 @@ fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
         output,
         json!({
             "status": "in-progress",
-            "title": "Show mixed fields",
-            "context_files": ["file:src/lib.rs"],
-            "plan": "",
+            "relations": [{
+                "type": "related_to",
+                "target": "DK-00042",
+                "verification": "not verifiable here",
+            }],
+            "external_refs": [],
+            "job_run_id": "jrun-projection",
         })
     );
+}
+
+#[test]
+fn task_show_public_dto_and_projection_vocabulary_cannot_drift() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "DTO vocabulary drift",
+        "Keep every stable public DTO key classified.",
+        TaskStatus::Backlog,
+        &[],
+    );
+    let dto = task_to_json(
+        &task,
+        &runtime.task_status_index().expect("task status index"),
+    );
+    let mut actual = dto
+        .as_object()
+        .expect("task DTO object")
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    actual.sort_unstable();
+    let mut expected = TASK_SHOW_PUBLIC_DTO_FIELDS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -2364,6 +2414,27 @@ fn task_show_tool_rejects_unknown_projection_with_the_shared_vocabulary() {
         message.contains(orbit_types::task::TASK_SHOW_PROJECTION_FIELDS_CSV),
         "{message}"
     );
+}
+
+#[test]
+fn task_show_tool_rejects_terminal_with_status_guidance() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Terminal projection",
+        "Exercise actionable lifecycle guidance.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.show",
+        json!({ "id": task.id, "field": "terminal" }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("use `status`"), "{message}");
 }
 
 #[test]

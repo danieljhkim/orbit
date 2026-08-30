@@ -1,9 +1,11 @@
 //! Canonical `orbit.task.show` field-projection vocabulary.
 //!
 //! CLI help, MCP/tool schema text, validation errors, and JSON projectors
-//! must all draw from this list. Sidecar fields (`comments`, `history`,
-//! `artifacts`) and `resolved_dependencies` still need a runtime fetch;
-//! the Task-local scalars below are projected from the record itself.
+//! must all draw from this list. Every stable key in the public task DTO is
+//! projectable. Sidecars (`comments`, `history`, `artifacts`) and fields whose
+//! canonical form depends on other tasks (`resolved_dependencies`,
+//! `relations`) still need a runtime fetch; the remaining fields are projected
+//! from the record itself.
 
 use serde_json::{Value, json};
 
@@ -14,20 +16,15 @@ use crate::task::Task;
 #[macro_export]
 macro_rules! task_show_projection_fields_csv {
     () => {
-        "id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts"
+        "id, parent_id, title, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, created_by, planned_by, implemented_by, status, priority, complexity, type, pr_status, external_refs, relations, source_task_id, job_run_id, crew, orchestrator, created_at, updated_at, comments, history, artifacts"
     };
 }
 
 /// Authoritative `orbit.task.show` `--fields` / `fields` / `field` vocabulary.
 pub const TASK_SHOW_PROJECTION_FIELDS: &[&str] = &[
     "id",
+    "parent_id",
     "title",
-    "type",
-    "status",
-    "priority",
-    "complexity",
-    "created_at",
-    "updated_at",
     "description",
     "acceptance_criteria",
     "dependencies",
@@ -37,11 +34,89 @@ pub const TASK_SHOW_PROJECTION_FIELDS: &[&str] = &[
     "plan",
     "execution_summary",
     "context_files",
+    "created_by",
+    "planned_by",
+    "implemented_by",
+    "status",
+    "priority",
+    "complexity",
+    "type",
+    "pr_status",
+    "external_refs",
+    "relations",
+    "source_task_id",
+    "job_run_id",
     "crew",
     "orchestrator",
+    "created_at",
+    "updated_at",
     "comments",
     "history",
     "artifacts",
+];
+
+/// Stable top-level keys in the unprojected public task DTO.
+///
+/// A projector-vs-DTO drift test compares this policy with the actual DTO.
+/// Sidecars are deliberately absent because they are attached after the base
+/// DTO is serialized, but remain projectable through the vocabulary above.
+pub const TASK_SHOW_PUBLIC_DTO_FIELDS: &[&str] = &[
+    "id",
+    "parent_id",
+    "title",
+    "description",
+    "acceptance_criteria",
+    "dependencies",
+    "resolved_dependencies",
+    "tags",
+    "required_tools",
+    "plan",
+    "execution_summary",
+    "context_files",
+    "created_by",
+    "planned_by",
+    "implemented_by",
+    "status",
+    "priority",
+    "complexity",
+    "type",
+    "pr_status",
+    "external_refs",
+    "relations",
+    "source_task_id",
+    "job_run_id",
+    "crew",
+    "orchestrator",
+    "created_at",
+    "updated_at",
+];
+
+/// Response enrichments that are intentionally not task-field projections.
+///
+/// These keys describe the read environment or an explicitly requested
+/// enrichment rather than stable task data, so asking for them alone could
+/// produce host-dependent results.
+pub const TASK_SHOW_DERIVED_RESPONSE_FIELDS: &[(&str, &str)] = &[
+    (
+        "workspace",
+        "lookup-owner metadata attached by the CLI, not task data",
+    ),
+    (
+        "related_docs",
+        "derived only when with_context is requested",
+    ),
+    (
+        "resolved_crew",
+        "conditional host-local crew configuration enrichment",
+    ),
+    (
+        "crew_model",
+        "conditional host-local crew configuration enrichment",
+    ),
+    (
+        "crew_unresolved",
+        "conditional host-local crew-resolution diagnostic",
+    ),
 ];
 
 /// Comma-separated form of [`TASK_SHOW_PROJECTION_FIELDS`].
@@ -54,21 +129,46 @@ pub fn is_task_show_projection_field(name: &str) -> bool {
 
 /// Actionable error for a name that is not in the vocabulary.
 pub fn unknown_task_show_field_message(name: &str) -> String {
-    format!("unknown field selector `{name}`. Valid values: {TASK_SHOW_PROJECTION_FIELDS_CSV}")
+    let guidance = if name == "terminal" {
+        " `terminal` is not a task field; use `status` for lifecycle state."
+    } else {
+        ""
+    };
+    format!(
+        "unknown field selector `{name}`.{guidance} Valid values: {TASK_SHOW_PROJECTION_FIELDS_CSV}"
+    )
 }
 
 /// JSON for a Task-local (non-sidecar) projection field.
 ///
-/// Returns `None` for sidecar names, `resolved_dependencies`, and unknown
-/// names so callers can keep those on their existing fetch paths.
+/// Returns `None` for sidecar names, cross-task fields (`dependencies`,
+/// `resolved_dependencies`, `relations`), and unknown names so callers can
+/// keep those on their existing fetch paths.
 pub fn task_show_record_field_json(task: &Task, field: &str) -> Option<Value> {
     match field {
         "id" => Some(json!(task.id)),
+        "parent_id" => Some(json!(task.parent_id())),
         "title" => Some(json!(task.title)),
+        "description" => Some(json!(task.description)),
+        "acceptance_criteria" => Some(json!(task.acceptance_criteria)),
+        "tags" => Some(json!(task.tags)),
+        "required_tools" => Some(json!(task.required_tools)),
+        "plan" => Some(json!(task.plan)),
+        "execution_summary" => Some(json!(task.execution_summary)),
+        "context_files" => Some(json!(task.context_files)),
+        "created_by" => Some(json!(task.created_by)),
+        "planned_by" => Some(json!(task.planned_by)),
+        "implemented_by" => Some(json!(task.implemented_by)),
         "type" => Some(json!(task.task_type.to_string())),
         "status" => Some(json!(task.status.to_string())),
         "priority" => Some(json!(task.priority.to_string())),
         "complexity" => Some(json!(task.complexity.map(|value| value.to_string()))),
+        "pr_status" => Some(json!(task.pr_status)),
+        "external_refs" => Some(json!(task.external_refs)),
+        "source_task_id" => Some(json!(task.source_task_id())),
+        "job_run_id" => Some(json!(task.job_run_id)),
+        "crew" => Some(json!(task.crew)),
+        "orchestrator" => Some(json!(task.orchestrator)),
         "created_at" => Some(json!(task.created_at.to_rfc3339())),
         "updated_at" => Some(json!(task.updated_at.to_rfc3339())),
         _ => None,
