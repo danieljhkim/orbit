@@ -1,6 +1,7 @@
-//! Task-migration tooling: export a workspace's task bundles to a portable
-//! tar.zst archive and import them into another machine's registry, resolving
-//! id collisions by renumbering through the local allocator.
+//! Task-migration and publication tooling: export a workspace's task bundles
+//! to a portable tar.zst archive, import them into another machine's registry,
+//! build validated publication snapshots, and inspect a publication repository
+//! as labelled read-only state.
 //!
 //! The engine lives in `orbit-store` because it needs the canonical bundle I/O
 //! primitives ([`read_bundle_at`]/[`write_bundle_at`]) and the private
@@ -71,12 +72,18 @@ use crate::driver::sqlite::task_registry::{
 };
 
 mod archive;
+mod inspect;
 mod publication;
 mod reindex;
 
 #[cfg(test)]
 mod tests;
 
+pub use inspect::{
+    InspectedPublicationTask, PublicationFreshness, PublicationInspectLabel,
+    PublicationInspectRequest, PublicationInspection, PublicationRenderAuthority,
+    inspect_publication,
+};
 pub use publication::{
     AttachmentPolicy, AttachmentPolicyKind, AttachmentScanFailure, AttachmentScanInput,
     AttachmentScanOutcome, AttachmentSensitivityScanner, OmittedAttachment,
