@@ -9,7 +9,7 @@ use orbit_common::OrbitError;
 use super::super::clock::{
     ClockCommandRunner, ClockPlatform, ClockSettings, ManagerCommand, clock_status_with,
     install_clock_with, load_clock_settings, render_systemd_service, render_systemd_timer,
-    set_clock_cadence_with, set_clock_enabled_with,
+    save_clock_settings, set_clock_cadence_with, set_clock_enabled_with,
 };
 
 struct MockRunner {
@@ -121,6 +121,10 @@ impl SystemdManagerFake {
             .lock()
             .expect("fake systemd state lock")
             .next_trigger
+    }
+
+    fn commands(&self) -> Vec<String> {
+        self.commands.lock().expect("fake command log lock").clone()
     }
 
     fn set_now(&self, now_seconds: u64) {
@@ -237,6 +241,22 @@ fn finds_launcher(path: &str, launcher: &str) -> bool {
         .any(|directory| directory.join(launcher).is_file())
 }
 
+fn write_stale_on_startup_timer(home: &Path, cadence_seconds: u64) {
+    let unit_dir = home.join(".config/systemd/user");
+    fs::create_dir_all(&unit_dir).expect("create systemd user unit dir");
+    fs::write(
+        unit_dir.join("orbit-sweep.timer"),
+        format!(
+            "# stale pre-OnActiveSec timer\n[Unit]\nDescription=Run orbit sweep every {cadence_seconds} seconds\n\n[Timer]\nOnStartupSec={cadence_seconds}s\nOnUnitActiveSec={cadence_seconds}s\nAccuracySec=5s\n\n[Install]\nWantedBy=timers.target\n"
+        ),
+    )
+    .expect("write stale OnStartupSec timer");
+}
+
+fn systemd_show_command() -> &'static str {
+    "systemctl --user show orbit-sweep.timer --property=LoadState --property=ActiveState --property=NextElapseUSecRealtime --property=NextElapseUSecMonotonic --property=LastTriggerUSec"
+}
+
 #[test]
 fn rendered_systemd_service_discovers_local_provider_launchers() {
     let home = tempdir().expect("create temporary home");
@@ -344,6 +364,98 @@ fn late_reinstall_rearms_an_active_elapsed_timer_from_timer_activation() {
         .next_trigger()
         .expect("finite trigger after reinstall");
     assert!((week + 300..=week + 305).contains(&next));
+}
+
+#[test]
+fn enable_migrates_stale_on_startup_sec_elapsed_timer() {
+    let root = tempdir().expect("create global root");
+    let home = tempdir().expect("create home");
+    save_clock_settings(
+        root.path(),
+        ClockSettings {
+            cadence_seconds: 300,
+        },
+    )
+    .expect("persist cadence matching the stale unit");
+    write_stale_on_startup_timer(home.path(), 300);
+    let week = 7 * 24 * 60 * 60;
+    let runner = SystemdManagerFake::late_elapsed(home.path(), week, 60);
+
+    let status = set_clock_enabled_with(
+        root.path(),
+        true,
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("enable migrates and re-arms a stale timer");
+
+    assert!(status.enabled);
+    assert!(status.schedulable);
+    let next = runner
+        .next_trigger()
+        .expect("finite trigger after enable migration");
+    assert!((week + 300..=week + 305).contains(&next));
+
+    let timer = fs::read_to_string(home.path().join(".config/systemd/user/orbit-sweep.timer"))
+        .expect("read migrated timer");
+    assert!(timer.contains("OnActiveSec=300s"));
+    assert!(timer.contains("OnUnitActiveSec=300s"));
+    assert!(!timer.contains("OnStartupSec="));
+    assert_eq!(
+        runner.commands(),
+        vec![
+            "systemctl --user is-enabled orbit-sweep.timer".to_string(),
+            "systemctl --user daemon-reload".to_string(),
+            "systemctl --user enable orbit-sweep.timer".to_string(),
+            "systemctl --user restart orbit-sweep.timer".to_string(),
+            systemd_show_command().to_string(),
+        ]
+    );
+}
+
+#[test]
+fn enable_is_idempotent_for_current_on_active_sec_timer() {
+    let root = tempdir().expect("create global root");
+    let home = tempdir().expect("create home");
+    let runner = SystemdManagerFake::new(home.path(), 100);
+    install_clock_with(
+        root.path(),
+        "/opt/orbit/bin/orbit",
+        ClockSettings::default(),
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("install current OnActiveSec timer");
+    let before = fs::read_to_string(home.path().join(".config/systemd/user/orbit-sweep.timer"))
+        .expect("read current timer");
+    let commands_after_install = runner.commands().len();
+
+    let status = set_clock_enabled_with(
+        root.path(),
+        true,
+        ClockPlatform::Systemd,
+        &runner,
+        home.path(),
+    )
+    .expect("enable current timer");
+
+    assert!(status.enabled);
+    assert!(status.schedulable);
+    let after = fs::read_to_string(home.path().join(".config/systemd/user/orbit-sweep.timer"))
+        .expect("read timer after enable");
+    assert_eq!(before, after);
+    assert_eq!(
+        runner.commands()[commands_after_install..],
+        vec![
+            "systemctl --user is-enabled orbit-sweep.timer".to_string(),
+            "systemctl --user daemon-reload".to_string(),
+            "systemctl --user enable orbit-sweep.timer".to_string(),
+            "systemctl --user restart orbit-sweep.timer".to_string(),
+            systemd_show_command().to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -573,7 +685,7 @@ fn systemd_cadence_change_and_reenable_establish_new_deadlines() {
 fn manager_failures_include_exact_recovery_command() {
     let root = tempdir().expect("create global root");
     let home = tempdir().expect("create home");
-    let runner = MockRunner::new(vec![Ok(false), Ok(false)]);
+    let runner = MockRunner::new(vec![Ok(false), Ok(true), Ok(false)]);
     let error = set_clock_enabled_with(
         root.path(),
         true,
@@ -661,6 +773,10 @@ fn systemd_install_rejects_successful_commands_without_a_finite_trigger() {
     assert!(error.to_string().contains("finite future trigger"));
     assert!(error.to_string().contains("systemctl --user status"));
     assert!(error.to_string().contains("journalctl --user"));
+    assert!(
+        !error.to_string().contains("orbit routine clock enable"),
+        "a completed enable/install that is still unschedulable must not tell the operator to repeat enable"
+    );
 }
 
 #[test]

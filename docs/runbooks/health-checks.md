@@ -148,12 +148,13 @@ orbit sweep --json
 On Linux, a healthy enabled status includes an active timer, a finite next systemd trigger,
 and an effective cadence. `clock: unhealthy` with an inactive effective cadence means the
 timer is enabled but elapsed, unscheduled, inactive, or could not be probed. Inspect the
-printed diagnostic, then run `orbit routine clock enable`: it restarts the timer even when it
-is already enabled and returns success only after verifying a finite next trigger. If that
-verification fails, inspect the `systemctl --user status` and `journalctl --user` commands in
-the error before retrying. The generated timer schedules its first sweep from every timer
-activation and then recurs from service activation; installation and cadence changes perform
-the same post-activation verification.
+printed diagnostic, then run `orbit routine clock enable`: it rewrites a stale installed
+timer if needed, restarts the timer even when it is already enabled, and returns success
+only after verifying a finite next trigger. If that verification fails, inspect the
+`systemctl --user status` and `journalctl --user` commands in the error rather than repeating
+enable. The generated timer schedules its first sweep from every timer activation and then
+recurs from service activation; installation and cadence changes perform the same
+post-activation verification.
 It does not replay every tick missed during host or manager downtime: on the next sweep,
 routine `missed_run: catch_up_once` fires once for a gap while `skip` waits for the next natural
 cron slot.
