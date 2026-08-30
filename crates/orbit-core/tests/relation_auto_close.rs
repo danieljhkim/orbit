@@ -2,6 +2,7 @@
 #![allow(missing_docs)]
 
 use chrono::{TimeZone, Utc};
+use orbit_common::OrbitError;
 use orbit_core::OrbitRuntime;
 use orbit_engine::{RuntimeHost, TaskAutomationUpdate};
 use orbit_store::friction_store::{FrictionAddParams, FrictionStore};
@@ -272,4 +273,153 @@ fn approving_proposed_task_does_not_resolve_friction() {
 
     let task = runtime.get_task(&task_id).expect("get task");
     assert_eq!(task.status, TaskStatus::Backlog);
+}
+
+fn dual_workspace_runtimes() -> (
+    TempDir,
+    OrbitRuntime,
+    std::path::PathBuf,
+    OrbitRuntime,
+    std::path::PathBuf,
+) {
+    let root = TempDir::new().expect("create tempdir");
+    let global_root = root.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+
+    let repo_a = root.path().join("repo_a");
+    let orbit_a = repo_a.join(".orbit");
+    std::fs::create_dir_all(&orbit_a).expect("create workspace a");
+    let runtime_a =
+        OrbitRuntime::from_roots(&global_root, &orbit_a).expect("build workspace a runtime");
+
+    let repo_b = root.path().join("repo_b");
+    let orbit_b = repo_b.join(".orbit");
+    std::fs::create_dir_all(&orbit_b).expect("create workspace b");
+    let runtime_b =
+        OrbitRuntime::from_roots(&global_root, &orbit_b).expect("build workspace b runtime");
+
+    (root, runtime_a, repo_a, runtime_b, repo_b)
+}
+
+fn assert_friction_not_local(error: &OrbitError, friction_id: &str, found_in: &str) {
+    let details = error
+        .friction_not_local_details()
+        .expect("structured friction_not_local error");
+    assert_eq!(details.friction_id, friction_id);
+    assert!(
+        details
+            .found_in
+            .iter()
+            .any(|workspace| workspace == found_in),
+        "expected owner {found_in}, got {:?}",
+        details.found_in
+    );
+    assert_ne!(details.workspace_id, found_in);
+}
+
+fn assert_friction_still_open(runtime: &OrbitRuntime, friction_id: &str) {
+    let stored = frictions(runtime)
+        .show(friction_id)
+        .expect("show friction")
+        .expect("friction exists");
+    assert_eq!(stored.record.status, FrictionStatus::Open);
+    assert_eq!(stored.record.resolved_by_task, None);
+}
+
+/// F2026-08-094: a done task in one workspace named an unqualified friction
+/// ID that lived in another, and auto-resolve silently no-op'd. Completing
+/// that edge must now fail with `friction_not_local` and leave the foreign
+/// friction open.
+#[test]
+fn cross_workspace_resolves_update_to_done_is_rejected() {
+    let (_root, runtime_a, _repo_a, runtime_b, repo_b) = dual_workspace_runtimes();
+    let friction_id = add_test_friction(&runtime_a);
+    let owner = runtime_a.workspace_id().expect("workspace a id");
+    let task_id = add_task_with_resolves(&runtime_b, &repo_b, &friction_id, "backlog");
+
+    let error = runtime_b
+        .run_tool(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "status": "done",
+                "model": "codex"
+            }),
+        )
+        .expect_err("cross-workspace resolves must not complete");
+    assert_friction_not_local(&error, &friction_id, &owner);
+    assert_friction_still_open(&runtime_a, &friction_id);
+    assert_eq!(
+        runtime_b.get_task(&task_id).expect("get task").status,
+        TaskStatus::Backlog
+    );
+}
+
+#[test]
+fn cross_workspace_resolves_review_approval_is_rejected() {
+    let (_root, runtime_a, _repo_a, runtime_b, repo_b) = dual_workspace_runtimes();
+    let friction_id = add_test_friction(&runtime_a);
+    let owner = runtime_a.workspace_id().expect("workspace a id");
+    let task_id = add_task_with_resolves(&runtime_b, &repo_b, &friction_id, "backlog");
+    move_backlog_task_to_review(&runtime_b, &task_id);
+
+    let error = runtime_b
+        .run_tool(
+            "orbit.task.approve",
+            json!({ "id": task_id, "model": "codex" }),
+        )
+        .expect_err("cross-workspace resolves must not approve into done");
+    assert_friction_not_local(&error, &friction_id, &owner);
+    assert_friction_still_open(&runtime_a, &friction_id);
+    assert_eq!(
+        runtime_b.get_task(&task_id).expect("get task").status,
+        TaskStatus::Review
+    );
+}
+
+#[test]
+fn cross_workspace_resolves_automation_update_is_rejected() {
+    let (_root, runtime_a, _repo_a, runtime_b, repo_b) = dual_workspace_runtimes();
+    let friction_id = add_test_friction(&runtime_a);
+    let owner = runtime_a.workspace_id().expect("workspace a id");
+    let task_id = add_task_with_resolves(&runtime_b, &repo_b, &friction_id, "backlog");
+
+    let error = runtime_b
+        .apply_task_automation_update(
+            &task_id,
+            TaskAutomationUpdate {
+                status: Some(TaskStatus::Done),
+                ..TaskAutomationUpdate::default()
+            },
+        )
+        .expect_err("cross-workspace resolves must not complete via automation");
+    assert_friction_not_local(&error, &friction_id, &owner);
+    assert_friction_still_open(&runtime_a, &friction_id);
+    assert_eq!(
+        runtime_b.get_task(&task_id).expect("get task").status,
+        TaskStatus::Backlog
+    );
+}
+
+#[test]
+fn same_workspace_resolves_still_wins_when_another_workspace_shares_the_id() {
+    let (_root, runtime_a, _repo_a, runtime_b, repo_b) = dual_workspace_runtimes();
+    let foreign_id = add_test_friction(&runtime_a);
+    let local_id = add_test_friction(&runtime_b);
+    assert_eq!(foreign_id, local_id);
+
+    let task_id = add_task_with_resolves(&runtime_b, &repo_b, &local_id, "backlog");
+    runtime_b
+        .run_tool(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "status": "done",
+                "model": "codex"
+            }),
+        )
+        .expect("local resolves still completes");
+
+    assert_friction_resolved_by(&runtime_b, &local_id, &task_id);
+    assert_friction_still_open(&runtime_a, &foreign_id);
 }

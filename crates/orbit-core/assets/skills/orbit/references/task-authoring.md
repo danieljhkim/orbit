@@ -74,11 +74,16 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
 - `dependencies: ["<task-id>", ...]` — prerequisites must reach a satisfying
   status first.
 - `relations: [{"type": "resolves", "target": "<friction-id>"}]` — auto-resolves
-  that friction when this task reaches `done`. Other types (`produces`,
-  `blocked_by`, `child_of`, `spawned_from`, `regression_from`, `supersedes`,
-  `related_to`) are tracked but inert. Only `produces`/`resolves` accept
-  non-task targets; the rest require a task ID. A dangling target succeeds but
-  emits a `TaskRelationDangling` audit event.
+  that friction when this task reaches `done`, **only in the same workspace**.
+  Friction IDs are workspace-local; an unqualified target is never a global
+  lookup. Completing a task whose `resolves` target exists only in another
+  workspace on this host is rejected with `friction_not_local` — resolve the
+  friction from its owning workspace (`orbit.friction.resolve`, or a covering
+  task there) instead. Other types (`produces`, `blocked_by`, `child_of`,
+  `spawned_from`, `regression_from`, `supersedes`, `related_to`) are tracked
+  but inert. Only `produces`/`resolves` accept non-task targets; the rest
+  require a task ID. A dangling target (unknown in every workspace this host
+  can see) succeeds but emits a `TaskRelationDangling` audit event.
 - `parent_id`, `source_task_id` (the bug-introducing task; creation-time only —
   `update` silently drops it), `tags` (reuse existing before inventing new).
 - `required_tools: ["<exact.canonical.tool>", ...]` — tools the task must add to

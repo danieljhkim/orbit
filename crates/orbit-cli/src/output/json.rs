@@ -47,6 +47,14 @@ pub fn error_payload(error: &OrbitError) -> Value {
         object.insert("path".to_string(), json!(path));
         object.insert("reason".to_string(), json!(reason));
     }
+    if let Some(details) = error.friction_not_local_details()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("friction_id".to_string(), json!(details.friction_id));
+        object.insert("task_id".to_string(), json!(details.task_id));
+        object.insert("workspace_id".to_string(), json!(details.workspace_id));
+        object.insert("found_in".to_string(), json!(details.found_in));
+    }
     payload
 }
 
@@ -94,6 +102,7 @@ fn error_code(error: &OrbitError) -> &str {
         OrbitError::AdrInvalidTransition(_) => "adr_invalid_transition",
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
+        OrbitError::FrictionNotLocal(_) => "friction_not_local",
         OrbitError::Migration(_) => "migration_failed",
         // New OrbitError variants must remain JSON-serializable before this
         // boundary assigns them a dedicated stable code.

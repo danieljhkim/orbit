@@ -158,3 +158,25 @@ fn ship_run_in_flight_has_a_stable_code_and_names_both_ids() {
         "ship_run_in_flight"
     );
 }
+
+#[test]
+fn friction_not_local_has_a_stable_code_and_names_owners() {
+    let error = OrbitError::friction_not_local(
+        "F2026-08-001",
+        "ORB-00001",
+        "ws_task",
+        vec!["ws_friction".to_string()],
+    );
+    let payload = error_payload(&error);
+
+    assert_eq!(payload["code"], "friction_not_local");
+    assert_eq!(payload["friction_id"], "F2026-08-001");
+    assert_eq!(payload["task_id"], "ORB-00001");
+    assert_eq!(payload["workspace_id"], "ws_task");
+    assert_eq!(payload["found_in"], json!(["ws_friction"]));
+    assert!(payload["message"].as_str().is_some_and(|message| {
+        message.contains("F2026-08-001")
+            && message.contains("ws_task")
+            && message.contains("ws_friction")
+    }));
+}

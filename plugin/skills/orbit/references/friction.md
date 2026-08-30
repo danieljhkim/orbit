@@ -90,11 +90,20 @@ orbit tool run orbit.friction.resolve --input '{"id":"<ID>"}'
 
 `update` also accepts `tags` and `body`.
 
-When a task fixes the underlying cause, give that task
-`relations: [{"type":"resolves","target":"<friction-id>"}]`. It auto-resolves
-the friction and records `resolved_by_task` when the task reaches `done`. Filing
-the task does not itself resolve anything — the record stays open until the fix
-lands. A dangling target is audit-visible but does not block task completion.
+When a task in the **same workspace** as the friction fixes the underlying
+cause, give that task
+`relations: [{"type":"resolves","target":"<friction-id>"}]`. Unqualified
+friction IDs are workspace-local: auto-resolve looks up that ID only in the
+task's workspace and records `resolved_by_task` when the task reaches `done`.
+IDs are not global. Filing the task does not itself resolve anything — the
+record stays open until the fix lands.
+
+A target that does not exist in this workspace and is not known to belong
+elsewhere is dangling: audit-visible, and it does not block completion. A
+target that exists only in another workspace on this host is **not**
+dangling — completing the task is rejected with `friction_not_local`. Resolve
+that friction from its owning workspace (`orbit.friction.resolve`, or a
+covering task there). Do not count a foreign `resolves` edge as coverage.
 
 ## Reading the corpus
 

@@ -132,6 +132,17 @@ impl FrictionStore {
             .with_read_connection(|conn| queries::show_record(conn, &self.workspace_id, id))
     }
 
+    /// Other workspaces on this host that already hold `id`.
+    ///
+    /// Returns IDs only — never another workspace's body — so callers can
+    /// refuse an unqualified cross-workspace `resolves` edge without treating
+    /// friction IDs as global (ORB-11078).
+    pub fn foreign_owners_of(&self, id: &str) -> Result<Vec<String>, OrbitError> {
+        validate_friction_id(id)?;
+        self.store
+            .with_read_connection(|conn| queries::foreign_owners_of(conn, &self.workspace_id, id))
+    }
+
     pub fn update(
         &self,
         id: &str,
@@ -361,6 +372,10 @@ impl crate::contracts::FrictionStoreBackend for FrictionStore {
 
     fn show(&self, id: &str) -> Result<Option<StoredFrictionRecord>, OrbitError> {
         Self::show(self, id)
+    }
+
+    fn foreign_owners_of(&self, id: &str) -> Result<Vec<String>, OrbitError> {
+        Self::foreign_owners_of(self, id)
     }
 
     fn update(

@@ -1,5 +1,6 @@
 use chrono::Utc;
 use orbit_common::{NotFoundKind, OrbitError};
+use orbit_store::contracts::FrictionStoreBackend;
 use orbit_types::identity::is_valid_friction_id;
 use orbit_types::record::OrbitEvent;
 use orbit_types::task::{
@@ -61,6 +62,9 @@ impl OrbitRuntime {
         let implemented_by =
             implementation_label(&task, effective_label.as_str(), canonical_model.as_deref());
         let append_comments = build_task_comments(comment, effective_label.as_str())?;
+        if task.status == TaskStatus::Review {
+            self.ensure_resolves_are_workspace_local(&task)?;
+        }
 
         let result = match task.status {
             TaskStatus::Proposed => self.with_mutation(|| {
@@ -125,6 +129,22 @@ impl OrbitRuntime {
             self.record_event(event)?;
         }
         Ok(())
+    }
+
+    /// Refuse a done transition whose unqualified `resolves` target lives in
+    /// another workspace on this host (ORB-11078).
+    ///
+    /// Same-workspace targets and IDs that cannot be shown to belong
+    /// elsewhere stay on the existing auto-resolve / dangling path.
+    pub(crate) fn ensure_resolves_are_workspace_local(
+        &self,
+        task: &Task,
+    ) -> Result<(), OrbitError> {
+        let Ok(frictions) = crate::runtime::friction::store_for(self) else {
+            return Ok(());
+        };
+        let workspace_id = self.workspace_id()?;
+        ensure_resolves_targets_are_workspace_local(frictions.as_ref(), &workspace_id, task)
     }
 
     pub(crate) fn apply_resolves_side_effects(&self, task: &Task) -> Vec<OrbitEvent> {
@@ -709,6 +729,37 @@ impl OrbitRuntime {
         ensure_task_delete_allowed(&task.id, task.status, force)?;
         self.delete_task(id)
     }
+}
+
+/// Rejects an unqualified `resolves` friction ID that is missing locally
+/// but present in another workspace on this host.
+pub(crate) fn ensure_resolves_targets_are_workspace_local(
+    frictions: &dyn FrictionStoreBackend,
+    workspace_id: &str,
+    task: &Task,
+) -> Result<(), OrbitError> {
+    for relation in &task.relations {
+        if relation.relation_type != TaskRelationType::Resolves {
+            continue;
+        }
+        let target = relation.target.as_str();
+        if !is_valid_friction_id(target) {
+            continue;
+        }
+        if frictions.show(target)?.is_some() {
+            continue;
+        }
+        let found_in = frictions.foreign_owners_of(target)?;
+        if !found_in.is_empty() {
+            return Err(OrbitError::friction_not_local(
+                target,
+                task.id.clone(),
+                workspace_id,
+                found_in,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn ensure_task_delete_allowed(id: &str, status: TaskStatus, force: bool) -> Result<(), OrbitError> {
