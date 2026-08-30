@@ -199,6 +199,9 @@ pub fn remove_workspace(
     registry
         .checkouts
         .retain(|checkout| checkout.workspace_id != removed.id);
+    registry
+        .publication_bindings
+        .retain(|binding| binding.workspace_id != removed.id);
     if let Some(owner) = removed.owner_machine_id.as_deref()
         && !registry
             .workspaces
@@ -624,6 +627,7 @@ pub fn validate_workspace_registry(
             }
         }
     }
+    super::publication::validate_publication_bindings(registry, context)?;
     Ok(changed)
 }
 

@@ -75,10 +75,11 @@ feature.
   Retrieval and ranking live in `orbit-search`. `orbit-core` owns the domain (corpora, records, lifecycle) and projects records into search-source structs. `orbit-search` owns lexical (BM25), semantic (cosine), and hybrid scoring. CLI verbs are presets layered on the same backend.
   It also builds `orbit-search-companion`, a separately installed search companion binary, as an additional `[[bin]]` target (folded from the standalone `orbit-search-companion` crate, ORB-10357); that target alone depends on fastembed-rs and is not linked into the default `orbit` CLI binary.
 - **orbit-registry**: machine identity and workspace registry feature crate. It
-  owns `host.toml`, the logical workspace catalog and local checkout bindings,
-  validation, and atomic file persistence. It contains no shared database,
-  command orchestration, MCP transport, or Core runtime execution. Depends only
-  on `orbit-types` and `orbit-common` among workspace crates.
+  owns `host.toml`, the logical workspace catalog, local checkout bindings,
+  owner-local task-publication repository bindings, validation, and atomic file
+  persistence. It contains no shared database, command orchestration, MCP
+  transport, or Core runtime execution. Depends only on `orbit-types` and
+  `orbit-common` among workspace crates.
 - **orbit-store**: one directional persistence crate. `contracts` owns every
   consumer-visible trait, parameter, query/filter, and result projection;
   `fs` owns narrowly named lock, path-safety, and YAML mechanics; private
