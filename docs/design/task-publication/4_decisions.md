@@ -1,9 +1,9 @@
 ---
 title: Task Publication — Decisions
 owner: codex
-last_updated: 2026-08-29
-last_validated: 2026-08-29
-status: Draft
+last_updated: 2026-08-30
+last_validated: 2026-08-30
+status: Accepted
 feature: task-publication
 doc_role: decisions
 type: design
@@ -11,12 +11,12 @@ summary: Standing repository, authority, failure, and data-exposure rules for ta
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
-related_artifacts: [ORB-11068]
+related_artifacts: [ORB-11068, ORB-11077]
 ---
 
 # Task Publication — Decisions
 
-These standing rules govern future implementation choices for task publication.
+These standing rules govern the shipped implementation and future task-publication choices.
 Task references carry provenance; superseded decisions remain in place so their
 original reasoning stays legible. See
 [CONVENTIONS.md §4](../CONVENTIONS.md#4-decisions) for the admission rule.
@@ -154,5 +154,6 @@ checks. Omission is recorded as incomplete backup state.
 ## Task References
 
 - [ORB-11068] — recorded the dedicated-repository, authority, acknowledgement, branch-conflict, and privacy rules.
+- [ORB-11077] — shipped those rules through an explicit CLI-only operator surface and deferred unattended publication.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -1,8 +1,8 @@
 ---
 title: Task Publication — Vision
 owner: codex
-last_updated: 2026-08-29
-last_validated: 2026-08-29
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Draft
 feature: task-publication
 doc_role: vision
@@ -11,7 +11,7 @@ summary: Evolution gates for private task-publication repositories, authority tr
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
-related_artifacts: [ORB-11068]
+related_artifacts: [ORB-11068, ORB-11077]
 ---
 
 # Task Publication — Vision
@@ -23,9 +23,9 @@ separate capabilities with different access and safety contracts.
 
 ## 1. Open Questions
 
-1. What default publication trigger and freshness objective are justified by
-   observed task-loss and recovery needs: explicit command, post-workflow hook,
-   scheduled routine, or a combination?
+1. What separately configurable routine trigger and freshness objective are
+   justified by observed task-loss and recovery needs? V1 ships only an
+   explicit command; a post-task-write hook is excluded.
 2. Should an explicit authority transfer carry the last publication generation
    as a fencing token, and what evidence must the old owner provide before the
    new owner can publish?
@@ -121,5 +121,6 @@ authority merely because a machine can clone or push.
 ## Task References
 
 - [ORB-11068] — chose a dedicated private publication repository and deferred aggregation and synchronization.
+- [ORB-11077] — shipped the explicit-only v1 operator workflow and kept routine triggering, authority transfer, and multi-writer synchronization deferred.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
