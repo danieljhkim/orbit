@@ -8,6 +8,7 @@ use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
 use orbit_types::task::TaskStatus;
 use serde_json::{Value, json};
+use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::adapter::engine_host::v2_host::test_support::runtime_with_workspace_layout;
@@ -89,6 +90,32 @@ fn filed_task_ids(output: &Value) -> Vec<String> {
         .iter()
         .map(|entry| entry["task_id"].as_str().expect("task id").to_string())
         .collect()
+}
+
+/// A workspace whose crew roster has no `system` entry: an explicit `[crews]`
+/// table naming only `sol`, with `workflow.system_crew` pointed at a name that
+/// resolves to nothing so the usual `system`-aliasing fallback does not kick
+/// in either.
+fn runtime_without_system_crew() -> (tempfile::TempDir, OrbitRuntime) {
+    let root = tempdir().expect("create tempdir");
+    let global = root.path().join("home/.orbit");
+    let workspace = root.path().join("repo/.orbit");
+    std::fs::create_dir_all(&global).expect("global orbit dir");
+    std::fs::create_dir_all(&workspace).expect("workspace orbit dir");
+    std::fs::write(
+        workspace.join("config.toml"),
+        r#"[workflow]
+default_crew = "sol"
+system_crew = "not-a-real-crew"
+
+[crews.sol]
+provider = "codex"
+model = "gpt-5.6-sol"
+"#,
+    )
+    .expect("write crew config with no system entry");
+    let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
+    (root, runtime)
 }
 
 #[test]
@@ -329,6 +356,104 @@ fn a_listed_but_uninvestigated_failure_is_not_filed_as_an_evidence_free_task() {
 
     assert_eq!(output["clusters"], json!(0));
     assert_eq!(output["outcome"], json!("no_current_failure"));
+}
+
+#[test]
+fn a_filed_task_title_carries_the_sweep_prefix_and_the_system_crew() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let log = "ci\ttest\t2026-08-30T01:00:00Z assertion failed: left == right\n";
+
+    let output = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            10,
+            "ci",
+            "test (ubuntu)",
+            "cargo test",
+            log,
+            CHECKOUT,
+        )])}),
+    );
+
+    let task_id = filed_task_ids(&output)
+        .first()
+        .cloned()
+        .expect("one filed task");
+    let task = runtime.get_task(&task_id).expect("read filed task");
+
+    assert!(
+        task.title
+            .starts_with("[ci-failure-sweep] Fix red CI: ci / test (ubuntu) / cargo test"),
+        "title must carry the sweep prefix followed by the existing rendering: {}",
+        task.title
+    );
+    assert_eq!(task.crew.as_deref(), Some("system"));
+}
+
+#[test]
+fn an_over_long_cluster_yields_an_intact_prefix_within_the_existing_bound() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let long_workflow = "w".repeat(300);
+    let log = "ci\tbuild\t2026-08-30T01:00:00Z error: boom\n";
+
+    let output = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            10,
+            &long_workflow,
+            "build",
+            "cargo build",
+            log,
+            CHECKOUT,
+        )])}),
+    );
+
+    let task_id = filed_task_ids(&output)
+        .first()
+        .cloned()
+        .expect("one filed task");
+    let task = runtime.get_task(&task_id).expect("read filed task");
+
+    assert!(
+        task.title.starts_with("[ci-failure-sweep] Fix red CI: "),
+        "prefix must survive truncation intact: {}",
+        task.title
+    );
+    assert!(
+        task.title.chars().count() <= 121,
+        "title must still respect the existing length bound: {} chars",
+        task.title.chars().count()
+    );
+}
+
+#[test]
+fn filing_still_succeeds_in_a_workspace_with_no_system_crew_entry() {
+    let (_root, runtime) = runtime_without_system_crew();
+    assert!(
+        runtime.validate_crew_name(Some("system")).is_err(),
+        "fixture must genuinely lack a resolvable system crew"
+    );
+    let log = "ci\tbuild\t2026-08-30T01:00:00Z error: expected 3 arguments, found 2\n";
+
+    let output = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            10,
+            "ci",
+            "build",
+            "cargo build",
+            log,
+            CHECKOUT,
+        )])}),
+    );
+
+    assert_eq!(output["outcome"], json!("current_failures"));
+    let task_id = filed_task_ids(&output)
+        .first()
+        .cloned()
+        .expect("filing still succeeds without a system crew");
+    let task = runtime.get_task(&task_id).expect("read filed task");
+    assert_eq!(task.crew, None);
 }
 
 #[test]
