@@ -1,4 +1,5 @@
-//! Crate-wide test isolation for process-global `HOME`/`USERPROFILE`/cwd.
+//! Crate-wide test isolation for process-global roots, `HOME`/`USERPROFILE`,
+//! and cwd.
 //!
 //! Workspace-init and the adjacent init/MCP-setup tests exercise
 //! [`WorkspaceInitArgs`](crate::command::workspace) and
@@ -48,6 +49,9 @@ pub(crate) struct EnvGuard {
     home: Option<Option<OsString>>,
     userprofile: Option<Option<OsString>>,
     orbit_root: Option<Option<OsString>>,
+    orbit_registry_root: Option<Option<OsString>>,
+    managed_run_context: Option<Option<OsString>>,
+    run_id: Option<Option<OsString>>,
     cwd: Option<PathBuf>,
     // Declared last so it drops last: the lock is held until every restoration
     // in `Drop` has run.
@@ -67,20 +71,44 @@ impl EnvGuard {
             home: None,
             userprofile: None,
             orbit_root: None,
+            orbit_registry_root: None,
+            managed_run_context: None,
+            run_id: None,
             cwd: None,
             _lock: lock,
         }
     }
 
+    /// Simulate the registry locator supplied to a trusted managed child.
+    ///
+    /// This exists for fixtures that must prove they remain isolated when the
+    /// test process itself is launched by a managed run. The marker and run id
+    /// are the trust boundary required for production registry-root precedence.
+    pub(crate) fn managed_registry_root(mut self, root: &Path) -> Self {
+        if self.orbit_registry_root.is_none() {
+            self.orbit_registry_root = Some(std::env::var_os("ORBIT_REGISTRY_ROOT"));
+        }
+        if self.managed_run_context.is_none() {
+            self.managed_run_context = Some(std::env::var_os("ORBIT_MANAGED_RUN_CONTEXT"));
+        }
+        if self.run_id.is_none() {
+            self.run_id = Some(std::env::var_os("ORBIT_RUN_ID"));
+        }
+        unsafe {
+            std::env::set_var("ORBIT_REGISTRY_ROOT", root);
+            std::env::set_var("ORBIT_MANAGED_RUN_CONTEXT", "1");
+            std::env::set_var("ORBIT_RUN_ID", "jrun-env-isolation");
+        }
+        self
+    }
+
     /// Point `HOME` and `USERPROFILE` at `home`, capturing the prior values the
     /// first time either is set.
     ///
-    /// Also clears `ORBIT_ROOT`, capturing its prior value: it is an explicit
-    /// escape hatch that outranks `HOME`/cwd-based root resolution (see
-    /// `orbit-core/src/runtime/resolve.rs`), so a process launched by Orbit's
-    /// own dispatch — which sets `ORBIT_ROOT` in the ambient environment for
-    /// audit bookkeeping — would otherwise resolve these tests' isolated
-    /// fixture root straight through to the real, non-isolated shared root.
+    /// Also clears `ORBIT_ROOT` and `ORBIT_REGISTRY_ROOT`, capturing their
+    /// prior values. The former is an explicit workspace-root escape hatch;
+    /// the latter selects a managed child's host registry. Either would
+    /// otherwise route an isolated fixture through real shared state.
     pub(crate) fn home(mut self, home: &Path) -> Self {
         if self.home.is_none() {
             self.home = Some(std::env::var_os("HOME"));
@@ -91,10 +119,14 @@ impl EnvGuard {
         if self.orbit_root.is_none() {
             self.orbit_root = Some(std::env::var_os("ORBIT_ROOT"));
         }
+        if self.orbit_registry_root.is_none() {
+            self.orbit_registry_root = Some(std::env::var_os("ORBIT_REGISTRY_ROOT"));
+        }
         unsafe {
             std::env::set_var("HOME", home);
             std::env::set_var("USERPROFILE", home);
             std::env::remove_var("ORBIT_ROOT");
+            std::env::remove_var("ORBIT_REGISTRY_ROOT");
         }
         self
     }
@@ -137,6 +169,15 @@ impl Drop for EnvGuard {
         }
         if let Some(previous) = self.orbit_root.take() {
             restore_var("ORBIT_ROOT", previous);
+        }
+        if let Some(previous) = self.orbit_registry_root.take() {
+            restore_var("ORBIT_REGISTRY_ROOT", previous);
+        }
+        if let Some(previous) = self.run_id.take() {
+            restore_var("ORBIT_RUN_ID", previous);
+        }
+        if let Some(previous) = self.managed_run_context.take() {
+            restore_var("ORBIT_MANAGED_RUN_CONTEXT", previous);
         }
     }
 }
