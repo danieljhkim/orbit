@@ -6,6 +6,14 @@ pub trait Sandbox {
     fn validate(&self, req: &ExecRequest) -> Result<(), OrbitError>;
 }
 
+/// A sandbox strategy that adds no Orbit-specific validation or containment.
+///
+/// `NoSandbox` controls only the sandbox selection made by
+/// [`run_process`](crate::run_process). It neither disables nor escapes an
+/// outer sandbox already imposed on the parent process. For example, child
+/// processes inherit macOS Seatbelt restrictions and Linux descendants inherit
+/// their Bubblewrap mount namespace. It is therefore not a host-side or
+/// credential boundary.
 #[derive(Debug, Default)]
 pub struct NoSandbox;
 

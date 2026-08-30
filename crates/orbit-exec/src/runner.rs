@@ -55,6 +55,14 @@ pub struct ExecRequest {
     pub debug: bool,
 }
 
+/// Run a process after applying the supplied Orbit sandbox strategy.
+///
+/// The strategy can add validation or containment before spawning the child.
+/// Passing [`NoSandbox`](crate::NoSandbox) applies no additional Orbit sandbox,
+/// but does not disable or escape any sandbox already imposed on this process.
+/// In particular, children inherit macOS Seatbelt restrictions and Linux
+/// descendants inherit the Bubblewrap mount namespace of an outer provider
+/// sandbox.
 pub fn run_process(
     req: &ExecRequest,
     sandbox: &dyn Sandbox,

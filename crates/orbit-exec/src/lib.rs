@@ -14,6 +14,11 @@
 //! controlled environments, optional sandboxing, and configurable timeouts.
 //! Results are captured and returned as [`ExecutionResult`] values.
 //!
+//! Sandbox selection in this crate can add an Orbit-controlled sandbox to a
+//! subprocess; it cannot escape containment already applied to the parent
+//! process. A child launched from a provider sandbox still inherits macOS
+//! Seatbelt restrictions or, on Linux, the Bubblewrap mount namespace.
+//!
 //! # Role
 //! Sits directly above `orbit-types` and is consumed by `orbit-tools`, which
 //! builds the builtin `proc.spawn` tool and other shell-invoking tools on top
@@ -23,7 +28,8 @@
 //! - [`run_process`] — primary entry point for spawning a subprocess
 //! - [`ExecRequest`] — builder-style description of the process to run
 //! - [`ExecutionResult`] — captured stdout/stderr, exit code, and duration
-//! - [`Sandbox`] / [`NoSandbox`] — sandbox strategy trait and no-op default
+//! - [`Sandbox`] / [`NoSandbox`] — sandbox strategy trait and strategy that
+//!   adds no additional Orbit sandbox
 //! - [`EnvironmentMode`], [`StdinMode`] — environment and stdin control
 //!
 //! # Dependency direction
