@@ -116,8 +116,8 @@ as absent; it never degrades into "fire with defaults".
 ### Seeded defaults and ownership
 
 `orbit workspace init` seeds `auto_task_scheduler.yaml`, `task_triage.yaml`,
-`task_pilot.yaml`, `ship_sweep.yaml`, and `worktree_gc.yaml` with a workspace-unique
-name, the resolved host pin, and
+`task_pilot.yaml`, `ship_sweep.yaml`, `worktree_gc.yaml`, and `ci_failure_sweep.yaml`
+with a workspace-unique name, the resolved host pin, and
 `enabled: false`. The definition's versioned `enabled` field is the opt-in: changing it
 to `true` deliberately grants that scheduled capability in the workspace.
 
@@ -136,6 +136,14 @@ unchanged content against the same host is a genuine no-op rather than a rewrite
 routine an operator has edited is never deleted: it is preserved under
 `.retired-managed/routines/`. `orbit doctor` reports routine artifacts as faulty,
 deprecated, or stale, and `orbit doctor --fix-stale-artifacts` performs the retirement.
+
+The seeded `ci_failure_sweep` targets `job:ci_failure_sweep_pipeline` hourly at
+`5 * * * *` — deliberately clear of the other defaults' minutes — with `missed_run: skip`
+and `overlap: forbid`. Its two deterministic steps run every GitHub query on the host and
+then file each current, non-stale failure cluster as an ordinary backlog bug task carrying
+that evidence inline, deduped against still-open tasks by failure key. The routine is a
+scheduling surface only: an operator-triggered run of the job behaves identically to a
+scheduled fire.
 
 The seeded `ship_sweep` targets `job:workspace_ship_pipeline` with `missed_run: skip` and
 `overlap: forbid`. The wrapper resolves the source runtime's ship mode and configured base

@@ -33,8 +33,16 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
     ),
     (
+        "collect_ci_evidence",
+        include_str!("../../assets/activities/collect_ci_evidence.yaml"),
+    ),
+    (
         "drain_window",
         include_str!("../../assets/activities/drain_window.yaml"),
+    ),
+    (
+        "file_ci_failure_tasks",
+        include_str!("../../assets/activities/file_ci_failure_tasks.yaml"),
     ),
     (
         "epic_orchestrator",

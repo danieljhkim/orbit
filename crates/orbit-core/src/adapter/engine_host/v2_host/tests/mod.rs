@@ -1,4 +1,5 @@
 mod backlog_exclusion;
+mod ci_failure_tasks;
 mod ci_remediation;
 mod cli_executor;
 mod dispatch;

@@ -1,0 +1,720 @@
+//! `file_ci_failure_tasks` — turn one CI evidence snapshot into ordinary
+//! backlog tasks.
+//!
+//! The snapshot arrives from the host-owned `collect_ci_evidence` step, which
+//! ran `gh` outside any agent sandbox. Everything below is a pure function of
+//! that JSON plus the workspace's open tasks: cluster the current failures by
+//! root cause, drop the clusters a still-open task already covers, and file
+//! what is left as `backlog` bug tasks whose descriptions carry the evidence
+//! inline.
+//!
+//! A filed task is deliberately unremarkable. It ships through the existing
+//! task PR pipeline with the ordinary agent baseline and no `required_tools`:
+//! the agent never has to query GitHub, because the answer is already in the
+//! description. Verification needs no new stage either — the fix opens a normal
+//! PR, CI runs on it, and if the failure is still current the next sweep sees
+//! it again.
+//!
+//! # Two keys, on purpose
+//!
+//! `cluster_key` includes the commit the runner actually tested, so one
+//! regression observed across a push run and a pull-request run of the *same*
+//! commit collapses into one task instead of two.
+//!
+//! `failure_key` — the dedupe tag — deliberately omits the commit. The sweep is
+//! hourly and a fix takes longer than that; keying dedupe on the commit would
+//! file the same root cause again every time the branch advanced, which is the
+//! backlog flood this step exists to prevent.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use orbit_common::OrbitError;
+use orbit_types::task::{TaskComplexity, TaskPriority, TaskStatus, TaskType};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+
+use crate::OrbitRuntime;
+use crate::application::task::TaskAddParams;
+
+/// Wire contract with `collect_ci_evidence` (`orbit-engine`'s
+/// `executor::automation::ci`), also stated in both activity assets' schemas.
+/// The three endings must never collapse into one another, and none of them is
+/// a CI pass.
+const OUTCOME_CAPABILITY_UNAVAILABLE: &str = "capability_unavailable";
+const OUTCOME_NO_CURRENT_FAILURE: &str = "no_current_failure";
+const OUTCOME_CURRENT_FAILURES: &str = "current_failures";
+
+/// Snapshot schema this step knows how to read.
+const SUPPORTED_SCHEMA_VERSION: u64 = 1;
+
+/// Provenance tag: every task this step files carries it.
+pub(crate) const CI_FAILURE_TAG: &str = "ci-failure-sweep";
+/// Prefix of the dedupe tag, completed by the failure key.
+pub(crate) const CI_FAILURE_KEY_TAG_PREFIX: &str = "ci-failure:";
+
+const DEFAULT_MAX_TASKS: u64 = 5;
+const MAX_MAX_TASKS: u64 = 20;
+/// Hex characters of the signature digest kept in a tag. Full-width digests
+/// make a tag unreadable in a task list; this is a dedupe key, not a security
+/// boundary.
+const KEY_LEN: usize = 16;
+/// Log bytes carried into a task description. `collect_ci_evidence` has already
+/// bounded and redacted the excerpt; this is a second, tighter bound so a
+/// description stays a readable brief.
+const DESCRIPTION_LOG_BYTES: usize = 4_000;
+/// Runs listed per cluster in the description.
+const MAX_LISTED_RUNS: usize = 6;
+
+pub(crate) fn file_ci_failure_tasks(
+    runtime: &OrbitRuntime,
+    input: &Value,
+) -> Result<Value, OrbitError> {
+    let evidence = input.get("ci_evidence").ok_or_else(|| {
+        OrbitError::InvalidInput(
+            "file_ci_failure_tasks requires the `ci_evidence` snapshot produced by \
+             collect_ci_evidence"
+                .to_string(),
+        )
+    })?;
+    if !evidence.is_object() {
+        return Err(OrbitError::InvalidInput(
+            "file_ci_failure_tasks requires `ci_evidence` to be the snapshot object".to_string(),
+        ));
+    }
+    let schema_version = evidence
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(SUPPORTED_SCHEMA_VERSION);
+    if schema_version > SUPPORTED_SCHEMA_VERSION {
+        return Err(OrbitError::InvalidInput(format!(
+            "ci_evidence schema version {schema_version} is newer than the supported version \
+             {SUPPORTED_SCHEMA_VERSION}; refusing to file tasks from a snapshot this step \
+             cannot read"
+        )));
+    }
+    let capability = evidence.get("capability").cloned().unwrap_or(Value::Null);
+
+    // The collection stage could not look. Every list below would be empty and
+    // would read exactly like "nothing is failing" — a conclusion that needs
+    // queries this host never ran.
+    if evidence.get("collected").and_then(Value::as_bool) != Some(true) {
+        return Ok(json!({
+            "outcome": OUTCOME_CAPABILITY_UNAVAILABLE,
+            "capability": capability,
+            "clusters": 0,
+            "filed_count": 0,
+            "filed": [],
+            "skipped_existing": [],
+            "skipped_over_cap": [],
+            "detail": "no CI evidence was gathered, so no task was filed; this is not a CI pass",
+        }));
+    }
+
+    let max_tasks = bounded_u64(input, "max_tasks", DEFAULT_MAX_TASKS, MAX_MAX_TASKS)? as usize;
+    let failures = evidence
+        .get("current_failures")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let clusters = cluster_failures(&failures);
+
+    if clusters.is_empty() {
+        return Ok(json!({
+            "outcome": OUTCOME_NO_CURRENT_FAILURE,
+            "capability": capability,
+            "clusters": 0,
+            "filed_count": 0,
+            "filed": [],
+            "skipped_existing": [],
+            "skipped_over_cap": [],
+            "detail": "the queries ran and found no current, non-superseded failure",
+        }));
+    }
+
+    let mut filed = Vec::new();
+    let mut skipped_existing = Vec::new();
+    let mut skipped_over_cap = Vec::new();
+    // Two clusters in one snapshot can share a failure key when the same root
+    // cause was tested at two commits. The first filing closes the second.
+    let mut filed_keys: BTreeSet<String> = BTreeSet::new();
+
+    for cluster in &clusters {
+        if let Some(task_id) = open_task_for_key(runtime, &cluster.failure_key)? {
+            skipped_existing.push(json!({
+                "failure_key": cluster.failure_key,
+                "cluster_key": cluster.cluster_key,
+                "task_id": task_id,
+                "workflow": cluster.workflow,
+            }));
+            continue;
+        }
+        if filed_keys.contains(&cluster.failure_key) {
+            skipped_existing.push(json!({
+                "failure_key": cluster.failure_key,
+                "cluster_key": cluster.cluster_key,
+                "task_id": filed
+                    .iter()
+                    .find(|entry: &&Value| entry["failure_key"] == json!(cluster.failure_key))
+                    .and_then(|entry| entry["task_id"].as_str())
+                    .unwrap_or_default(),
+                "workflow": cluster.workflow,
+            }));
+            continue;
+        }
+        if filed.len() >= max_tasks {
+            skipped_over_cap.push(json!({
+                "failure_key": cluster.failure_key,
+                "workflow": cluster.workflow,
+                "job": cluster.job,
+                "run_urls": cluster.run_urls(),
+            }));
+            continue;
+        }
+
+        let task = runtime.add_task(TaskAddParams {
+            title: cluster.title(),
+            description: cluster.description(evidence),
+            acceptance_criteria: cluster.acceptance_criteria(),
+            tags: vec![
+                CI_FAILURE_TAG.to_string(),
+                format!("{CI_FAILURE_KEY_TAG_PREFIX}{}", cluster.failure_key),
+                "github-actions".to_string(),
+            ],
+            // Deliberately empty: the evidence is already in the description,
+            // so the task ships on the ordinary agent baseline.
+            required_tools: Vec::new(),
+            priority: TaskPriority::High,
+            complexity: TaskComplexity::Unassessed,
+            task_type: Some(TaskType::Bug),
+            status: Some(TaskStatus::Backlog),
+            system_created: true,
+            ..TaskAddParams::default()
+        })?;
+        filed_keys.insert(cluster.failure_key.clone());
+        filed.push(json!({
+            "task_id": task.id,
+            "failure_key": cluster.failure_key,
+            "cluster_key": cluster.cluster_key,
+            "workflow": cluster.workflow,
+            "job": cluster.job,
+            "step": cluster.step,
+            "tested_commit": cluster.tested_commit,
+            "run_urls": cluster.run_urls(),
+        }));
+    }
+
+    Ok(json!({
+        "outcome": OUTCOME_CURRENT_FAILURES,
+        "capability": capability,
+        "clusters": clusters.len(),
+        "filed_count": filed.len(),
+        "filed": filed,
+        "skipped_existing": skipped_existing,
+        "skipped_over_cap": skipped_over_cap,
+        "max_tasks": max_tasks,
+    }))
+}
+
+/// One root cause, with every current run that exhibited it.
+struct FailureCluster {
+    /// Dedupe identity across sweeps: workflow, failing job, failing step, and
+    /// normalized error signature. Commit-independent by design.
+    failure_key: String,
+    /// Grouping identity within one snapshot: `failure_key` plus the commit the
+    /// runner actually tested.
+    cluster_key: String,
+    workflow: String,
+    job: String,
+    step: String,
+    tested_commit: String,
+    signature: String,
+    log_excerpt: String,
+    log_truncated: bool,
+    runs: Vec<Value>,
+}
+
+impl FailureCluster {
+    fn run_urls(&self) -> Vec<String> {
+        self.runs
+            .iter()
+            .filter_map(|run| run.get("url").and_then(Value::as_str))
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    fn title(&self) -> String {
+        let where_ = match (self.job.as_str(), self.step.as_str()) {
+            ("", "") => self.workflow.clone(),
+            (job, "") => format!("{} / {job}", self.workflow),
+            ("", step) => format!("{} / {step}", self.workflow),
+            (job, step) => format!("{} / {job} / {step}", self.workflow),
+        };
+        truncate_chars(&format!("Fix red CI: {where_}"), 120)
+    }
+
+    fn acceptance_criteria(&self) -> Vec<String> {
+        vec![
+            format!(
+                "The root cause of the `{}` failure recorded below is fixed in this repository; \
+                 the workflow, assertion, or lint level is not disabled, weakened, or made \
+                 non-blocking to obtain green.",
+                self.workflow
+            ),
+            "The exact command or narrowest faithful local equivalent that failed on the runner \
+             is reproduced and then passes locally."
+                .to_string(),
+            "The repository's documented pre-handoff gate passes.".to_string(),
+            "If the failure turns out to be infrastructure rather than repository-owned, the \
+             execution summary cites concrete evidence for that (a same-commit retry that \
+             succeeded, or runner/service fault output) rather than a single non-reproduction."
+                .to_string(),
+        ]
+    }
+
+    /// Render the evidence a remediation agent needs, inline.
+    ///
+    /// This is the whole point of the sweep: the agent that picks this task up
+    /// cannot reach GitHub, so anything absent here is unavailable to it.
+    fn description(&self, evidence: &Value) -> String {
+        let mut out = String::new();
+        out.push_str(
+            "This task was filed automatically from a host-side sweep of this repository's \
+             GitHub Actions runs. Every CI query ran on the host before this task existed, so \
+             the evidence below is all of it — the execution lane for this task cannot reach \
+             GitHub, and it is not expected to.\n\n",
+        );
+
+        out.push_str("## Failure\n\n");
+        out.push_str(&format!("- Workflow: `{}`\n", display(&self.workflow)));
+        out.push_str(&format!("- Failing job: `{}`\n", display(&self.job)));
+        out.push_str(&format!("- Failing step: `{}`\n", display(&self.step)));
+        out.push_str(&format!(
+            "- Commit the runner actually checked out: `{}`\n",
+            display(&self.tested_commit)
+        ));
+        out.push_str(&format!(
+            "- Normalized error signature (the dedupe identity, not a quote): `{}`\n",
+            display(&self.signature)
+        ));
+        if let Some(repository) = evidence.get("repository").and_then(Value::as_object) {
+            if let Some(full_name) = repository.get("full_name").and_then(Value::as_str) {
+                out.push_str(&format!("- Repository: `{full_name}`\n"));
+            }
+            if let Some(default_branch) = repository.get("default_branch").and_then(Value::as_str) {
+                out.push_str(&format!(
+                    "- Release branch as GitHub reports it: `{default_branch}`\n"
+                ));
+            }
+        }
+        if let Some(collected_at) = evidence.get("collected_at").and_then(Value::as_str) {
+            out.push_str(&format!("- Evidence collected at: {collected_at}\n"));
+        }
+
+        out.push_str("\n## Runs exhibiting this failure\n\n");
+        out.push_str(
+            "Three commits are routinely conflated and are kept apart here: the SHA the \
+             workflow event reported, the SHA the ref points at now, and the commit the runner \
+             actually checked out. A pull-request merge SHA is not a pull-request head SHA.\n\n",
+        );
+        for run in self.runs.iter().take(MAX_LISTED_RUNS) {
+            out.push_str(&render_run(run));
+        }
+        if self.runs.len() > MAX_LISTED_RUNS {
+            out.push_str(&format!(
+                "\n_{} further run(s) in this cluster are not listed._\n",
+                self.runs.len() - MAX_LISTED_RUNS
+            ));
+        }
+
+        out.push_str("\n## Failed-step log excerpt\n\n");
+        if self.log_excerpt.trim().is_empty() {
+            out.push_str(
+                "_No log excerpt was captured for this cluster. Reproduce the failing job's \
+                 command locally instead of guessing from the step name._\n",
+            );
+        } else {
+            out.push_str("```\n");
+            out.push_str(&truncate_bytes(&self.log_excerpt, DESCRIPTION_LOG_BYTES));
+            out.push_str("\n```\n");
+            if self.log_truncated {
+                out.push_str(
+                    "\n_The excerpt above was truncated at collection. Head and tail are kept; \
+                     the omitted region is marked inline._\n",
+                );
+            }
+        }
+
+        let stale = self.stale_evidence(evidence);
+        if !stale.is_empty() {
+            out.push_str("\n## Stale or superseded runs of this workflow\n\n");
+            out.push_str(
+                "These are already excluded from the failure above. They are listed so the \
+                 repair is not attributed to a run that no longer reflects the current head.\n\n",
+            );
+            for entry in &stale {
+                out.push_str(&format!(
+                    "- `{}` run {} — {}: {}\n",
+                    display(&value_string(entry, "workflow")),
+                    display(&value_string(entry, "url")),
+                    display(&value_string(entry, "reason")),
+                    display(&value_string(entry, "evidence")),
+                ));
+            }
+        }
+
+        if let Some(truncation) = evidence.get("truncation") {
+            out.push_str("\n## Collection bounds\n\n");
+            out.push_str(
+                "Reported so \"no more failures\" is never mistaken for \"we stopped \
+                 looking\".\n\n",
+            );
+            out.push_str("```json\n");
+            out.push_str(&truncate_bytes(
+                &serde_json::to_string_pretty(truncation).unwrap_or_default(),
+                2_000,
+            ));
+            out.push_str("\n```\n");
+        }
+
+        let query_errors = evidence
+            .get("query_errors")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if !query_errors.is_empty() {
+            out.push_str("\n## Queries that failed during collection\n\n");
+            for error in query_errors {
+                out.push_str(&format!("- {}\n", truncate_chars(&error.to_string(), 300)));
+            }
+        }
+
+        out.push_str(
+            "\n## How to finish\n\n\
+             Reproduce the failure at the current repository head using the exact command or \
+             the narrowest faithful local equivalent, fix the repository-owned cause, and rerun \
+             that command. Do not disable a workflow, weaken an assertion or lint level, add a \
+             broad allow rule, or mark a failing gate non-blocking. Then run the repository's \
+             documented pre-handoff gate. Verification happens on this task's own pull request: \
+             CI runs there normally, and if the failure is still current the next sweep will see \
+             it again.\n",
+        );
+        out
+    }
+
+    /// Stale/superseded runs of the same workflow, so the description can say
+    /// why they were excluded rather than leaving them unexplained.
+    fn stale_evidence(&self, evidence: &Value) -> Vec<Value> {
+        evidence
+            .get("stale_or_superseded")
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|entry| value_string(entry, "workflow") == self.workflow)
+                    .take(MAX_LISTED_RUNS)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+fn render_run(run: &Value) -> String {
+    let mut out = format!(
+        "- {} run `{}` ({} on `{}`)\n",
+        display(&value_string(run, "url")),
+        display(&value_string(run, "run_id")),
+        display(&value_string(run, "event")),
+        display(&value_string(run, "head_branch")),
+    );
+    out.push_str(&format!(
+        "  - event-reported head SHA: `{}`\n",
+        display(&value_string(run, "event_reported_head_sha"))
+    ));
+    out.push_str(&format!(
+        "  - current head of that ref: `{}`\n",
+        display(&value_string(run, "current_ref_head_sha"))
+    ));
+    let checkout = run
+        .get("actual_checkout_shas")
+        .and_then(Value::as_array)
+        .map(|shas| {
+            shas.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    out.push_str(&format!(
+        "  - commit actually checked out: `{}`\n",
+        display(&checkout)
+    ));
+    if let Some(pr) = run.get("pr_number").and_then(Value::as_u64) {
+        out.push_str(&format!("  - pull request: #{pr}\n"));
+    }
+    for line in run
+        .get("checkout_evidence")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .take(3)
+    {
+        out.push_str(&format!(
+            "  - checkout evidence: `{}`\n",
+            truncate_chars(line, 200)
+        ));
+    }
+    out
+}
+
+/// Group current failures by root cause.
+///
+/// Preserves the order collection chose (integration head first, then release,
+/// then pull requests), so the filing cap spends itself on the heads that gate
+/// delivery.
+fn cluster_failures(failures: &[Value]) -> Vec<FailureCluster> {
+    let mut order: Vec<String> = Vec::new();
+    let mut grouped: BTreeMap<String, FailureCluster> = BTreeMap::new();
+
+    for failure in failures {
+        // A listed-but-uninvestigated failure carries no job, step, or log —
+        // only a run URL. Filing a task from it would produce a task whose
+        // evidence section is empty, which is worse than reporting it as an
+        // unfiled bound. `truncation` already names how many there were.
+        if failure.get("investigated").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let workflow = value_string(failure, "workflow");
+        let (job, step) = failing_job_and_step(failure);
+        let log_excerpt = value_string(failure, "log_excerpt");
+        let signature = error_signature(&log_excerpt, &step);
+        let tested_commit = tested_commit(failure);
+
+        let failure_key = digest(&[&workflow, &job, &step, &signature]);
+        let cluster_key = digest(&[&workflow, &job, &step, &signature, &tested_commit]);
+
+        let cluster = grouped.entry(cluster_key.clone()).or_insert_with(|| {
+            order.push(cluster_key.clone());
+            FailureCluster {
+                failure_key,
+                cluster_key: cluster_key.clone(),
+                workflow,
+                job,
+                step,
+                tested_commit,
+                signature,
+                log_excerpt,
+                log_truncated: failure
+                    .get("log_truncated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                runs: Vec::new(),
+            }
+        });
+        cluster.runs.push(failure.clone());
+    }
+
+    order
+        .into_iter()
+        .filter_map(|key| grouped.remove(&key))
+        .collect()
+}
+
+/// The first failing job and step named by the snapshot.
+fn failing_job_and_step(failure: &Value) -> (String, String) {
+    let Some(job) = failure
+        .get("failed_jobs")
+        .and_then(Value::as_array)
+        .and_then(|jobs| jobs.first())
+    else {
+        return (String::new(), String::new());
+    };
+    let step = job
+        .get("failed_steps")
+        .and_then(Value::as_array)
+        .and_then(|steps| steps.first())
+        .map(|step| value_string(step, "name"))
+        .unwrap_or_default();
+    (value_string(job, "name"), step)
+}
+
+/// The commit under test: what the runner checked out when that is evidenced,
+/// falling back to the SHA the event reported.
+fn tested_commit(failure: &Value) -> String {
+    failure
+        .get("actual_checkout_shas")
+        .and_then(Value::as_array)
+        .and_then(|shas| shas.first())
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value_string(failure, "event_reported_head_sha"))
+}
+
+/// Lines a runner emits when something breaks.
+const ERROR_MARKERS: &[&str] = &[
+    "error",
+    "failed",
+    "failure",
+    "panicked",
+    "assertion",
+    "exit code",
+    "not ok",
+    "fatal",
+];
+
+/// Reduce a failed-step log to one normalized line that survives a rerun.
+///
+/// Reruns of the same regression differ in timestamps, durations, run numbers,
+/// and paths under a run-specific temp directory. Normalizing those away is
+/// what lets an hourly sweep recognize the same root cause instead of filing it
+/// again every hour. With no marker line the step name alone is the signature —
+/// weaker, but stable, and still scoped by workflow and job.
+fn error_signature(log_excerpt: &str, step: &str) -> String {
+    for line in log_excerpt.lines() {
+        let payload = log_payload(line);
+        let lowered = payload.to_ascii_lowercase();
+        if ERROR_MARKERS.iter().any(|marker| lowered.contains(marker)) {
+            return normalize_signature(&lowered);
+        }
+    }
+    normalize_signature(&step.to_ascii_lowercase())
+}
+
+/// Strip the `job<TAB>step<TAB>timestamp ` columns a runner log carries.
+fn log_payload(line: &str) -> &str {
+    let mut columns = line.splitn(3, '\t');
+    let rest = match (columns.next(), columns.next(), columns.next()) {
+        (Some(_job), Some(_step), Some(rest)) => rest,
+        _ => line,
+    };
+    match rest.split_once(' ') {
+        Some((first, tail)) if first.contains('T') && first.ends_with('Z') => tail,
+        _ => rest,
+    }
+}
+
+/// Collapse the parts of a log line that vary between identical failures.
+fn normalize_signature(lowered: &str) -> String {
+    let mut out = String::with_capacity(lowered.len());
+    let mut chars = lowered.chars().peekable();
+    let mut last_was_space = false;
+    while let Some(ch) = chars.next() {
+        if ch.is_ascii_alphanumeric() {
+            let mut token = String::from(ch);
+            while chars.peek().is_some_and(char::is_ascii_alphanumeric) {
+                token.push(chars.next().unwrap_or_default());
+            }
+            let replacement = if token.chars().all(|c| c.is_ascii_digit()) {
+                "<n>"
+            } else if token.len() >= 7 && token.chars().all(|c| c.is_ascii_hexdigit()) {
+                "<hex>"
+            } else {
+                token.as_str()
+            };
+            out.push_str(replacement);
+            last_was_space = false;
+            continue;
+        }
+        if ch.is_whitespace() {
+            if !last_was_space {
+                out.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+        out.push(ch);
+        last_was_space = false;
+    }
+    truncate_chars(out.trim(), 200)
+}
+
+fn digest(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update([0u8]);
+    }
+    format!("{:x}", hasher.finalize())
+        .chars()
+        .take(KEY_LEN)
+        .collect()
+}
+
+/// The id of a still-open task already carrying this failure key, if any.
+fn open_task_for_key(
+    runtime: &OrbitRuntime,
+    failure_key: &str,
+) -> Result<Option<String>, OrbitError> {
+    let tag = format!("{CI_FAILURE_KEY_TAG_PREFIX}{failure_key}");
+    let tasks = runtime.list_tasks_by_tags(std::slice::from_ref(&tag))?;
+    Ok(tasks
+        .into_iter()
+        .find(|task| is_open_status(task.status))
+        .map(|task| task.id))
+}
+
+/// Statuses that count as "already being handled". Mirrors the auto-task
+/// `skip_if_open` rule: done, archived, and rejected are closed, and everything
+/// else is in flight.
+fn is_open_status(status: TaskStatus) -> bool {
+    !matches!(
+        status,
+        TaskStatus::Done | TaskStatus::Archived | TaskStatus::Rejected
+    )
+}
+
+fn bounded_u64(input: &Value, key: &str, default: u64, max: u64) -> Result<u64, OrbitError> {
+    let Some(value) = input.get(key).filter(|value| !value.is_null()) else {
+        return Ok(default);
+    };
+    let raw = match value {
+        Value::Number(number) => number.as_u64(),
+        Value::String(text) => text.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| OrbitError::InvalidInput(format!("input.{key} must be a positive integer")))?;
+    if raw == 0 {
+        return Err(OrbitError::InvalidInput(format!(
+            "input.{key} must be greater than zero"
+        )));
+    }
+    Ok(raw.min(max))
+}
+
+/// Read a snapshot field as a display string, accepting the numeric spellings
+/// `gh` uses for run and job identifiers.
+fn value_string(value: &Value, key: &str) -> String {
+    match value.get(key) {
+        Some(Value::String(text)) => text.trim().to_string(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn display(value: &str) -> &str {
+    if value.is_empty() { "unknown" } else { value }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    value.chars().take(max_chars).collect::<String>() + "…"
+}
+
+fn truncate_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n[... truncated at {max_bytes} B for the task description; the full excerpt is in \
+         the sweep run's step output ...]",
+        &value[..end]
+    )
+}

@@ -1,0 +1,66 @@
+# CI-failure sweep pipeline [ORB-11107].
+#
+# Two deterministic steps and nothing else. This pipeline looks and files; it
+# never repairs, so it launches no agent and builds no worktree.
+#
+# Shape
+# - `collect` (deterministic, host-owned): runs the GitHub capability preflight
+#   and every CI query on the host, outside any agent sandbox, and emits one
+#   bounded, redacted evidence snapshot. The credential never has to cross into
+#   a sandbox, because the looking happens before any task exists.
+# - `file` (deterministic): clusters the snapshot's current, non-stale failures
+#   by root cause and files each surviving cluster as an ordinary `backlog` bug
+#   task carrying that evidence inline. Filing is deduped against still-open
+#   tasks by failure key.
+#
+# Filed tasks are unremarkable: they ship through `task_pr_pipeline` on the
+# ordinary `agent_implement` baseline with no `required_tools`, because the
+# evidence they need is already in the description. Verification needs no extra
+# stage — the fix opens a normal pull request, CI runs on it, and if the failure
+# is still current the next sweep observes it again.
+#
+# Empty and unavailable behavior
+# - No current failure: `file` reports `no_current_failure` and the run succeeds
+#   having created nothing — a clean no-op, the same contract as
+#   `task_auto_pipeline` on an empty backlog.
+# - No GitHub client or no credentials on this host: `collect` reports
+#   `capability_unavailable` and `file` passes that through unchanged. That is
+#   never reported as a no-current-failure and is never a CI pass.
+#
+# Overlap safety
+# - `max_active_runs: 1` makes the sweep single-flight, and the seeded routine
+#   fires it with `policy.overlap: forbid`. A sweep that runs long therefore
+#   skips its next slot rather than double-filing, and the failure-key dedupe
+#   makes a repeat pass idempotent even if one somehow overlapped.
+
+schemaVersion: 2
+kind: Job
+metadata:
+  name: ci_failure_sweep_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 1
+  default_input:
+    # The branch this workspace ships onto. Empty means "use whatever GitHub
+    # reports as this repository's default branch", which is right for a
+    # workspace that ships onto its default branch and wrong for one that
+    # ships onto a separate integration branch — set it in the workspace copy
+    # of this job when they differ, the same way `task_pr_pipeline` carries
+    # `base_branch`.
+    integration_branch: ""
+    max_tasks: 5
+    max_investigated_runs: 6
+
+  steps:
+    - id: collect
+      target: activity:collect_ci_evidence
+      default_input:
+        integration_branch: "{{ input.integration_branch }}"
+        max_investigated_runs: "{{ input.max_investigated_runs }}"
+
+    - id: file
+      target: activity:file_ci_failure_tasks
+      default_input:
+        ci_evidence: "{{ steps.collect.output.ci_evidence }}"
+        max_tasks: "{{ input.max_tasks }}"
