@@ -1,11 +1,11 @@
 ---
 type: runbook
-summary: Locate Orbit state and perform WAL-safe backups, restores, and task migrations.
-tags: [operations, backup, restore, state, sqlite]
+summary: Locate Orbit state and perform WAL-safe backups, explicit task publication, restores, and task migrations.
+tags: [operations, backup, restore, state, sqlite, task-publication]
 paths: ["crates/orbit-common/src/types/workspace.rs", "crates/orbit-config/src/**", "crates/orbit-registry/**", "crates/orbit-store/**", "crates/orbit-web/src/state.rs"]
-related_features: [orbit-core, remote-access]
-related_artifacts: [ORB-10014, ORB-10294, ORB-10473]
-last_validated: 2026-08-15
+related_features: [orbit-core, remote-access, task-publication]
+related_artifacts: [ORB-10014, ORB-10294, ORB-10473, ORB-11077]
+last_validated: 2026-08-30
 ---
 
 # Inventory and Protect Orbit State
@@ -54,6 +54,7 @@ precedence). Path layout is defined in
 | `resources/activities/`, `resources/jobs/` | managed defaults plus operator-authored activity/job YAML; hidden manifests retain managed content provenance | mixed: current defaults are regenerable, but untracked YAML and `resources/.retired-managed/` backups are **authoritative until reviewed** |
 | other `resources/`, `skills/` | default executor/policy defs and skills | regenerable (`orbit init` reseeds) |
 | `state/logs/orbit.jsonl` (+ rotated archives) | unified JSONL log sink for all Orbit processes | disposable |
+| `state/task-publication/` | private Git object/work-tree caches plus pending-push reconciliation records | regenerable after a cleanly recorded success; retain during push-success/local-record recovery |
 | `embed/` | semantic-search companion binary + models | regenerable (`orbit semantic install`) |
 | `bin/` | installed Orbit binary (when installed via `install.sh`) | reinstallable |
 
@@ -152,6 +153,97 @@ orbit task export --all -o tasks-backup.tar.zst
 
 Both `VACUUM INTO` and `.backup` produce a checkpointed, sidecar-free file. If you must
 file-copy a live DB, copy `*.db`, `*.db-wal`, and `*.db-shm` together.
+
+### Publish task snapshots to a dedicated repository
+
+Task publication is an explicit, task-only durability channel. It does not
+replace the global-root/database backup above: audit events, run history,
+claims, reservations, configuration, host identity, and runtime caches are not
+published. No task mutation publishes automatically, and v1 seeds no publication
+routine. A future routine trigger must be configured separately.
+
+Provision one empty, dedicated Git repository for the workspace. Configure its
+visibility, collaborators, retention, branch protection, and credentials with
+the Git provider. Orbit's generic Git surface always reports privacy as
+`operator-managed`; it cannot prove that a repository is private or that deleted
+history was erased.
+
+From the declared owner checkout (or with the global `--workspace <selector>`):
+
+```sh
+orbit workspace publication bind \
+  --remote ssh://git.example.com/backups/orbit-tasks.git \
+  --publication-id pub_orbit_primary
+
+orbit workspace publication show --json
+orbit task publication publish --attachments fail --json
+orbit task publication status --json
+```
+
+`bind`, `publish`, and `status` use the selected workspace; a replica, missing
+owner/source identity, credential-bearing URL, publication/source remote reuse,
+or stale lineage fails closed. Replacing a lineage is explicit with `workspace
+publication rebind`. Removing local binding state requires `workspace
+publication remove --confirm` and never deletes or rewrites the repository.
+
+The default attachment policy is `fail`. `omit` publishes core task records and
+an omission ledger, so inspection and restore report an incomplete snapshot.
+`include` enforces per-file/total limits and built-in plus operator deny patterns.
+Because v1 has no sensitivity-scanner integration, attached bytes still fail
+unless the operator deliberately adds `--allow-unscanned-attachments`. A Git
+history that ever received a secret requires provider-side history remediation
+and credential rotation; deleting the latest file is not erasure.
+
+Publication uses an Orbit-owned cache and never checks out, switches, stages, or
+changes a source-worktree branch. A moved publication branch is an authority
+conflict: Orbit neither merges nor force-pushes it. Resolve the unexpected writer
+or binding before publishing again.
+
+### Inspect and deliberately recover a publication
+
+Inspection is read-only and does not require an owner-local publication binding.
+Supply the expected pairing facts rather than trusting the repository to declare
+its own identity:
+
+```sh
+orbit --workspace <local-consumer-workspace> task publication inspect \
+  --workspace-id ws_orbit \
+  --source-remote ssh://git.example.com/team/orbit.git \
+  --publication-id pub_orbit_primary \
+  --authority-machine-id hm_example \
+  --remote ssh://git.example.com/backups/orbit-tasks.git \
+  --json
+```
+
+The result labels every record with publication time, generation, workspace,
+source identity, authority, publication ID, commit, freshness, completeness, and
+`render_authority: snapshot`. It is not live owner state. Pairing mismatch,
+unsupported schema, corrupt JSONL, changed bundle/attachment bytes, or invalid
+Git lineage returns no trusted task projection.
+
+Restore the global configuration and `host.toml`/`workspaces.json` authority
+evidence first. V1 has no authority-transfer command: the selected recovery
+workspace must be an owner checkout whose local `machine_id`, logical workspace
+ID, and source remote match the publication. Start with an empty canonical task
+destination:
+
+```sh
+orbit --workspace ws_orbit task publication restore \
+  --workspace-id ws_orbit \
+  --source-remote ssh://git.example.com/team/orbit.git \
+  --publication-id pub_orbit_primary \
+  --authority-machine-id hm_example \
+  --remote ssh://git.example.com/backups/orbit-tasks.git \
+  --confirm --json
+```
+
+The confirmation is mandatory. The default refuses any non-empty destination.
+For an interrupted or repeated recovery, `--allow-identical-retry` admits only
+byte-identical task-ID collisions; one non-identical collision aborts the whole
+restore without renumbering or partial replacement. The result names restored
+and already-present IDs, projection repair state, every omitted attachment, and
+`complete` versus `incomplete-attachments`. Use ordinary `task export/import`
+with renumbering for migration between unrelated authorities instead.
 
 ## Restore Orbit
 

@@ -979,6 +979,37 @@ fn bind_workspace_is_idempotent_for_orbit_dir() {
 }
 
 #[test]
+fn publication_fingerprint_is_adopted_once_and_then_fails_closed() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = store(&temp);
+    let workspace = bind(&store, temp.path());
+    assert_eq!(
+        store
+            .find_workspace_binding(&workspace.workspace_id)
+            .expect("find workspace")
+            .expect("workspace")
+            .repo_fingerprint,
+        None
+    );
+
+    let recorded = store
+        .record_workspace_repo_fingerprint(&workspace.workspace_id, "ssh://source.test/orbit.git")
+        .expect("record fingerprint");
+    assert_eq!(
+        recorded.repo_fingerprint.as_deref(),
+        Some("ssh://source.test/orbit.git")
+    );
+    store
+        .record_workspace_repo_fingerprint(&workspace.workspace_id, "ssh://source.test/orbit.git")
+        .expect("idempotent recording");
+
+    let error = store
+        .record_workspace_repo_fingerprint(&workspace.workspace_id, "ssh://source.test/other.git")
+        .expect_err("mismatch must fail");
+    assert!(error.to_string().contains("different source-repository"));
+}
+
+#[test]
 fn bind_workspace_rebinds_same_checkout_under_a_new_orbit_dir() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);

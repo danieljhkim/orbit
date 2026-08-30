@@ -11,6 +11,7 @@ use super::import::TaskImportArgs;
 use super::lifecycle::{TaskArchiveArgs, TaskStartArgs};
 use super::lint::TaskLintArgs;
 use super::list::TaskListArgs;
+use super::publication::TaskPublicationCommand;
 use super::reindex::TaskReindexArgs;
 use super::show::TaskShowArgs;
 use super::update::TaskUpdateArgs;
@@ -54,6 +55,8 @@ pub enum TaskSubcommand {
     Export(TaskExportArgs),
     /// Import task bundles from a tar.zst archive
     Import(TaskImportArgs),
+    /// Publish, inspect, diagnose, or deliberately restore task snapshots
+    Publication(TaskPublicationCommand),
     /// Rebuild the registry index from on-disk task bundles
     Reindex(TaskReindexArgs),
 }
@@ -72,6 +75,7 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Archive(args) => args.execute(runtime),
             TaskSubcommand::Export(args) => args.execute(runtime),
             TaskSubcommand::Import(args) => args.execute(runtime),
+            TaskSubcommand::Publication(command) => command.execute(runtime),
             TaskSubcommand::Reindex(args) => args.execute(runtime),
         }
     }

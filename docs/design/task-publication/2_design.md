@@ -3,27 +3,26 @@ title: Task Publication — Design
 owner: codex
 last_updated: 2026-08-30
 last_validated: 2026-08-30
-status: Draft
+status: Accepted
 feature: task-publication
 doc_role: design
 type: design
-summary: Proposed contract for publishing validated task snapshots to a dedicated private repository without creating a second mutation authority.
+summary: Shipped contract for explicit owner publication, labelled inspection, and deliberate same-authority task recovery.
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
-related_artifacts: [ORB-11068, ORB-11074]
+related_artifacts: [ORB-11068, ORB-11072, ORB-11073, ORB-11074, ORB-11075, ORB-11076, ORB-11077]
 ---
 
 # Task Publication — Design
 
-This document specifies the v1 publication protocol. Its implemented
-`orbit-store` primitives cover snapshot construction, owner-only Git transport,
-read-only inspection, and explicit same-authority recovery; entry-point wiring
-is tracked separately. V1 publishes one workspace's authority-owned task
-snapshots to one dedicated private Git repository for remote durability,
-read-only inspection, and explicit recovery. Multi-workspace aggregation,
-authority transfer, and multi-writer synchronization remain deferred to
-[3_vision.md](./3_vision.md).
+This document specifies the shipped v1 publication protocol. `orbit workspace
+publication` owns explicit binding lifecycle, while `orbit task publication`
+owns publish/status, read-only inspection, and deliberate same-authority
+recovery. V1 publishes one workspace's authority-owned task snapshots to one
+dedicated Git repository. Repository privacy remains operator-managed.
+Multi-workspace aggregation, unattended triggering, authority transfer, and
+multi-writer synchronization remain deferred to [3_vision.md](./3_vision.md).
 
 ## 1. Ownership Boundary
 
@@ -87,9 +86,38 @@ repository and creates the branch's root publication commit. A non-empty
 repository without a valid matching publication envelope is refused rather than
 adopted or overwritten.
 
+### 2.1 Operator surface
+
+The shipped command taxonomy keeps machine-local repository identity under the
+workspace noun and task content movement under the task noun:
+
+| Command | Contract |
+|---|---|
+| `orbit workspace publication bind` | Owner-only initial binding; refuses replicas, credential-bearing URLs, source-remote reuse, missing source identity, and duplicate lineage. |
+| `orbit workspace publication show` | Read-only local binding and last-success inspection; repository privacy is labelled `operator-managed`. |
+| `orbit workspace publication rebind` | Operator-governed explicit replacement; clears previous lineage success rather than drifting silently. |
+| `orbit workspace publication remove --confirm` | Removes only owner-local binding state and never changes the remote repository. |
+| `orbit task publication publish` | Operator-governed explicit validation and compare-and-swap publication; the attachment default is `fail`. |
+| `orbit task publication status` | Fetches and validates the branch after a recorded success, reporting `current` or `authority-conflict`; an unused binding reports `never-published`. |
+| `orbit task publication inspect` | Fetches explicit repository/pairing inputs into a consumer cache and returns task content labelled as snapshot state, never live state. |
+| `orbit task publication restore --confirm` | Requires an owner destination with matching machine, workspace, and source identity; defaults to an empty destination. `--allow-identical-retry` admits only byte-identical collisions. |
+
+The global `--workspace <selector>` chooses the binding, publisher, status, and
+restore destination. Consumer inspection instead requires every pairing input
+(`--workspace-id`, `--source-remote`, `--publication-id`,
+`--authority-machine-id`, `--remote`, and optional branch/commit), because a
+consumer need not hold an owner-local binding. Every command returns structured
+JSON through `--json` or `--format json`; human inspection lists identity,
+freshness, task IDs, and titles without dumping task prose. Remote diagnostics
+redact credentials and local paths.
+
+No task-publication MCP mutation is registered in v1. Omitting that surface
+keeps the owner, capability, workspace-selection, and destructive-operation
+checks centralized in the operator CLI until an MCP contract can preserve them.
+
 ## 3. Tree and Manifest Contract
 
-The proposed publication branch tree is:
+The publication branch tree is:
 
 ```text
 orbit-task-publication.yaml
@@ -137,10 +165,11 @@ detached snapshot self-describing during recovery.
 
 ## 4. Snapshot Construction
 
-Publication is an explicit operation that may also be invoked by an
-operator-configured routine. It is not part of task-write acknowledgement: a
-task update commits to the canonical local store even when the publication
-repository is unavailable.
+Publication is an explicit operator operation in v1. It is not part of
+task-write acknowledgement: a task update commits to the canonical local store
+even when the publication repository is unavailable. A future routine trigger
+must be separately configurable and invoke the same publication boundary; no
+post-task-write hook or seeded routine exists.
 
 The owner performs these phases:
 
@@ -314,11 +343,20 @@ deleting the current tree erased the data.
   multi-writer design.
 - Source-repository moves may require an explicit fingerprint rebind even when
   the logical workspace is unchanged.
+- V1 has no sensitivity-scanner integration. `include` therefore refuses an
+  attachment unless the operator deliberately passes
+  `--allow-unscanned-attachments`; size limits and built-in plus operator deny
+  patterns still apply. `fail` remains the default and `omit` records incomplete
+  recovery state.
+- The operator CLI is the only mutation surface. MCP publication/restore,
+  authority transfer, multi-writer sync, and a separately configured routine
+  trigger are deferred.
 
 ## Task References
 
 - [ORB-11068] — specified the proposed dedicated private task-publication repository protocol.
 - [ORB-11074] — implemented the owner-only Git compare-and-swap publication transport.
 - [ORB-11076] — implemented fail-closed same-authority publication restore with rollback.
+- [ORB-11077] — shipped binding, publish/status, inspect/restore CLI contracts and network-free end-to-end validation.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

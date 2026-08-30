@@ -342,6 +342,58 @@ impl TaskRegistryStore {
         Ok(binding)
     }
 
+    /// Record the portable source-repository identity when an existing
+    /// workspace first enables a workflow that requires it.
+    ///
+    /// Ordinary task-runtime bootstrap deliberately does not infer remote
+    /// identity. Explicit publication binding supplies the registry-validated
+    /// value instead. Once recorded, a different value is a pairing conflict,
+    /// never an implicit source move.
+    pub fn record_workspace_repo_fingerprint(
+        &self,
+        workspace_id: &str,
+        repo_fingerprint: &str,
+    ) -> Result<WorkspaceBinding, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        if repo_fingerprint.trim() != repo_fingerprint || repo_fingerprint.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "workspace repository fingerprint must be non-empty and trimmed".to_string(),
+            ));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| OrbitError::Store(format!("mutex poisoned: {error}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let existing = workspace_by_id(&tx, &workspace_id)?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, workspace_id.clone()))?;
+        match existing.repo_fingerprint.as_deref() {
+            Some(current) if current == repo_fingerprint => {}
+            Some(_) => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "workspace '{workspace_id}' is registered with a different source-repository fingerprint"
+                )));
+            }
+            None => {
+                tx.execute(
+                    "UPDATE workspace_bindings
+                     SET repo_fingerprint = ?2, updated_at = ?3
+                     WHERE workspace_id = ?1",
+                    params![workspace_id, repo_fingerprint, now_string()],
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            }
+        }
+        let binding = workspace_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read fingerprinted workspace binding".to_string())
+        })?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(binding)
+    }
+
     /// Allocate a monotonic local task ID.
     ///
     /// Allocation commits independently from bundle registration. A crash between
