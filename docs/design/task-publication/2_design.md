@@ -11,7 +11,7 @@ summary: Shipped contract for explicit owner publication, labelled inspection, a
 tags: [task-publication, task-artifacts, backup, git, multi-host]
 paths: ["crates/orbit-store/src/workflow/task/**", "crates/orbit-registry/**"]
 related_features: [task-publication, task-artifacts, remote-access, federated-mcp, host-registry]
-related_artifacts: [ORB-11068, ORB-11072, ORB-11073, ORB-11074, ORB-11075, ORB-11076, ORB-11077]
+related_artifacts: [ORB-11068, ORB-11072, ORB-11073, ORB-11074, ORB-11075, ORB-11076, ORB-11077, ORB-11110]
 ---
 
 # Task Publication — Design
@@ -187,7 +187,11 @@ The owner performs these phases:
 6. Build and commit the snapshot inside the private publication-repository
    cache. The source-code repository and its worktree are never checked out,
    switched, staged, or dirtied by publication.
-7. Push the new commit as a normal fast-forward update to the configured branch.
+7. Push the new commit as an exact compare-and-swap of the observed tip onto
+   the configured branch. The update succeeds only when that ref still names the
+   observed object, or is still absent after a verified empty-repository
+   initialization. The refspec is not force-prefixed, so a matching expected
+   object cannot replace non-fast-forward history.
 8. Record the successful generation and commit ID in owner-local publication
    state. Failed publication does not change the last-success record.
 
@@ -211,7 +215,11 @@ the same instant. A later publication converges on newer owner state.
 ## 5. Compare-and-Swap and Competing Writers
 
 The expected branch tip from phase 3 is load-bearing. The push must fail when
-the publication branch moved after it was fetched.
+the publication branch moved after it was fetched. Ordinary Git fast-forward is
+not that check: deleting or rewinding the branch after observation can still
+accept a descendant and recreate or advance the ref. The transport therefore
+compare-and-swaps the exact observed object ID, or requires the ref to stay
+absent when initialization observed an empty repository [ORB-11110].
 
 A non-fast-forward rejection means one of the following:
 
@@ -356,6 +364,7 @@ deleting the current tree erased the data.
 
 - [ORB-11068] — specified the proposed dedicated private task-publication repository protocol.
 - [ORB-11074] — implemented the owner-only Git compare-and-swap publication transport.
+- [ORB-11110] — publication push compare-and-swaps the exact observed object, so a deleted or rewound branch is an authority conflict rather than a recreate-or-advance.
 - [ORB-11076] — implemented fail-closed same-authority publication restore with rollback.
 - [ORB-11077] — shipped binding, publish/status, inspect/restore CLI contracts and network-free end-to-end validation.
 

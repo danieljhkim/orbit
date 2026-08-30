@@ -9,7 +9,16 @@ use std::path::{Path, PathBuf};
 use orbit_types::task::TASK_EVENTS_FILE_NAME;
 use tempfile::TempDir;
 
+use super::super::publish::{clear_before_push_hook, set_before_push_hook};
 use super::*;
+
+struct BeforePushGuard;
+
+impl Drop for BeforePushGuard {
+    fn drop(&mut self) {
+        clear_before_push_hook();
+    }
+}
 
 const FINGERPRINT: &str = "git@github.com:example/orbit-source.git";
 const AUTHORITY: &str = "hm_owner";
@@ -565,4 +574,179 @@ fn publication_never_touches_the_source_repository_or_canonical_state() {
         git(&fixture.source, &["diff", "--cached", "--name-status"]),
         before_index
     );
+}
+
+fn assert_authority_conflict(error: &str, observed: &str) {
+    assert!(
+        error.contains("resolve the publication authority"),
+        "{error}"
+    );
+    assert!(error.contains(observed), "{error}");
+}
+
+#[test]
+fn deleting_the_branch_after_observation_is_an_authority_conflict() {
+    let fixture = fixture("ws_publish_delete_race");
+    let first = publish_first(&fixture);
+    seed_task(&fixture, "ORB-00002");
+
+    let _guard = BeforePushGuard;
+    let remote = fixture.remote.clone();
+    set_before_push_hook(move || {
+        git(&remote, &["update-ref", "-d", BRANCH]);
+    });
+
+    let error = publish(&fixture, request(&fixture, 2, Some(&first)))
+        .unwrap_err()
+        .to_string();
+    assert_authority_conflict(&error, &first.commit_id);
+    assert!(error.contains("moved during publication"), "{error}");
+    assert!(fixture.remote_tip().is_none(), "{}", error);
+    assert!(fixture.remote_history().is_empty());
+}
+
+#[test]
+fn rewinding_the_branch_after_observation_is_an_authority_conflict() {
+    let fixture = fixture("ws_publish_rewind_race");
+    let first = publish_first(&fixture);
+    seed_task(&fixture, "ORB-00002");
+    let second = publish(&fixture, request(&fixture, 2, Some(&first))).expect("second");
+    seed_task(&fixture, "ORB-00003");
+
+    let _guard = BeforePushGuard;
+    let remote = fixture.remote.clone();
+    let rewind_to = first.commit_id.clone();
+    set_before_push_hook(move || {
+        git(&remote, &["update-ref", BRANCH, &rewind_to]);
+    });
+
+    let error = publish(&fixture, request(&fixture, 3, Some(&second)))
+        .unwrap_err()
+        .to_string();
+    assert_authority_conflict(&error, &second.commit_id);
+    assert!(error.contains("moved during publication"), "{error}");
+    assert_eq!(
+        fixture.remote_tip().as_deref(),
+        Some(first.commit_id.as_str())
+    );
+    assert_eq!(fixture.remote_history(), vec![first.commit_id.clone()]);
+}
+
+#[test]
+fn a_concurrent_fast_forward_after_observation_is_an_authority_conflict() {
+    let fixture = fixture("ws_publish_ff_race");
+    let first = publish_first(&fixture);
+    seed_task(&fixture, "ORB-00002");
+
+    let snapshot = external_snapshot(&fixture, "race-ff", 2, Some(&first.commit_id));
+    let _guard = BeforePushGuard;
+    let root = fixture.root.path().to_path_buf();
+    let remote = fixture.remote_str();
+    set_before_push_hook(move || {
+        let work = root.join("external-race-ff");
+        git(
+            root.as_path(),
+            &["clone", "--quiet", &remote, work.to_str().unwrap()],
+        );
+        replace_worktree(&work, &snapshot);
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "-m", "race-ff"]);
+        git(&work, &["push", "origin", &format!("HEAD:{BRANCH}")]);
+    });
+
+    let error = publish(&fixture, request(&fixture, 2, Some(&first)))
+        .unwrap_err()
+        .to_string();
+    assert_authority_conflict(&error, &first.commit_id);
+    let competing = fixture.remote_tip().expect("competing tip");
+    assert_ne!(competing, first.commit_id);
+    assert_eq!(fixture.remote_history().len(), 2);
+    let envelope = fixture.remote_file(&competing, PUBLICATION_ENVELOPE_FILE_NAME);
+    assert!(envelope.contains("generation: 2"), "{envelope}");
+}
+
+#[test]
+fn a_concurrent_divergent_update_after_observation_is_an_authority_conflict() {
+    let fixture = fixture("ws_publish_div_race");
+    let first = publish_first(&fixture);
+    seed_task(&fixture, "ORB-00002");
+
+    let snapshot = external_snapshot(&fixture, "race-div", 1, None);
+    let _guard = BeforePushGuard;
+    let root = fixture.root.path().to_path_buf();
+    let remote = fixture.remote_str();
+    set_before_push_hook(move || {
+        let work = root.join("external-race-div");
+        git(
+            root.as_path(),
+            &["clone", "--quiet", &remote, work.to_str().unwrap()],
+        );
+        replace_worktree(&work, &snapshot);
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "--amend", "--no-edit"]);
+        git(
+            &work,
+            &["push", "--force", "origin", &format!("HEAD:{BRANCH}")],
+        );
+    });
+
+    let error = publish(&fixture, request(&fixture, 2, Some(&first)))
+        .unwrap_err()
+        .to_string();
+    assert_authority_conflict(&error, &first.commit_id);
+    let competing = fixture.remote_tip().expect("divergent tip");
+    assert_ne!(competing, first.commit_id);
+    assert_eq!(fixture.remote_history().len(), 1);
+}
+
+#[test]
+fn an_unchanged_expected_tip_still_advances_without_rewriting_history() {
+    let fixture = fixture("ws_publish_cas_advance");
+    let first = publish_first(&fixture);
+    seed_task(&fixture, "ORB-00002");
+
+    let _guard = BeforePushGuard;
+    set_before_push_hook(|| {});
+
+    let second = publish(&fixture, request(&fixture, 2, Some(&first))).expect("cas advance");
+    assert_eq!(second.status, PublicationPublishStatus::Advanced);
+    assert_eq!(
+        second.observed_tip.as_deref(),
+        Some(first.commit_id.as_str())
+    );
+    assert_eq!(
+        fixture.remote_history(),
+        vec![second.commit_id.clone(), first.commit_id.clone()]
+    );
+}
+
+#[test]
+fn initializing_requires_the_branch_to_stay_absent() {
+    let fixture = fixture("ws_publish_init_cas");
+    let _guard = BeforePushGuard;
+    let root = fixture.root.path().to_path_buf();
+    let remote = fixture.remote_str();
+    set_before_push_hook(move || {
+        let work = root.join("external-init-cas");
+        git(
+            root.as_path(),
+            &["clone", "--quiet", &remote, work.to_str().unwrap()],
+        );
+        fs::write(work.join("README.md"), "foreign\n").unwrap();
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "-m", "foreign"]);
+        git(&work, &["push", "origin", &format!("HEAD:{BRANCH}")]);
+    });
+
+    let error = publish(&fixture, request(&fixture, 1, None))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("resolve the publication authority"),
+        "{error}"
+    );
+    assert!(error.contains("moved during publication"), "{error}");
+    let foreign = fixture.remote_tip().expect("foreign tip");
+    assert!(!fixture.remote_file(&foreign, "README.md").is_empty());
+    assert_eq!(fixture.remote_history().len(), 1);
 }
