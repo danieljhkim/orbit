@@ -2,6 +2,8 @@
 //! trusted MCP envelope boundary.
 
 use std::cell::Cell;
+#[cfg(test)]
+use std::cell::RefCell;
 use std::path::Path;
 use std::time::Instant;
 
@@ -51,6 +53,41 @@ impl ToolEntryPoint {
 
 thread_local! {
     static TOOL_AUDIT_RECORDED: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ACTIVITY_TOOLS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/// Restores a test-local activity-tool override when dropped.
+///
+/// The override is thread-local so tests never need to change process-global
+/// environment variables merely to isolate their temporary runtime from a
+/// managed executor's inherited activity allowlist.
+#[cfg(test)]
+pub(crate) struct TestActivityToolsGuard {
+    previous: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+impl Drop for TestActivityToolsGuard {
+    fn drop(&mut self) {
+        TEST_ACTIVITY_TOOLS.with(|tools| {
+            tools.replace(self.previous.take());
+        });
+    }
+}
+
+/// Override the effective managed-agent activity allowlist for this test
+/// thread. Production dispatch always reads the inherited activity envelope.
+#[cfg(test)]
+pub(crate) fn override_activity_tools_for_test(
+    allowed_tools: impl IntoIterator<Item = impl Into<String>>,
+) -> TestActivityToolsGuard {
+    let allowed_tools = allowed_tools.into_iter().map(Into::into).collect();
+    let previous = TEST_ACTIVITY_TOOLS.with(|tools| tools.replace(Some(allowed_tools)));
+    TestActivityToolsGuard { previous }
 }
 
 /// Execute a server-global implementation inside Core's ordinary tool audit
@@ -662,6 +699,11 @@ fn read_proc_allowed_programs_from_env() -> Vec<String> {
 }
 
 fn read_activity_tools_from_env() -> Vec<String> {
+    #[cfg(test)]
+    if let Some(allowed_tools) = TEST_ACTIVITY_TOOLS.with(|tools| tools.borrow().clone()) {
+        return allowed_tools;
+    }
+
     if std::env::var("ORBIT_TASK_ACTOR_KIND").ok().as_deref() != Some("agent") {
         return Vec::new();
     }

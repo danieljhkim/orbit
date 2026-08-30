@@ -699,6 +699,7 @@ mod tests {
     use std::fs;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
+    use crate::adapter::command::override_activity_tools_for_test;
     use crate::adapter::tool_host::test_support::test_runtime;
 
     struct EnvVarGuard {
@@ -941,6 +942,10 @@ mod tests {
     fn dispatch_redacts_session_log_body_and_emits_an_audit_report() {
         let token = "orbit-session-log-secret-value";
         let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
+        let _activity_tools = override_activity_tools_for_test([
+            "orbit.session_log.append",
+            "orbit.session_log.list",
+        ]);
         let (_root, runtime, _repo_root) = test_runtime();
 
         let output = runtime
