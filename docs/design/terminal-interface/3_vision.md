@@ -2,7 +2,7 @@
 title: Terminal Interface — Vision
 owner: claude
 last_updated: 2026-08-01
-last_validated: 2026-08-01
+last_validated: 2026-08-30
 status: Accepted
 feature: terminal-interface
 doc_role: vision
@@ -20,7 +20,7 @@ This document scopes questions the current specs deliberately do not answer: whe
 
 ## 1. Open Questions
 
-1. **Composable CLI or TUI?** Table rendering has so far been pushed toward adapting to the terminal rather than toward owning it — [T20260411-0335] made tables reflow for narrow screens rather than introducing a view that controls the screen. `orbit run status` polled in a loop is a worse `k9s`. But a TUI is a second surface with its own state, keybindings, and failure modes, and it cannot be piped. Is the right answer a genuinely live subcommand (`orbit watch`) that owns the alternate screen, leaving every other command line-oriented — or does an interactive layer belong in the dashboard, which already exists?
+1. **Composable CLI or TUI?** Table rendering has so far been pushed toward adapting to the terminal rather than toward owning it — [T20260411-0335] made tables shrink and truncate for narrow screens rather than introducing a view that controls the screen. A hypothetical `orbit run status` loop is a worse `k9s`. But a TUI is a second surface with its own state, keybindings, and failure modes, and it cannot be piped. Is the right answer a genuinely live subcommand (`orbit watch`) that owns the alternate screen, leaving every other command line-oriented — or does an interactive layer belong in the dashboard, which already exists?
 
 2. **Is an agent a third audience?** [Terminal Output Is a Rendering of a Structured Payload](./4_decisions.md#terminal-output-is-a-rendering-of-a-structured-payload) resolves output for a human and for a script. An agent reading `orbit task list` through a shell tool is neither: it wants the density of the table (tokens are the budget) but the unambiguity of JSON, and it fails differently — silently misparsing rather than erroring. A fourth mode is the obvious move and probably the wrong one. Does `ndjson` already cover this, or is the real answer that agents should use the MCP surface and never the CLI?
 
