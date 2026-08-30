@@ -99,7 +99,7 @@ not a clean CI result).
   dependencies, secret handling, and configuration with evidence; files a
   durable Orbit task for each non-duplicate finding with severity and impact; a
   clean review is a successful no-op.
-- **`code-review-sweep`** — every six hours. Reviews the commits merged into the
+- **`code-review`** — every six hours. Reviews the commits merged into the
   integration branch since the previous sweep's recorded cursor, verifies each
   candidate finding against the live code, files the non-duplicate ones as tasks
   tagged `code-review`, and records the new last-reviewed commit in its execution
@@ -126,6 +126,14 @@ not a clean CI result).
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.
+
+Finding tasks tagged `qa-sweep`, `security-review`, `code-review`, or
+`friction-curation` receive the matching bracketed title prefix at the shared
+task-creation boundary. If more than one of those tags is present, the fixed
+precedence is `qa-sweep`, `security-review`, `code-review`, then
+`friction-curation`, regardless of tag order. Existing matching prefixes are
+not duplicated. Scheduler-minted parent tasks continue to use `[auto-task] `,
+which takes precedence when an `auto-task:<name>` provenance tag is present.
 
 ## Writing the body
 

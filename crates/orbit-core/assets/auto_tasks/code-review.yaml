@@ -1,5 +1,5 @@
 schemaVersion: 1
-name: code-review-sweep
+name: code-review
 description: Post-merge code review of changes merged since the last completed sweep
 enabled: false
 schedule:
@@ -15,7 +15,7 @@ template:
     ## Rules and command surfaces
 
     - Use the registered Orbit tool surface. Find the previous sweep with
-      `orbit tool run orbit.task.list --input '{"status":["done"],"tag":"code-review-sweep","model":"<agent-family>"}'`
+      `orbit tool run orbit.task.list --input '{"status":["done"],"tag":"code-review","model":"<agent-family>"}'`
       and read its cursor with
       `orbit tool run orbit.task.show --input '{"id":"<id>","model":"<agent-family>"}'`.
       Search existing coverage with
@@ -30,7 +30,7 @@ template:
 
     ## Determine the review window
 
-    Find the most recent done task tagged `code-review-sweep` and read the
+    Find the most recent done task tagged `code-review` and read the
     last-reviewed commit recorded in its execution summary. Review the commits from
     that point to the current HEAD of the workspace's integration branch. If no
     prior sweep task exists, record the current HEAD as the baseline and stop — the
@@ -62,7 +62,7 @@ template:
   - A window with no confirmed findings succeeds as a no-op.
   task_type: chore
   tags:
-  - code-review-sweep
+  - code-review
   - no-diff-expected
   priority: medium
   # The portable system lane is seeded per machine and compatibility-aliased

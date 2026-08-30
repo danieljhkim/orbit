@@ -1,8 +1,8 @@
 ---
 title: Auto-tasks — Design
 owner: claude
-last_updated: 2026-08-16
-last_validated: 2026-08-16
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Accepted
 feature: auto-tasks
 doc_role: design
@@ -11,7 +11,7 @@ summary: Current implementation of the auto-task record, due-math, host-local cu
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**", "crates/orbit-web/src/api/auto_tasks.rs", "crates/orbit-web/assets/dashboard/operations.js"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800, ORB-10876]
+related_artifacts: [ORB-10149, ORB-10439, ORB-10441, ORB-10446, ORB-10472, ORB-10583, ORB-10800, ORB-10876, ORB-11095]
 ---
 
 # Auto-tasks — Design
@@ -122,6 +122,13 @@ identical to a fired one: same field mapping, same `[auto-task] ` title
 convention, same `auto-task:<name>` tag, same `system_created` marker, same
 template-supplied status.
 
+Title provenance is enforced by `OrbitRuntime::add_task_with_identity`, the
+shared creation boundary used by CLI, MCP, dashboard, scheduler, and internal
+callers. An `auto-task:<name>` tag maps to `[auto-task] ` and takes precedence
+for scheduler-minted parent tasks. Otherwise finding tags use this fixed,
+input-order-independent precedence: `qa-sweep`, `security-review`,
+`code-review`, then `friction-curation`. The selected prefix is idempotent.
+
 The mint is **unconditional**. It ignores schedule due-math, `dedupe`, and
 `enabled`, and it neither reads nor writes the host-local cursor — an operator
 naming a definition explicitly means it, and a manual mint must not perturb
@@ -218,5 +225,7 @@ accurate.
 - ORB-10441 — mint-time visible title provenance.
 - ORB-10472 — worktree-local, atomic definition refresh.
 - ORB-10583 — workspace-local weekly official model-price audit definition.
+- ORB-11095 — centralized tag-derived title provenance and the canonical
+  `code-review` auto-task name.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
