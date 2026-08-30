@@ -506,6 +506,16 @@ fn investigate<Q: CiQueries + ?Sized>(
             failure["actual_checkout_shas"] = json!(log.checkout_commits);
             failure["checkout_evidence"] = json!(log.checkout_evidence);
             failure["checkout_evidence_scope"] = json!("failed");
+            // `gh` can succeed with empty stdout when the run's logs are gone
+            // (retention). That is not a captured excerpt; record it so the
+            // filed task can say why the block is empty.
+            if log.text.trim().is_empty() {
+                query_errors.push(json!({
+                    "query": "run_logs",
+                    "run_id": run_id,
+                    "error": "query returned no log text",
+                }));
+            }
         }
         Err(error) => {
             query_errors
