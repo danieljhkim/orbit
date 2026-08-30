@@ -87,7 +87,14 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
   deduplicated on write, and cannot change once the task enters `in-progress`.
   Inclusion grants only activity allowlist membership: caller role, host
   capability, tool policy, filesystem/subprocess policy, and external
-  authentication can still deny execution.
+  authentication can still deny execution. The shipped `ci-failure-remediation`
+  auto-task is the worked example: it names exactly `github.auth.status`,
+  `github.run.list`, `github.run.view`, `github.run.logs`, and `github.pr.list`,
+  so `agent_implement` stays unchanged and
+  `effective_tools = activity baseline ∪ those five`. Reaching
+  `github.auth.status` can still yield a structured `available: false` or
+  `authenticated: false` capability-unavailable result when the lane has no
+  GitHub client or credentials; that is not a clean CI pass.
 
 ## Quality bar
 

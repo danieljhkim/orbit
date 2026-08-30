@@ -179,6 +179,14 @@ template:
   - ci-failure-remediation
   - github-actions
   - no-diff-expected
+  # Exact names only. Dispatch unions these with the selected activity
+  # baseline (`agent_implement` today); a wildcard would fail admission.
+  required_tools:
+  - github.auth.status
+  - github.run.list
+  - github.run.view
+  - github.run.logs
+  - github.pr.list
   priority: high
   # The portable system lane is seeded per machine and compatibility-aliased
   # for configs written before that crew existed.

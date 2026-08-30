@@ -541,6 +541,26 @@ fn ci_failure_remediation_default_is_portable_hourly_and_inert() {
         definition.template.task_type,
         orbit_types::task::TaskType::Bug
     );
+    assert_eq!(
+        definition.template.required_tools,
+        vec![
+            "github.auth.status",
+            "github.pr.list",
+            "github.run.list",
+            "github.run.logs",
+            "github.run.view",
+        ],
+        "minted CI-remediation tasks must persist the five exact GitHub reads"
+    );
+    assert!(
+        definition
+            .template
+            .required_tools
+            .iter()
+            .all(|tool| !tool.contains('*')),
+        "required_tools must not use a wildcard: {:?}",
+        definition.template.required_tools
+    );
     for required_tag in ["ci-failure-remediation", "no-diff-expected"] {
         assert!(
             definition

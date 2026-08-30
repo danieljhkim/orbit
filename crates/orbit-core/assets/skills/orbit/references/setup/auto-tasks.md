@@ -74,6 +74,17 @@ they do not replace it or bypass runtime capability, policy, filesystem,
 subprocess, or authentication checks. Invalid, inactive, wildcard, or
 non-agent-facing names fail dispatch before the provider starts.
 
+`ci-failure-remediation` is the worked example: its template declares exactly
+`github.auth.status`, `github.run.list`, `github.run.view`, `github.run.logs`,
+and `github.pr.list`. A minted instance therefore runs under
+`effective_tools = agent_implement baseline ∪ those five names`. Ordinary
+implementation tasks that request nothing keep the original baseline and
+cannot call GitHub tools. Inclusion is only allowlist membership — a
+structured `github.auth.status` answer may still report `available: false` or
+`authenticated: false` when the lane has no GitHub CLI or no credentials
+(DANI-10056 is failed-validation evidence of the missing-requirements bug,
+not a clean CI result).
+
 ## The five seeded definitions
 
 `orbit workspace init` seeds all five, disabled:
@@ -98,15 +109,20 @@ non-agent-facing names fail dispatch before the provider starts.
   pull-request heads, clusters by root cause, repairs repository-owned failures
   without weakening a check, and treats a clean current-head pass as a successful
   no-diff outcome. The body is GitHub-Actions-shaped; operators on other CI
-  should adapt it before enabling. **Execution-lane precondition:** all of its CI
-  discovery goes through the read-only `github.auth.status`, `github.run.list`,
+  should adapt it before enabling. The template persists those five exact
+  GitHub-read names as `required_tools` so dispatch can union them with the
+  ordinary `agent_implement` baseline; it does not widen that activity or use
+  `github.*`. **Execution-lane precondition:** all of its CI discovery goes
+  through the read-only `github.auth.status`, `github.run.list`,
   `github.run.view`, `github.run.logs`, and `github.pr.list` builtin tools, which
   run the GitHub CLI as a child of whichever process executes the tool. So the
   lane that runs the minted task needs one of: an executor whose sandbox permits
   reading the GitHub CLI's configuration directory, or a GitHub token forwarded
   through `[execution.env] pass`. Check before enabling — a lane with neither
   still completes, but every run ends at the preflight with a
-  capability-unavailable summary and no investigation.
+  capability-unavailable summary and no investigation. That structured
+  unauthenticated or unavailable answer is a legitimate capability outcome,
+  not a policy denial and not a clean pipeline.
 
 Read them before enabling. They are also the best worked examples of how much
 instruction a minted task's body should carry.

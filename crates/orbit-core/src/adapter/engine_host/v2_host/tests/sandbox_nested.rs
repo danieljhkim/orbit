@@ -1,5 +1,5 @@
 //! Production-shaped managed nested Orbit commands under the resolved macOS
-//! child-runtime profile. [ORB-11055] [ORB-11066]
+//! child-runtime profile. [ORB-11055] [ORB-11066] [ORB-11070]
 
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
@@ -17,9 +17,16 @@ use orbit_exec::{
 use serde_json::Value;
 
 #[cfg(target_os = "macos")]
+use orbit_engine::activity_job::load_activity_asset;
+#[cfg(target_os = "macos")]
+use orbit_types::workflow::ActivityV2Spec;
+
+#[cfg(target_os = "macos")]
 use crate::OrbitRuntime;
 #[cfg(target_os = "macos")]
 use crate::adapter::engine_host::v2_host::test_support::seed_executor;
+#[cfg(target_os = "macos")]
+use crate::bootstrap::activity::DEFAULT_ACTIVITY_FILES;
 
 /// A managed child launched from a disposable linked worktree carries the same
 /// registry locator and provenance the CLI runner emits. Both a capability
@@ -53,7 +60,27 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
         "workspace init",
     );
 
-    let add = run_orbit(
+    let minted = run_orbit(
+        &orbit_bin,
+        &repo,
+        &home,
+        &["auto-task", "mint", "ci-failure-remediation", "--json"],
+        "auto-task mint",
+    );
+    let minted: Value = serde_json::from_slice(&minted.stdout).expect("mint JSON");
+    let task_id = minted["id"].as_str().expect("task id").to_string();
+    assert_eq!(
+        minted["required_tools"],
+        serde_json::json!([
+            "github.auth.status",
+            "github.pr.list",
+            "github.run.list",
+            "github.run.logs",
+            "github.run.view"
+        ])
+    );
+
+    let ordinary = run_orbit(
         &orbit_bin,
         &repo,
         &home,
@@ -61,19 +88,27 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
             "task",
             "add",
             "--title",
-            "Nested sandbox audit write",
+            "Ordinary nested implementation",
             "--description",
-            "Registered-workspace fixture for a sandboxed orbit.task.update.",
+            "Empty required_tools neighbor proving GitHub reads stay task-scoped.",
             "--acceptance-criteria",
-            "execution summary persists under the child-runtime profile",
+            "github.auth.status remains policy-denied",
             "--complexity",
             "low",
             "--json",
         ],
-        "task add",
+        "ordinary task add",
     );
-    let added: Value = serde_json::from_slice(&add.stdout).expect("task add JSON");
-    let task_id = added["id"].as_str().expect("task id").to_string();
+    let ordinary: Value = serde_json::from_slice(&ordinary.stdout).expect("ordinary task JSON");
+    let ordinary_id = ordinary["id"]
+        .as_str()
+        .expect("ordinary task id")
+        .to_string();
+    assert!(
+        ordinary["required_tools"]
+            .as_array()
+            .is_some_and(|tools| tools.is_empty())
+    );
 
     let worktree = repo.join(".orbit/state/worktrees/jrun-orb-11066");
     let worktree_output = Command::new("git")
@@ -141,34 +176,68 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
     let _env = orbit_common::test_env::scoped([("HOME", Some(home_str.as_str()))]);
     let profile_text = compile_macos_sandbox_profile(&resolved.fs_profile, "gemini")
         .expect("compile nested orbit sandbox profile");
+    let (_, implement_yaml) = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find(|(name, _)| *name == "agent_implement")
+        .expect("shipped agent_implement");
+    let implement = load_activity_asset(implement_yaml).expect("parse agent_implement");
+    let ActivityV2Spec::AgentLoop(implement_spec) = implement.spec.spec else {
+        panic!("agent_implement must remain an agent_loop activity");
+    };
+    let minted_tools = RuntimeHost::resolve_activity_tools(
+        &runtime,
+        std::slice::from_ref(&task_id),
+        &implement_spec.tools,
+    )
+    .expect("resolve minted CI-remediation tools");
+    assert_eq!(
+        minted_tools.requested_tools,
+        [
+            "github.auth.status",
+            "github.pr.list",
+            "github.run.list",
+            "github.run.logs",
+            "github.run.view"
+        ]
+    );
+    assert!(
+        minted_tools
+            .effective_tools
+            .starts_with(implement_spec.tools.as_slice()),
+        "effective tools must keep the production agent_implement baseline: {:?}",
+        minted_tools.effective_tools
+    );
+    assert!(
+        minted_tools
+            .effective_tools
+            .iter()
+            .any(|tool| tool == "github.auth.status")
+    );
+    let ordinary_tools = RuntimeHost::resolve_activity_tools(
+        &runtime,
+        std::slice::from_ref(&ordinary_id),
+        &implement_spec.tools,
+    )
+    .expect("resolve ordinary tools");
+    assert_eq!(ordinary_tools.effective_tools, implement_spec.tools);
+    assert!(
+        !ordinary_tools
+            .effective_tools
+            .iter()
+            .any(|tool| tool.starts_with("github.")),
+        "DANI-10056 missing-requirements behavior must remain denied for ordinary tasks"
+    );
+
     let child_home_str = child_home.to_string_lossy().into_owned();
     let orbit_bin_str = orbit_bin.to_string_lossy().into_owned();
-    let env = vec![
-        ("HOME".to_string(), child_home_str.clone()),
-        ("USERPROFILE".to_string(), child_home_str),
-        (
-            "PATH".to_string(),
-            "/usr/bin:/bin:/usr/local/bin".to_string(),
-        ),
-        ("TMPDIR".to_string(), "/tmp".to_string()),
-        ("ORBIT_BIN".to_string(), orbit_bin_str),
-        ("ORBIT_REGISTRY_ROOT".to_string(), global_str.clone()),
-        ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
-        ("ORBIT_RUN_ID".to_string(), "jrun-orb-11066".to_string()),
-        ("ORBIT_TASK_ID".to_string(), task_id.clone()),
-        ("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.clone()),
-        ("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()),
-        (
-            "ORBIT_ACTIVITY_TOOLS".to_string(),
-            "github.auth.status,orbit.task.show".to_string(),
-        ),
-        (
-            "ORBIT_ACTIVITY_FS_PROFILE".to_string(),
-            resolved.fs_profile.name.clone(),
-        ),
-        ("ORBIT_AGENT_NAME".to_string(), "grok".to_string()),
-        ("ORBIT_AGENT_MODEL".to_string(), "grok".to_string()),
-    ];
+    let env = managed_nested_env(
+        &child_home_str,
+        &orbit_bin_str,
+        &global_str,
+        &task_id,
+        &minted_tools.effective_tools,
+        &resolved.fs_profile.name,
+    );
 
     let output = run_sandboxed_orbit(
         &orbit_bin,
@@ -196,8 +265,46 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
             && capability
                 .get("authenticated")
                 .and_then(Value::as_bool)
-                .is_some(),
+                .is_some()
+            && capability
+                .get("detail")
+                .and_then(Value::as_str)
+                .is_some_and(|detail| !detail.is_empty()),
         "github.auth.status must return its structured capability result: {capability}"
+    );
+    assert!(
+        !stdout.contains("policy_denied") && !stderr.contains("policy_denied"),
+        "computed CI-remediation tools must not reproduce DANI-10056 policy_denied: {stderr}"
+    );
+
+    let ordinary_env = managed_nested_env(
+        &child_home_str,
+        &orbit_bin_str,
+        &global_str,
+        &ordinary_id,
+        &ordinary_tools.effective_tools,
+        &resolved.fs_profile.name,
+    );
+    let denied = run_sandboxed_orbit(
+        &orbit_bin,
+        &profile_text,
+        &ordinary_env,
+        &worktree,
+        &["tool", "run", "github.auth.status"],
+    );
+    let denied_out = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&denied.stdout),
+        String::from_utf8_lossy(&denied.stderr)
+    );
+    assert!(
+        !denied.status.success(),
+        "ordinary agent_implement baseline must deny GitHub reads\n{denied_out}"
+    );
+    assert!(
+        denied_out.contains("policy_denied")
+            || denied_out.contains("not in the activity allowlist"),
+        "DANI-10056 missing-requirements denial must stay policy_denied: {denied_out}"
     );
 
     let input = serde_json::json!({ "id": task_id, "model": "grok" }).to_string();
@@ -227,6 +334,43 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
             "managed registry discovery must not create global workspace-only path {workspace_only}"
         );
     }
+}
+
+#[cfg(target_os = "macos")]
+fn managed_nested_env(
+    child_home: &str,
+    orbit_bin: &str,
+    registry_root: &str,
+    task_id: &str,
+    effective_tools: &[String],
+    fs_profile: &str,
+) -> Vec<(String, String)> {
+    vec![
+        ("HOME".to_string(), child_home.to_string()),
+        ("USERPROFILE".to_string(), child_home.to_string()),
+        (
+            "PATH".to_string(),
+            "/usr/bin:/bin:/usr/local/bin".to_string(),
+        ),
+        ("TMPDIR".to_string(), "/tmp".to_string()),
+        ("ORBIT_BIN".to_string(), orbit_bin.to_string()),
+        ("ORBIT_REGISTRY_ROOT".to_string(), registry_root.to_string()),
+        ("ORBIT_MANAGED_RUN_CONTEXT".to_string(), "1".to_string()),
+        ("ORBIT_RUN_ID".to_string(), "jrun-orb-11066".to_string()),
+        ("ORBIT_TASK_ID".to_string(), task_id.to_string()),
+        ("ORBIT_ACTIVE_TASK_ID".to_string(), task_id.to_string()),
+        ("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()),
+        (
+            "ORBIT_ACTIVITY_TOOLS".to_string(),
+            effective_tools.join(","),
+        ),
+        (
+            "ORBIT_ACTIVITY_FS_PROFILE".to_string(),
+            fs_profile.to_string(),
+        ),
+        ("ORBIT_AGENT_NAME".to_string(), "grok".to_string()),
+        ("ORBIT_AGENT_MODEL".to_string(), "grok".to_string()),
+    ]
 }
 
 #[cfg(target_os = "macos")]
