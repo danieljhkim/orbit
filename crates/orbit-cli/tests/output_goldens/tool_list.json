@@ -631,6 +631,12 @@
         "required": false
       },
       {
+        "description": "Optional exact canonical tool names the task adds to its agent activity baseline, as a string or array of strings",
+        "name": "required_tools",
+        "param_type": "string_list",
+        "required": false
+      },
+      {
         "description": "Optional task context selectors as a comma-separated string or array of strings. Add entries ONLY for existing files, directories, or symbols expected to be modified or deleted by the task. Do not add background-reading entries or files referenced only for context. Prefer canonical selectors: `file:`, `dir:`, or `symbol:path#name:kind`. Legacy raw paths are accepted and upgraded automatically.",
         "name": "context_files",
         "param_type": "string_list",
@@ -851,7 +857,7 @@
         "required": false
       },
       {
-        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution.",
+        "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution.",
         "name": "fields",
         "param_type": "string_list",
         "required": false
@@ -969,6 +975,12 @@
       {
         "description": "Replacement task tags as a string or array of strings",
         "name": "tags",
+        "param_type": "string_list",
+        "required": false
+      },
+      {
+        "description": "Replacement exact canonical tool requirements. Frozen once the task enters in-progress",
+        "name": "required_tools",
         "param_type": "string_list",
         "required": false
       },
