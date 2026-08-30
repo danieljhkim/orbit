@@ -55,8 +55,8 @@ pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/auto_tasks/ci-failure-remediation.yaml"),
     ),
     (
-        "code-review-sweep",
-        include_str!("../../assets/auto_tasks/code-review-sweep.yaml"),
+        "code-review",
+        include_str!("../../assets/auto_tasks/code-review.yaml"),
     ),
     (
         "friction-curation",

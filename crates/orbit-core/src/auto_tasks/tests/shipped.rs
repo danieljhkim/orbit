@@ -24,7 +24,7 @@ fn shipped_defaults_all_parse_and_are_disabled() {
         .collect();
     for required in [
         "ci-failure-remediation",
-        "code-review-sweep",
+        "code-review",
         "friction-curation",
         "qa-sweep",
         "security-review",
@@ -317,21 +317,21 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
 /// than in scheduler state, so the template must keep saying so, and it must
 /// stay generic across workspaces.
 #[test]
-fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
+fn code_review_default_is_portable_cursor_driven_and_inert() {
     let (_, yaml) = DEFAULT_AUTO_TASK_FILES
         .iter()
-        .find(|(name, _)| *name == "code-review-sweep")
-        .expect("code-review-sweep default");
-    let definition = parse_auto_task_yaml(yaml).expect("parse code-review-sweep");
+        .find(|(name, _)| *name == "code-review")
+        .expect("code-review default");
+    let definition = parse_auto_task_yaml(yaml).expect("parse code-review");
 
-    assert_eq!(definition.name, "code-review-sweep");
+    assert_eq!(definition.name, "code-review");
     assert!(!definition.enabled, "definition must ship disabled");
     assert_eq!(
         definition.schedule,
         AutoTaskSchedule::Cron {
             cron: "40 */6 * * *".to_string()
         },
-        "code-review-sweep must use a documented six-hourly schedule"
+        "code-review must use a documented six-hourly schedule"
     );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
     assert_eq!(definition.template.crew.as_deref(), Some("system"));
@@ -343,7 +343,7 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
         definition.template.status,
         orbit_types::task::TaskStatus::Backlog
     );
-    for required_tag in ["code-review-sweep", "no-diff-expected"] {
+    for required_tag in ["code-review", "no-diff-expected"] {
         assert!(
             definition
                 .template
@@ -399,7 +399,7 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
                     && criterion.contains("last-reviewed commit")
                     && criterion.contains("execution summary")
             }),
-        "code-review-sweep must require recording the window cursor"
+        "code-review must require recording the window cursor"
     );
     assert!(
         definition
@@ -412,7 +412,7 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
                     && criterion.contains("non-duplicate")
                     && criterion.contains("file:line")
             }),
-        "code-review-sweep must require verified, evidenced, non-duplicate findings"
+        "code-review must require verified, evidenced, non-duplicate findings"
     );
 }
 

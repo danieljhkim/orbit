@@ -218,3 +218,78 @@ fn task_add_redacts_secrets_in_stored_fields() {
         "creation comment should carry a redaction placeholder: {comments:?}"
     );
 }
+
+#[test]
+fn task_add_applies_normalized_provenance_title_prefixes() {
+    for (tag, expected_prefix) in [
+        (" qa-SWEEP ", "[qa-sweep] "),
+        ("security-review", "[security-review] "),
+        ("code-review", "[code-review] "),
+        ("friction-curation", "[friction-curation] "),
+    ] {
+        let (_root, runtime) = test_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Confirmed finding".to_string(),
+                tags: vec![tag.to_string()],
+                workspace_path: Some(".".to_string()),
+                ..Default::default()
+            })
+            .expect("task add succeeds");
+
+        assert_eq!(task.title, format!("{expected_prefix}Confirmed finding"));
+    }
+}
+
+#[test]
+fn task_add_does_not_double_the_applicable_provenance_prefix() {
+    let (_root, runtime) = test_runtime();
+
+    let task = runtime
+        .add_task(TaskAddParams {
+            title: "[code-review] Confirmed finding".to_string(),
+            tags: vec!["code-review".to_string()],
+            workspace_path: Some(".".to_string()),
+            ..Default::default()
+        })
+        .expect("task add succeeds");
+
+    assert_eq!(task.title, "[code-review] Confirmed finding");
+}
+
+#[test]
+fn task_add_uses_fixed_provenance_precedence_independent_of_tag_order() {
+    for tags in [
+        vec!["friction-curation", "security-review", "qa-sweep"],
+        vec!["qa-sweep", "friction-curation", "security-review"],
+    ] {
+        let (_root, runtime) = test_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: "Confirmed finding".to_string(),
+                tags: tags.into_iter().map(str::to_string).collect(),
+                workspace_path: Some(".".to_string()),
+                ..Default::default()
+            })
+            .expect("task add succeeds");
+
+        assert_eq!(task.title, "[qa-sweep] Confirmed finding");
+    }
+}
+
+#[test]
+fn task_add_preserves_auto_task_title_prefix_behavior() {
+    for title in ["Scheduled work", "[auto-task] Scheduled work"] {
+        let (_root, runtime) = test_runtime();
+        let task = runtime
+            .add_task(TaskAddParams {
+                title: title.to_string(),
+                tags: vec!["auto-task:qa-sweep".to_string(), "qa-sweep".to_string()],
+                workspace_path: Some(".".to_string()),
+                ..Default::default()
+            })
+            .expect("task add succeeds");
+
+        assert_eq!(task.title, "[auto-task] Scheduled work");
+    }
+}

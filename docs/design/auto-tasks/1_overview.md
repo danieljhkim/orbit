@@ -1,8 +1,8 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-08-22
-last_validated: 2026-08-29
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950, ORB-11054]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950, ORB-11054, ORB-11095]
 ---
 
 # Auto-tasks — Overview
@@ -96,7 +96,7 @@ definition of the same name.
   applicable application code, dependencies, secret handling, and configuration;
   each actionable finding is filed as a durable Orbit task, and a clean review
   is a successful no-op (ORB-10950).
-- `code-review-sweep` — disabled-by-default six-hourly review of commits merged
+- `code-review` — disabled-by-default six-hourly review of commits merged
   since the previous sweep's recorded cursor.
 - `ci-failure-remediation` — disabled-by-default hourly investigation and
   remediation of current-head GitHub Actions failures across the workspace's
@@ -123,7 +123,7 @@ encode this repository's branches and gates. Re-init preserves them:
   of the same name; managed-asset reconciliation treats the local file as
   authored.
 - `doc-duties`, `model-price-audit`, `release-prep`, and this repository's
-  enabled copies of catalog names such as `code-review-sweep` and
+  enabled copies of catalog names such as `code-review` and
   `security-review`.
 
 ## Task References
@@ -150,5 +150,7 @@ encode this repository's branches and gates. Re-init preserves them:
   so minted CI-remediation tasks can reach them under `agent_implement`
   without changing that activity's baseline. DANI-10056 remains cited as
   failed-validation evidence of the missing-requirements bug.
+- ORB-11095 — Added centralized finding-title provenance and established the
+  shipped definition's canonical `code-review` name.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

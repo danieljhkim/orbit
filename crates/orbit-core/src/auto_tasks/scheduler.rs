@@ -28,9 +28,6 @@ use super::loader::{AutoTaskLoadError, collect_auto_tasks};
 use super::schedule::{AutoTaskDueDecision, decide_due};
 use super::state::{AutoTaskCursor, cursor_state_path, load_cursor_state, upsert_cursor};
 
-/// Visible provenance stamped onto every task minted from an auto-task template.
-const AUTO_TASK_TITLE_PREFIX: &str = "[auto-task] ";
-
 /// Per-definition outcome of one scheduler pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutoTaskFireReport {
@@ -214,7 +211,7 @@ pub(super) fn mint_task(
     tags.push(auto_task_tag(&definition.name));
 
     runtime.add_task(TaskAddParams {
-        title: minted_title(&template.title),
+        title: template.title.clone(),
         description: template.description.clone(),
         acceptance_criteria: template.acceptance_criteria.clone(),
         tags,
@@ -229,17 +226,6 @@ pub(super) fn mint_task(
         system_created: true,
         ..TaskAddParams::default()
     })
-}
-
-/// Stamp the human-visible auto-task provenance without changing templates that
-/// already carry it. Keeping this beside the template-to-task mapping makes
-/// every mint entry point follow the same convention.
-fn minted_title(template_title: &str) -> String {
-    if template_title.starts_with(AUTO_TASK_TITLE_PREFIX) {
-        template_title.to_string()
-    } else {
-        format!("{AUTO_TASK_TITLE_PREFIX}{template_title}")
-    }
 }
 
 /// Run one scheduler pass now and project it to the deterministic-action JSON
