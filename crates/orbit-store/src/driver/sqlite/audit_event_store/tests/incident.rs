@@ -12,7 +12,8 @@ use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
 use crate::Store;
 use crate::driver::sqlite::audit_event_store::incident::{
     CASCADE_WINDOW_SECS, FailureClass, FailureIncidentQuery, build_report, group_failure_incidents,
-    has_tool_identity, normalize_message, signature_for,
+    has_tool_identity, is_failure_only_diagnostic_surface, is_lifecycle_diagnostic,
+    normalize_message, signature_for,
 };
 
 use super::super::AuditEventInsertParams;
@@ -316,6 +317,80 @@ fn denials_expected_negative_paths_and_unexpected_failures_never_merge() {
 }
 
 #[test]
+fn duplicate_worker_diagnostics_are_seven_incidents_not_fourteen_tool_failures() {
+    const RUN_IDS: [&str; 7] = [
+        "jrun-diagnostic-0",
+        "jrun-diagnostic-1",
+        "jrun-diagnostic-2",
+        "jrun-diagnostic-3",
+        "jrun-diagnostic-4",
+        "jrun-diagnostic-5",
+        "jrun-diagnostic-6",
+    ];
+    let mut failures = Vec::new();
+    for (index, run_id) in RUN_IDS.into_iter().enumerate() {
+        for duplicate in 0..2 {
+            failures.push(
+                FailureFixture::new(
+                    (index * 2 + duplicate) as i64,
+                    (index * 10 + duplicate) as i64,
+                    "pipeline.worker.exit",
+                )
+                .message("pipeline worker exited after claiming the persisted run")
+                .run(run_id, "worker-observer")
+                .build(),
+            );
+        }
+    }
+
+    let report = build_report(&failures, false);
+
+    assert!(is_failure_only_diagnostic_surface("pipeline.worker.exit"));
+    assert!(failures.iter().all(is_lifecycle_diagnostic));
+    assert_eq!(report.raw_failed_events, 14);
+    assert_eq!(report.incident_count(), 7);
+    assert_eq!(report.lifecycle_diagnostic_events, 14);
+    assert_eq!(report.lifecycle_diagnostic_incidents, 7);
+    assert_eq!(report.lifecycle_diagnostic_affected_run_count, 7);
+    assert_eq!(report.raw_events_by_class.get("diagnostic"), Some(&14));
+    assert_eq!(report.incidents_by_class.get("diagnostic"), Some(&7));
+    assert_eq!(report.affected_runs_by_class.get("diagnostic"), Some(&7));
+    assert!(report.incidents.iter().all(|incident| {
+        incident.class == FailureClass::Diagnostic
+            && incident.event_count == 2
+            && incident.events.len() == 2
+            && incident.events.iter().all(|event| {
+                event.tool_name.as_deref() == Some("pipeline.worker.exit")
+                    && event.run_id.is_some()
+                    && event.task_id.is_some()
+            })
+    }));
+}
+
+#[test]
+fn expected_task_show_and_update_negatives_do_not_enter_unexpected_counts() {
+    let failures = vec![
+        FailureFixture::new(1, 0, "orbit.task.show")
+            .message("not found: task REC-missing")
+            .build(),
+        FailureFixture::new(2, 1, "orbit.task.update")
+            .message("unsupported field projection: mystery")
+            .build(),
+    ];
+
+    let report = build_report(&failures, false);
+
+    assert_eq!(report.raw_events_by_class.get("expected"), Some(&2));
+    assert_eq!(report.incidents_by_class.get("expected"), Some(&2));
+    assert_eq!(report.raw_events_by_class.get("unexpected"), None);
+    assert!(report.incidents.iter().all(|incident| {
+        incident.class == FailureClass::Expected
+            && incident.events.len() == 1
+            && incident.events[0].tool_name.is_some()
+    }));
+}
+
+#[test]
 fn a_denial_recorded_with_failure_status_still_classifies_as_a_denial() {
     let failures = vec![
         FailureFixture::new(1, 0, "surface.alpha")
@@ -596,6 +671,10 @@ fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
         "2 duplicate Starts collapse; 8 cascade rows from 4 leaves are 4 roots"
     );
     assert_eq!(report.job_run_lifecycle_incidents, 5);
+    assert_eq!(report.lifecycle_diagnostic_events, 10);
+    assert_eq!(report.lifecycle_diagnostic_incidents, 5);
+    assert_eq!(report.lifecycle_diagnostic_affected_run_count, 8);
+    assert_eq!(report.raw_events_by_class.get("diagnostic"), Some(&10));
     assert_eq!(
         report.affected_run_count, 8,
         "4 leaf runs + 4 parent runs; Starts carry no run id"

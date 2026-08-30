@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Preview — Failures by Tool card</title>
+  <title>Preview — Unexpected Failures by Callable Tool</title>
   <link rel="stylesheet" href="dashboard.css" />
   <style>
     body { padding: 24px; max-width: 1100px; margin: 0 auto; }
@@ -10,24 +10,26 @@
   </style>
 </head>
 <body>
-  <h1>Audit tab · Failures by Tool (preview)</h1>
+  <h1>Audit tab · Unexpected Failures by Callable Tool (preview)</h1>
   <div id="mount"></div>
 
   <script type="module">
     import { el } from './common.js';
 
     const rateRows = [
-      { tool: "orbit.friction.add", rate: 0.143, failures: 1, total: 7 },
-      { tool: "orbit.task.add",   rate: 0.118, failures: 2, total: 17 },
-      { tool: "orbit.task.show",  rate: 0.114, failures: 4, total: 35 },
-      { tool: "orbit.search",     rate: 0.042, failures: 1, total: 24 },
+      { tool: "orbit.friction.add", rate: 0.143, failures: 1, successes: 6, total: 7 },
+      { tool: "orbit.task.add",   rate: 0.118, failures: 2, successes: 15, total: 17 },
+      { tool: "orbit.search",     rate: 0.042, failures: 1, successes: 23, total: 24 },
     ];
     const failuresRows = [
-      { tool: "orbit.friction.add", count: 1, mcp: 1, cli: 0 },
-      { tool: "orbit.task.add",   count: 2, mcp: 1, cli: 1 },
-      { tool: "orbit.task.show",  count: 4, mcp: 3, cli: 1 },
-      { tool: "orbit.search",     count: 1, mcp: 0, cli: 1 },
+      { tool: "orbit.friction.add", count: 1 },
+      { tool: "orbit.task.add",   count: 2 },
+      { tool: "orbit.search",     count: 1 },
     ];
+    // Accessible in the incident evidence, but deliberately absent from the
+    // reliability rate rows above.
+    const expectedNegativeFixtures = ["orbit.task.show", "orbit.task.update"];
+    const diagnosticFixtures = ["pipeline.worker.exit", "pipeline.run.terminal_conflict"];
 
     function isNamedTool(name) {
       const trimmed = String(name || "").trim();
@@ -41,7 +43,7 @@
       }
 
       const container = el("div", { class: "audit-summary-container" });
-      container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
+      container.appendChild(el("h3", { class: "summary-title", text: "Unexpected Failures by Callable Tool (24H)" }));
       const grid = el("div", { class: "tool-health-grid" });
 
       for (const row of rateRows) {
@@ -54,22 +56,16 @@
         header.appendChild(el("span", { class: "tool-name", text: row.tool }));
         header.appendChild(el("span", {
           class: "status-badge",
-          text: `${(rate * 100).toFixed(1)}% Fail Rate`,
+          text: `${(rate * 100).toFixed(1)}% Unexpected Failure Rate`,
         }));
         card.appendChild(header);
 
         const body = el("div", { class: "card-body" });
         const breakdown = failByTool.get(row.tool);
-        const mcp = breakdown ? (breakdown.mcp || 0) : 0;
-        const cli = breakdown ? (breakdown.cli || 0) : 0;
         const failures = row.failures != null ? row.failures : (breakdown ? (breakdown.count || 0) : 0);
         const total = row.total || 0;
         const failureWord = failures === 1 ? "failure" : "failures";
-
-        let trendText = `${failures} ${failureWord} / ${total} total runs`;
-        if (mcp > 0 && cli > 0) {
-          trendText = `${failures} ${failureWord} (${mcp} MCP, ${cli} CLI) / ${total} total runs`;
-        }
+        const trendText = `${failures} unexpected ${failureWord} / ${total} comparable calls (successful + unexpected failed)`;
         body.appendChild(el("span", { class: "metric-trend", text: trendText }));
         card.appendChild(body);
 
@@ -83,31 +79,31 @@
       container.appendChild(grid);
 
       const lifecycleCard = el("div", { class: "audit-summary-card lifecycle-failure-card" });
-      lifecycleCard.appendChild(el("div", { class: "card-title", text: "job-run lifecycle" }));
+      lifecycleCard.appendChild(el("div", { class: "card-title", text: "lifecycle diagnostics" }));
       const lifeBody = el("div", { class: "card-body" });
       lifeBody.appendChild(el("div", {
         class: "lifecycle-failure-counts",
-        text: "10 failed events · 5 incidents · 8 affected runs",
+        text: "7 incidents · 14 raw events · 7 affected runs",
       }));
       lifeBody.appendChild(el("div", {
         class: "metric-trend",
-        text: "Excluded from tool denominators and rates · window 24h",
+        text: "Failure-only diagnostic surfaces; excluded from callable-tool denominators and rates · window 24h",
       }));
       lifecycleCard.appendChild(lifeBody);
       container.appendChild(lifecycleCard);
 
       const incidentHead = el("section", { class: "incident-summary" }, [
         el("div", { class: "incident-summary-head" }, [
-          el("strong", { class: "incident-summary-headline", text: "5 incidents" }),
+          el("strong", { class: "incident-summary-headline", text: "2 unexpected incidents" }),
           el("span", {
             class: "incident-summary-denominator",
-            text: "10 failed events · 5 grouped incidents · 8 affected runs of 12 audited events",
+            text: "2 unexpected raw events · 2 affected runs; 11 incidents / 18 failed events / 11 affected runs across 40 audited events",
           }),
           el("span", { class: "incident-summary-window", text: "window 24h" }),
         ]),
         el("div", {
           class: "incident-lifecycle-note",
-          text: "job-run lifecycle: 10 failed events · 5 incidents (excluded from tool rates)",
+          text: `lifecycle diagnostics: 7 incidents · 14 raw events · 7 affected runs (excluded from tool rates); expected negatives: ${expectedNegativeFixtures.join(", ")}; evidence: ${diagnosticFixtures.join(", ")}`,
         }),
       ]);
       container.appendChild(incidentHead);

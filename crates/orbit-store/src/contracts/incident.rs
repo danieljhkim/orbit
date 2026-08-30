@@ -18,9 +18,10 @@
 //! Grouping runs in three passes:
 //!
 //! 1. **Classify** each failed row as [`FailureClass::Denied`],
-//!    [`FailureClass::Expected`], or [`FailureClass::Unexpected`] so a policy
-//!    refusal and a caller's invalid input stay distinguishable from a genuine
-//!    unexpected failure.
+//!    [`FailureClass::Expected`], [`FailureClass::Diagnostic`], or
+//!    [`FailureClass::Unexpected`] so a policy refusal, caller/input negative,
+//!    and lifecycle diagnostic stay distinguishable from a genuine unexpected
+//!    failure.
 //! 2. **Cluster** rows by `(run scope, signature)`, where the signature is
 //!    `class | role | surface | normalized message`. Volatile tokens (paths,
 //!    numbers, ids, timestamps, hashes, quoted literals) are replaced with
@@ -37,7 +38,7 @@
 //!    not a special-cased tool or activity name.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Duration, Utc};
 use orbit_types::telemetry::{AuditEvent, AuditEventStatus};
@@ -62,9 +63,10 @@ const MAX_SIGNATURE_MESSAGE_CHARS: usize = 160;
 
 /// How an audit failure should be read by an operator.
 ///
-/// The three classes are kept separate at every layer: an incident never
-/// merges rows of different classes, so a policy denial can never be counted
-/// as an unexpected failure (or hide one).
+/// The four classes are kept separate at every layer: an incident never
+/// merges rows of different classes, so a policy denial, expected negative,
+/// or lifecycle diagnostic can never be counted as an unexpected failure (or
+/// hide one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureClass {
@@ -73,6 +75,9 @@ pub enum FailureClass {
     /// The call ran and failed on a documented negative path — invalid input,
     /// a missing record, a validation refusal. The system behaved correctly.
     Expected,
+    /// An abnormal-path lifecycle record emitted for diagnosis. These rows
+    /// have no healthy-call population and therefore never form a tool rate.
+    Diagnostic,
     /// Everything else: a failure that is not a known negative path.
     Unexpected,
 }
@@ -82,6 +87,7 @@ impl FailureClass {
         match self {
             FailureClass::Denied => "denied",
             FailureClass::Expected => "expected",
+            FailureClass::Diagnostic => "diagnostic",
             FailureClass::Unexpected => "unexpected",
         }
     }
@@ -92,6 +98,7 @@ impl FailureClass {
         match self {
             FailureClass::Denied => "policy denial",
             FailureClass::Expected => "expected negative path",
+            FailureClass::Diagnostic => "lifecycle diagnostic",
             FailureClass::Unexpected => "unexpected failure",
         }
     }
@@ -218,6 +225,18 @@ pub const JOB_RUN_LIFECYCLE_CATEGORY: &str = "job_run_lifecycle";
 /// Operator-facing label for [`JOB_RUN_LIFECYCLE_CATEGORY`].
 pub const JOB_RUN_LIFECYCLE_LABEL: &str = "job-run lifecycle";
 
+/// Named lifecycle audit surfaces that are emitted only when an abnormal path
+/// occurs. Unlike callable tools, they cannot have a healthy-call denominator.
+pub const FAILURE_ONLY_DIAGNOSTIC_SURFACES: &[&str] = &[
+    "pipeline.run.terminal_conflict",
+    "pipeline.worker.exit",
+    "pipeline.worker.startup",
+];
+
+/// Operator-facing label for abnormal-path lifecycle records, whether they
+/// use one of [`FAILURE_ONLY_DIAGNOSTIC_SURFACES`] or have no tool identity.
+pub const LIFECYCLE_DIAGNOSTIC_LABEL: &str = "lifecycle diagnostics";
+
 /// Result of one aggregation: the incidents plus the raw denominators they
 /// were derived from, so no surface has to re-derive (or guess) them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,12 +248,21 @@ pub struct FailureIncidentReport {
     pub raw_events_by_class: BTreeMap<String, u64>,
     /// Incident count per class.
     pub incidents_by_class: BTreeMap<String, u64>,
+    /// Unique affected run count per class.
+    pub affected_runs_by_class: BTreeMap<String, u64>,
     /// Unique `job_run_id`s on the grouped incidents (the affected-run count).
     pub affected_run_count: u64,
     /// Raw failed rows with no tool identity.
     pub job_run_lifecycle_events: u64,
     /// Incidents whose root had no tool identity.
     pub job_run_lifecycle_incidents: u64,
+    /// Raw diagnostic rows, including both no-tool lifecycle rows and named
+    /// failure-only diagnostic surfaces.
+    pub lifecycle_diagnostic_events: u64,
+    /// Diagnostic incidents over the same raw population.
+    pub lifecycle_diagnostic_incidents: u64,
+    /// Unique runs affected by diagnostic incidents.
+    pub lifecycle_diagnostic_affected_run_count: u64,
     /// True when the scan hit `max_events` and older rows were not read.
     pub truncated: bool,
 }
@@ -261,7 +289,8 @@ pub fn build_report(failures: &[AuditEvent], truncated: bool) -> FailureIncident
         }
     }
     let mut incidents_by_class: BTreeMap<String, u64> = BTreeMap::new();
-    let mut run_ids: BTreeMap<String, ()> = BTreeMap::new();
+    let mut run_ids: BTreeSet<String> = BTreeSet::new();
+    let mut run_ids_by_class: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut job_run_lifecycle_incidents: u64 = 0;
     for incident in &incidents {
         *incidents_by_class
@@ -271,18 +300,42 @@ pub fn build_report(failures: &[AuditEvent], truncated: bool) -> FailureIncident
             job_run_lifecycle_incidents += 1;
         }
         for run_id in &incident.run_ids {
-            run_ids.insert(run_id.clone(), ());
+            run_ids.insert(run_id.clone());
+            run_ids_by_class
+                .entry(incident.class.as_str().to_string())
+                .or_default()
+                .insert(run_id.clone());
         }
     }
+    let affected_runs_by_class: BTreeMap<String, u64> = run_ids_by_class
+        .into_iter()
+        .map(|(class, ids)| (class, ids.len() as u64))
+        .collect();
+    let lifecycle_diagnostic_events = raw_events_by_class
+        .get(FailureClass::Diagnostic.as_str())
+        .copied()
+        .unwrap_or(0);
+    let lifecycle_diagnostic_incidents = incidents_by_class
+        .get(FailureClass::Diagnostic.as_str())
+        .copied()
+        .unwrap_or(0);
+    let lifecycle_diagnostic_affected_run_count = affected_runs_by_class
+        .get(FailureClass::Diagnostic.as_str())
+        .copied()
+        .unwrap_or(0);
 
     FailureIncidentReport {
         raw_failed_events: failures.len() as u64,
         raw_events_by_class,
         incidents_by_class,
+        affected_runs_by_class,
         incidents,
         affected_run_count: run_ids.len() as u64,
         job_run_lifecycle_events,
         job_run_lifecycle_incidents,
+        lifecycle_diagnostic_events,
+        lifecycle_diagnostic_incidents,
+        lifecycle_diagnostic_affected_run_count,
         truncated,
     }
 }
@@ -292,6 +345,9 @@ pub fn build_report(failures: &[AuditEvent], truncated: bool) -> FailureIncident
 /// path. Anything unmatched is treated as unexpected — the conservative
 /// direction, since under-reporting a real failure is the costlier mistake.
 pub fn classify(event: &AuditEvent) -> FailureClass {
+    if is_lifecycle_diagnostic(event) {
+        return FailureClass::Diagnostic;
+    }
     if matches!(event.status, AuditEventStatus::Denied) {
         return FailureClass::Denied;
     }
@@ -313,6 +369,23 @@ pub fn classify(event: &AuditEvent) -> FailureClass {
         return FailureClass::Expected;
     }
     FailureClass::Unexpected
+}
+
+/// True for a failure-only named diagnostic surface. Callers use the same
+/// predicate when excluding those rows from callable-tool rate rankings.
+pub fn is_failure_only_diagnostic_surface(name: &str) -> bool {
+    let name = name.trim();
+    FAILURE_ONLY_DIAGNOSTIC_SURFACES.contains(&name)
+}
+
+/// True when an audit row is a lifecycle diagnostic rather than a call whose
+/// success and failure populations can be compared.
+pub fn is_lifecycle_diagnostic(event: &AuditEvent) -> bool {
+    !has_tool_identity(event)
+        || event
+            .tool_name
+            .as_deref()
+            .is_some_and(is_failure_only_diagnostic_surface)
 }
 
 /// True when the row names a real tool. Empty/`NULL` tool names are job-run

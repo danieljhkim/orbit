@@ -9,8 +9,9 @@ use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Duration, Utc};
 use orbit_core::application::job::JobRunListParams;
 use orbit_core::{
-    AuditEventFilter, AuditEventStatus, AuditToolAggregate, FailureIncidentQuery, JobRunState,
-    OrbitError, OrbitRuntime,
+    AuditEventFilter, AuditEventStatus, AuditToolAggregate, FailureClass, FailureIncidentQuery,
+    FailureIncidentReport, JOB_RUN_LIFECYCLE_LABEL, JobRunState, LIFECYCLE_DIAGNOSTIC_LABEL,
+    OrbitError, OrbitRuntime, is_failure_only_diagnostic_surface,
 };
 use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ use serde_json::{Value, json};
 use super::denials::{
     collect_denial_rows, denials_by_reason_summary, denials_by_tool_summary, scan_v2_loop_denials,
 };
-use super::incidents::ROLLUP_SCAN_LIMIT;
+use super::incidents::{ROLLUP_SCAN_LIMIT, failure_category_summaries};
 use super::{
     AuditQuery, AuditSummaryQuery, DEFAULT_SUMMARY_WINDOW, HISTORY_DEFAULT_LIMIT,
     HISTORY_MAX_LIMIT, bad_request, bounded_limit, map_runtime_error, server_error,
@@ -228,10 +229,16 @@ pub(super) async fn audit_summary(Ws(runtime): Ws, Query(q): Query<AuditSummaryQ
         "failure_incidents": bundle.failure_incidents,
         "failure_incidents_by_class": bundle.failure_incidents_by_class,
         "failed_events_by_class": bundle.failed_events_by_class,
+        "affected_runs_by_class": bundle.affected_runs_by_class,
+        "failure_categories": bundle.failure_categories,
         "affected_run_count": bundle.affected_run_count,
         "job_run_lifecycle_failures": bundle.job_run_lifecycle_failures,
         "job_run_lifecycle_incidents": bundle.job_run_lifecycle_incidents,
-        "job_run_lifecycle_label": "job-run lifecycle",
+        "job_run_lifecycle_label": JOB_RUN_LIFECYCLE_LABEL,
+        "lifecycle_diagnostic_events": bundle.lifecycle_diagnostic_events,
+        "lifecycle_diagnostic_incidents": bundle.lifecycle_diagnostic_incidents,
+        "lifecycle_diagnostic_affected_run_count": bundle.lifecycle_diagnostic_affected_run_count,
+        "lifecycle_diagnostic_label": LIFECYCLE_DIAGNOSTIC_LABEL,
         "failed_runs": bundle.failed_runs,
         "active_long_runs": bundle.active_long_runs,
         "sparkline": sparkline,
@@ -259,9 +266,14 @@ struct AuditSummaryBundle {
     failure_incidents: u64,
     failure_incidents_by_class: BTreeMap<String, u64>,
     failed_events_by_class: BTreeMap<String, u64>,
+    affected_runs_by_class: BTreeMap<String, u64>,
+    failure_categories: Value,
     affected_run_count: u64,
     job_run_lifecycle_failures: u64,
     job_run_lifecycle_incidents: u64,
+    lifecycle_diagnostic_events: u64,
+    lifecycle_diagnostic_incidents: u64,
+    lifecycle_diagnostic_affected_run_count: u64,
     failed_runs: i64,
     active_long_runs: i64,
     buckets: Vec<(String, i64)>,
@@ -312,15 +324,14 @@ fn compute_audit_summary_bundle(
     let role_aggs = runtime.audit_event_aggregates_by_role(&since)?;
     let actor_aggs = runtime.audit_event_aggregates_by_actor(&since)?;
 
-    let mut failures_vec: Vec<_> = tool_aggs
+    let unexpected_by_tool = raw_failure_counts_by_tool(&incidents, FailureClass::Unexpected);
+    let mut failures_vec: Vec<_> = unexpected_by_tool
         .iter()
-        .filter(|t| t.failures > 0 && is_named_tool(&t.tool_name))
-        .map(|t| {
+        .map(|(tool, count)| {
             json!({
-                "tool": t.tool_name,
-                "count": t.failures,
-                "mcp": t.mcp_failures,
-                "cli": t.cli_failures,
+                "tool": tool,
+                "count": count,
+                "class": FailureClass::Unexpected.as_str(),
             })
         })
         .collect();
@@ -359,27 +370,28 @@ fn compute_audit_summary_bundle(
 
     let mut rate_vec: Vec<_> = tool_aggs
         .iter()
-        .filter(|t| t.total >= 5 && is_named_tool(&t.tool_name))
-        .map(|t| {
-            let rate = t.failures as f64 / t.total as f64;
-            let mcp_rate = if t.mcp_total > 0 {
-                t.mcp_failures as f64 / t.mcp_total as f64
-            } else {
-                0.0
-            };
-            let cli_rate = if t.cli_total > 0 {
-                t.cli_failures as f64 / t.cli_total as f64
-            } else {
-                0.0
-            };
-            json!({
+        .filter_map(|t| {
+            let unexpected_failures = unexpected_by_tool.get(&t.tool_name).copied().unwrap_or(0);
+            let comparison_population = t.successes + unexpected_failures;
+            let is_callable = t.mcp_total + t.cli_total > 0;
+            if !is_named_tool(&t.tool_name)
+                || is_failure_only_diagnostic_surface(&t.tool_name)
+                || !is_callable
+                || t.successes == 0
+                || unexpected_failures == 0
+                || comparison_population < 5
+            {
+                return None;
+            }
+            let rate = unexpected_failures as f64 / comparison_population as f64;
+            Some(json!({
                 "tool": t.tool_name,
                 "rate": rate,
-                "failures": t.failures,
-                "mcp_rate": mcp_rate,
-                "cli_rate": cli_rate,
-                "total": t.total,
-            })
+                "failures": unexpected_failures,
+                "successes": t.successes,
+                "total": comparison_population,
+                "denominator": "successful + unexpected failed calls",
+            }))
         })
         .collect();
     rate_vec.sort_by(|a, b| {
@@ -448,6 +460,7 @@ fn compute_audit_summary_bundle(
     let denial_rows = collect_denial_rows(runtime, Some(since), None, None)?;
     let denials_by_tool = denials_by_tool_summary(&denial_rows, 8);
     let denials_by_reason = denials_by_reason_summary(&denial_rows, 8);
+    let failure_categories = failure_category_summaries(&incidents);
 
     Ok(AuditSummaryBundle {
         total,
@@ -457,9 +470,14 @@ fn compute_audit_summary_bundle(
         failure_incidents: incidents.incident_count(),
         failure_incidents_by_class: incidents.incidents_by_class,
         failed_events_by_class: incidents.raw_events_by_class,
+        affected_runs_by_class: incidents.affected_runs_by_class,
+        failure_categories,
         affected_run_count: incidents.affected_run_count,
         job_run_lifecycle_failures: incidents.job_run_lifecycle_events,
         job_run_lifecycle_incidents: incidents.job_run_lifecycle_incidents,
+        lifecycle_diagnostic_events: incidents.lifecycle_diagnostic_events,
+        lifecycle_diagnostic_incidents: incidents.lifecycle_diagnostic_incidents,
+        lifecycle_diagnostic_affected_run_count: incidents.lifecycle_diagnostic_affected_run_count,
         failed_runs,
         active_long_runs,
         buckets,
@@ -473,6 +491,32 @@ fn compute_audit_summary_bundle(
         denials_by_tool,
         denials_by_reason,
     })
+}
+
+/// Counts raw incident evidence by tool for one class. This deliberately uses
+/// the existing incident classifier instead of maintaining a second list of
+/// expected/diagnostic message rules in the dashboard API.
+fn raw_failure_counts_by_tool(
+    report: &FailureIncidentReport,
+    class: FailureClass,
+) -> BTreeMap<String, i64> {
+    let mut counts = BTreeMap::new();
+    for event in report
+        .incidents
+        .iter()
+        .filter(|incident| incident.class == class)
+        .flat_map(|incident| &incident.events)
+    {
+        let Some(tool) = event
+            .tool_name
+            .as_deref()
+            .filter(|tool| is_named_tool(tool) && !is_failure_only_diagnostic_surface(tool))
+        else {
+            continue;
+        };
+        *counts.entry(tool.to_string()).or_insert(0) += 1;
+    }
+    counts
 }
 
 /// Builds a contiguous hourly sparkline covering `[truncate_to_hour(since), now]`,

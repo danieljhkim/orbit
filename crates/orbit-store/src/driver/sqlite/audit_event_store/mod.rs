@@ -849,7 +849,9 @@ impl Store {
 
         let sql = "SELECT COALESCE(tool_name, 'unknown') AS tool, \
                    COUNT(*), \
+                   COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END), 0), \
                    COALESCE(SUM(CASE WHEN status = 'failure' THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0), \
                    COALESCE(SUM(CASE WHEN subcommand = 'run-mcp' THEN 1 ELSE 0 END), 0), \
                    COALESCE(SUM(CASE WHEN subcommand = 'run' THEN 1 ELSE 0 END), 0), \
                    COALESCE(SUM(CASE WHEN status = 'failure' AND subcommand = 'run-mcp' THEN 1 ELSE 0 END), 0), \
@@ -866,12 +868,14 @@ impl Store {
                 Ok(AuditToolAggregate {
                     tool_name: row.get(0)?,
                     total: row.get(1)?,
-                    failures: row.get(2)?,
-                    mcp_total: row.get(3)?,
-                    cli_total: row.get(4)?,
-                    mcp_failures: row.get(5)?,
-                    cli_failures: row.get(6)?,
-                    avg_duration_ms: row.get(7)?,
+                    successes: row.get(2)?,
+                    failures: row.get(3)?,
+                    denials: row.get(4)?,
+                    mcp_total: row.get(5)?,
+                    cli_total: row.get(6)?,
+                    mcp_failures: row.get(7)?,
+                    cli_failures: row.get(8)?,
+                    avg_duration_ms: row.get(9)?,
                 })
             })
             .map_err(|e| OrbitError::Store(e.to_string()))?;
