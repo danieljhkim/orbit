@@ -23,6 +23,7 @@ macro_rules! deterministic_action_catalog {
                 ClassifyWorkspaceAutoTasks => "classify_workspace_auto_tasks",
                 ContextConflictCheck => "context_conflict_check",
                 DrainWindow => "drain_window",
+                FileCiFailureTasks => "file_ci_failure_tasks",
                 GateStarvationFail => "gate_starvation_fail",
                 InvokeAndWait => "invoke_and_wait",
                 InvokeDetached => "invoke_detached",
@@ -43,6 +44,7 @@ macro_rules! deterministic_action_catalog {
                 ValidateBundles => "validate_bundles",
             }
             engine {
+                CollectCiEvidence => "collect_ci_evidence",
                 GitCommit => "git_commit",
                 GitMerge => "git_merge",
                 GitPush => "git_push",

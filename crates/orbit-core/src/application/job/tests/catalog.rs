@@ -22,6 +22,10 @@ const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
+        "ci_failure_sweep_pipeline",
+        include_str!("../../../../assets/jobs/ci_failure_sweep_pipeline.yaml"),
+    ),
+    (
         "epic_pipeline",
         include_str!("../../../../assets/jobs/epic_pipeline.yaml"),
     ),
@@ -188,6 +192,48 @@ fn default_activity_catalog() -> V2ActivityCatalog {
         catalog.insert(*name, asset.spec);
     }
     catalog
+}
+
+/// The CI-failure sweep only looks and files. An agent step or a worktree in
+/// this pipeline would mean an agent had been handed the credentialed side of
+/// the sweep, or that the sweep had started building checkouts it never needs.
+#[test]
+fn ci_failure_sweep_pipeline_is_two_deterministic_steps_and_single_flight() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "ci_failure_sweep_pipeline").then_some(*yaml))
+        .expect("CI-failure sweep job default exists");
+    let mut asset = load_job_asset(yaml).expect("parse CI-failure sweep pipeline");
+    let catalog = default_activity_catalog();
+    resolve_job_target_refs(&mut asset.spec, &catalog).expect("resolve sweep target refs");
+
+    assert_eq!(asset.spec.max_active_runs, 1);
+
+    let step_ids: Vec<&str> = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect();
+    assert_eq!(step_ids, ["collect", "file"], "collect must precede file");
+
+    for step in &asset.spec.steps {
+        let JobV2StepBody::Target(target) = &step.body else {
+            panic!(
+                "sweep step `{}` must be a resolved activity target",
+                step.id
+            );
+        };
+        assert!(
+            matches!(target.spec, ActivityV2Spec::Deterministic(_)),
+            "sweep step `{}` must be deterministic; this sweep launches no agent",
+            step.id
+        );
+    }
+    assert!(
+        !yaml.contains("worktree_setup"),
+        "the sweep only looks and files, so it must never build a worktree"
+    );
 }
 
 #[test]

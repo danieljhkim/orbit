@@ -27,6 +27,10 @@ pub(crate) const DEFAULT_JOB_FILES: &[(&str, &str)] = &[
         include_str!("../../../assets/jobs/auto_task_scheduler_pipeline.yaml"),
     ),
     (
+        "ci_failure_sweep_pipeline",
+        include_str!("../../../assets/jobs/ci_failure_sweep_pipeline.yaml"),
+    ),
+    (
         "epic_pipeline",
         include_str!("../../../assets/jobs/epic_pipeline.yaml"),
     ),

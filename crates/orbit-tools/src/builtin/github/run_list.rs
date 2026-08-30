@@ -10,7 +10,7 @@ const RUN_LIST_FIELDS: &str = "databaseId,number,workflowName,displayTitle,statu
 const DEFAULT_LIMIT: u64 = 20;
 const MAX_LIMIT: u64 = 100;
 
-pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitError> {
     let mut args = vec!["run".to_string(), "list".to_string()];
     super::push_optional_flag(&mut args, input, "branch", "--branch")?;
     super::push_optional_flag(&mut args, input, "workflow", "--workflow")?;
@@ -30,7 +30,7 @@ pub(super) fn build_exec_request(input: &Value) -> Result<ExecRequest, OrbitErro
 /// `reported_head_sha` is deliberately not called `sha`: it is the SHA the
 /// workflow event carried, which is not necessarily the commit the runner
 /// tested. Read `github.run.logs` for that.
-pub(super) fn project_run(run: &Value) -> Value {
+pub fn project_run(run: &Value) -> Value {
     json!({
         "run_id": run["databaseId"],
         "run_number": run["number"],

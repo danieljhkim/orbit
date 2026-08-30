@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::TIMEOUT_DEFAULT_MS;
 
-pub(super) fn build_exec_request(_input: &Value) -> Result<ExecRequest, OrbitError> {
+pub fn build_exec_request(_input: &Value) -> Result<ExecRequest, OrbitError> {
     Ok(super::gh_exec_request(
         vec!["auth".to_string(), "status".to_string()],
         None,
