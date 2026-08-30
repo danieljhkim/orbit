@@ -2,6 +2,8 @@
 //! child-runtime profile. [ORB-11055] [ORB-11066] [ORB-11070]
 
 #[cfg(target_os = "macos")]
+use std::ffi::OsStr;
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
@@ -52,12 +54,22 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
     std::fs::create_dir_all(&repo).expect("create repo");
     init_git_repo(&repo);
 
+    // `workspace init` freezes crew availability from PATH. Hosted macOS
+    // runners do not provide an agent CLI, which otherwise seeds an explicit
+    // empty `[crews]` registry while the CI remediation auto-task still names
+    // the `system` crew. A disposable executable keeps this fixture
+    // deterministic without dispatching an agent.
+    let provider_bin = home.join("stub-bin");
+    plant_agent_cli_stub(&provider_bin, "codex");
+    let provider_path = stub_first_path(&provider_bin);
+
     run_orbit(
         &orbit_bin,
         &repo,
         &home,
         &["workspace", "init", "--name", "orb-11055-nested-audit"],
         "workspace init",
+        Some(&provider_path),
     );
 
     let minted = run_orbit(
@@ -66,6 +78,7 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
         &home,
         &["auto-task", "mint", "ci-failure-remediation", "--json"],
         "auto-task mint",
+        None,
     );
     let minted: Value = serde_json::from_slice(&minted.stdout).expect("mint JSON");
     let task_id = minted["id"].as_str().expect("task id").to_string();
@@ -98,6 +111,7 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
             "--json",
         ],
         "ordinary task add",
+        None,
     );
     let ordinary: Value = serde_json::from_slice(&ordinary.stdout).expect("ordinary task JSON");
     let ordinary_id = ordinary["id"]
@@ -406,8 +420,10 @@ fn run_orbit(
     home: &Path,
     args: &[&str],
     label: &str,
+    path: Option<&OsStr>,
 ) -> std::process::Output {
-    let output = Command::new(bin)
+    let mut command = Command::new(bin);
+    command
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
@@ -416,7 +432,11 @@ fn run_orbit(
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .env_remove("ORBIT_AGENT_NAME")
         .env_remove("ORBIT_AGENT_MODEL")
-        .args(args)
+        .args(args);
+    if let Some(path) = path {
+        command.env("PATH", path);
+    }
+    let output = command
         .output()
         .unwrap_or_else(|err| panic!("{label}: spawn orbit: {err}"));
     assert!(
@@ -426,6 +446,27 @@ fn run_orbit(
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+#[cfg(target_os = "macos")]
+fn plant_agent_cli_stub(bin: &Path, name: &str) {
+    std::fs::create_dir_all(bin).expect("create stub CLI directory");
+    let stub = bin.join(name);
+    std::fs::write(&stub, "#!/bin/sh\nexit 0\n").expect("write stub agent CLI");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("mark stub agent CLI executable");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn stub_first_path(bin: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![bin.to_path_buf()];
+    entries.extend(std::env::split_paths(&inherited));
+    std::env::join_paths(entries).expect("join PATH entries")
 }
 
 #[cfg(target_os = "macos")]
