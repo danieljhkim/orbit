@@ -1,8 +1,12 @@
 ---
 title: What Orbit Is
 description: "Orbit is a durable, intent-tracked, auditable task layer for developers driving AI coding agents at high volume — local-first by design."
-tableOfContents: false
+template: splash
+prev: false
+next: false
 ---
+
+<div class="orbit-landing not-content">
 
 <section class="orbit-hero">
   <div class="orbit-hero-copy">
@@ -15,65 +19,133 @@ tableOfContents: false
       <button class="orbit-hero-install-copy" type="button" data-copy="npm install -g @orbit-tools/cli">Copy</button>
     </div>
     <div class="orbit-hero-actions">
-      <a class="orbit-button primary" href="./getting-started/install/">Install Orbit →</a>
+      <a class="orbit-button primary" href="/getting-started/install/">Install Orbit →</a>
+      <a class="orbit-button" href="/reference/cli/">Read the CLI reference</a>
+    </div>
+    <div class="orbit-hero-providers">
+      <span>Runs your provider CLI</span>
+      <span class="orbit-hero-providers-rule" aria-hidden="true"></span>
+      <span>Claude Code</span>
+      <span>Codex</span>
+      <span>Gemini</span>
+      <span>Grok Build</span>
     </div>
   </div>
-  <div class="orbit-hero-diagram" aria-hidden="true">
-    <span class="orbit-dot"></span>
-    <span class="orbit-dot orbit-dot-outer"></span>
-    <span class="orbit-core"></span>
+
+  <div class="orbit-terminal">
+    <div class="orbit-terminal-bar">
+      <span>~/repo</span>
+      <span>one task, end to end</span>
+    </div>
+    <div class="orbit-terminal-body">
+      <div><span class="orbit-terminal-prompt">$ </span><span class="orbit-terminal-cmd">orbit task add --title "Document fsProfile resolution" \</span></div>
+      <div><span class="orbit-terminal-cmd">    --acceptance-criteria "..." --complexity medium</span></div>
+      <div><span class="orbit-terminal-id">[TASK_ID]</span></div>
+      <div class="orbit-terminal-gap"></div>
+      <div><span class="orbit-terminal-prompt">$ </span><span class="orbit-terminal-cmd">orbit run ship "$TASK_ID"</span></div>
+      <div>submitted · run <span class="orbit-terminal-id">[RUN_ID]</span></div>
+      <div class="orbit-terminal-gap"></div>
+      <div><span class="orbit-terminal-prompt">$ </span><span class="orbit-terminal-cmd">orbit run show</span></div>
+      <div class="orbit-terminal-head">step   scope             status   duration</div>
+      <div>plan   worktree: iso     <span class="orbit-terminal-id">ok</span>       00:12</div>
+      <div>edit   fsProfile: docs   <span class="orbit-terminal-id">ok</span>       01:47</div>
+      <div>test   fsProfile: docs   <span class="orbit-terminal-id">ok</span>       02:03</div>
+      <div>pr     github            <span class="orbit-terminal-id">ok</span>       00:09</div>
+      <div class="orbit-terminal-gap"></div>
+      <div><span class="orbit-terminal-prompt">$ </span><span class="orbit-terminal-cmd">git log -1 --grep "$TASK_ID" --oneline</span></div>
+      <div><span class="orbit-terminal-id">[SHA]</span> docs: document fsProfile resolution</div>
+    </div>
   </div>
 </section>
 
 <div class="orbit-section-title">Start here</div>
 
-<div class="orbit-card-grid">
-  <a class="orbit-card" data-tag="01" href="./getting-started/install/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></div>
-    <h3>Install Orbit</h3>
-    <p>One binary, local config. Bring your own model provider.</p>
+<div class="orbit-card-grid orbit-card-grid-3">
+  <a class="orbit-card" data-tag="01" href="/getting-started/install/">
+    <h3>Install</h3>
+    <p>One binary, no Rust toolchain. Then <code>orbit init</code> sets up your root and skills.</p>
+    <div class="orbit-card-cmd">orbit init</div>
   </a>
-  <a class="orbit-card" data-tag="02" href="./getting-started/first-task/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
-    <h3>Your first task</h3>
-    <p>Define scope, attach activities, watch agents work in parallel.</p>
+  <a class="orbit-card" data-tag="02" href="/getting-started/first-task/">
+    <h3>Write a task</h3>
+    <p>Acceptance criteria are required — agents self-evaluate against them.</p>
+    <div class="orbit-card-cmd">orbit task add --title "…"</div>
   </a>
-  <a class="orbit-card" data-tag="03" href="./concepts/activities-jobs/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.91a1 1 0 0 0 0-1.83z"/><path d="M22 17.65l-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="M22 12.65l-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg></div>
-    <h3>Activities &amp; jobs</h3>
-    <p>The atomic unit of work. Composable, replayable, scoped by filesystem policy.</p>
-  </a>
-  <a class="orbit-card" data-tag="04" href="./reference/cli/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
-    <h3>CLI reference</h3>
-    <p>A compact map of common commands and workflows.</p>
-  </a>
-  <a class="orbit-card" data-tag="05" href="./reference/scoping/">
-    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></div>
-    <h3>Policies</h3>
-    <p>Declarative scoping rules for what an agent can touch.</p>
+  <a class="orbit-card" data-tag="03" href="/how-to/task-lifecycle/">
+    <h3>Ship it</h3>
+    <p>The gated pipeline opens a PR, or stays local with <code>--mode local</code>.</p>
+    <div class="orbit-card-cmd">orbit run ship "$TASK_ID"</div>
   </a>
 </div>
 
 <div class="orbit-section-title">Why Orbit</div>
 
-<div class="orbit-card-grid">
+<div class="orbit-card-grid orbit-card-grid-4">
   <div class="orbit-card">
+    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h11"/><path d="M4 12h11"/><path d="M4 19h7"/><path d="m16 18 2 2 4-4"/></svg></div>
     <h3>Auditable</h3>
-    <p>Task mutations, workflow events, provider turns, and tool calls emit joined audit records. Captured payloads use write-time redaction.</p>
+    <p>Task mutations, workflow events, provider turns, and tool calls emit joined audit records, redacted at write time.</p>
   </div>
   <div class="orbit-card">
+    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M2 12h6.5"/><path d="M15.5 12H22"/></svg></div>
     <h3>Intent-attributed</h3>
     <p>Workflow commits carry the allocated task ID, so <code>git log --grep</code> links code history back to the task record.</p>
   </div>
   <div class="orbit-card">
+    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01"/><path d="M7 16.5h.01"/></svg></div>
     <h3>Local-first</h3>
     <p>Task and run state stay in your Orbit roots. Provider CLIs handle model traffic using your own provider accounts.</p>
   </div>
   <div class="orbit-card">
+    <div class="orbit-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="2"/><rect x="14" y="4" width="7" height="16" rx="2"/></svg></div>
     <h3>Safe parallel</h3>
-    <p>Worktree isolation and filesystem policies (OS-level on macOS via <code>sandbox-exec</code>) keep parallel agents from colliding.</p>
+    <p>Worktree isolation and filesystem policies (<code>sandbox-exec</code>, <code>bwrap</code>) keep parallel agents from colliding.</p>
   </div>
+</div>
+
+<div class="orbit-section-title">Explore the docs</div>
+
+<div class="orbit-docs-index">
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">Getting Started</div>
+    <a href="/getting-started/install/">Install Orbit</a>
+    <a href="/getting-started/first-task/">First Task</a>
+    <a href="/getting-started/workflows/">Default Workflows</a>
+  </div>
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">Concepts</div>
+    <a href="/concepts/tasks/">Tasks</a>
+    <a href="/concepts/activities-jobs/">Activities and Jobs</a>
+    <a href="/concepts/policies/">Policies</a>
+    <a href="/concepts/agents/">Agents</a>
+  </div>
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">How-to Guides</div>
+    <a href="/how-to/task-lifecycle/">Run a Task Lifecycle</a>
+    <a href="/how-to/write-activity/">Write an Activity</a>
+    <a href="/how-to/scoping-rules/">Choose Scopes</a>
+    <a href="/how-to/mcp-integration/">Set Up MCP</a>
+  </div>
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">Reference</div>
+    <a href="/reference/cli/">CLI Commands</a>
+    <a href="/reference/activity-job-yaml/">Activity and Job YAML</a>
+    <a href="/reference/policy-format/">Policy Format</a>
+    <a href="/reference/config/">Configuration</a>
+    <a href="/reference/scoping/">Scoping Rules</a>
+  </div>
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">Architecture</div>
+    <a href="/architecture/">Overview</a>
+  </div>
+  <div class="orbit-docs-group">
+    <div class="orbit-docs-group-title">Contributing</div>
+    <a href="/contributing/local-dev/">Local Development</a>
+    <a href="/contributing/crate-layout/">Crate Layout</a>
+    <a href="/contributing/pr-workflow/">PR Workflow</a>
+  </div>
+</div>
+
 </div>
 
 <script is:inline>
