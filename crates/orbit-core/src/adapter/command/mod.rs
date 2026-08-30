@@ -14,8 +14,6 @@ mod tests;
 
 pub use crate::runtime::tool_exec::DryRunResult;
 
-#[cfg(test)]
-pub(crate) use dispatch::override_activity_tools_for_test;
 pub use dispatch::{
     AuditContext, ToolDispatchOutcome, ToolEntryPoint, audit_role_label,
     audit_role_label_for_entry_point, execute_global_in_process_tool_dispatch,

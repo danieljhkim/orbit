@@ -104,7 +104,7 @@ jobs:
 
   # [ORB-10010] Coverage visibility — informational, NOT a merge gate. No CI
   # job gates merges on agent-main; failures are signals consumed by the
-  # qa-sweep and ci-failure-remediation routines. Coverage is doubly
+  # qa-sweep auto-task. Coverage is doubly
   # informational, and per-crate coverage targets (goals, not gates) are
   # documented in CONTRIBUTING.md "Testing & Coverage".
   coverage:

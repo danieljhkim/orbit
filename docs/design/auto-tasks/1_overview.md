@@ -78,11 +78,11 @@ becomes just the first definition.
 | Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
 | Deterministic action | `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
-| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950, ORB-11054 |
+| Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |
 
 ## Embedded default catalog
 
-These five YAML files live under `crates/orbit-core/assets/auto_tasks/` and are
+These four YAML files live under `crates/orbit-core/assets/auto_tasks/` and are
 registered in `DEFAULT_AUTO_TASK_FILES`. `orbit workspace init` materializes a
 missing file as `enabled: false`; re-init does not overwrite a workspace-authored
 definition of the same name.
@@ -98,21 +98,6 @@ definition of the same name.
   is a successful no-op (ORB-10950).
 - `code-review` — disabled-by-default six-hourly review of commits merged
   since the previous sweep's recorded cursor.
-- `ci-failure-remediation` — disabled-by-default hourly investigation and
-  remediation of current-head GitHub Actions failures across the workspace's
-  derived integration and release heads plus open pull-request heads, with
-  stale-run filtering, root-cause clustering, CI-failure-hook deduplication,
-  and evidence-backed no-diff outcomes (ORB-11054). GitHub-Actions-shaped;
-  operators on other CI should adapt before enabling. All CI discovery runs
-  through the read-only `github.*` builtin tools, which bound log output and
-  redact credentials; a `github.auth.status` preflight makes an execution lane
-  that cannot authenticate report a capability-unavailable outcome instead of a
-  clean pipeline (ORB-11059). The template persists the five exact GitHub-read
-  names as `required_tools` so dispatch unions them with the ordinary
-  `agent_implement` baseline rather than widening that activity (ORB-11070;
-  DANI-10056 is the missing-requirements incident, not a clean result).
-  Updating the template changes this creation-time list only for later mints;
-  already-created tasks retain their immutable list.
 
 ## Workspace-authored definitions in this repo
 
@@ -120,10 +105,6 @@ Orbit's own checkout also carries extra `.orbit/auto_tasks/` files that are
 **not** embedded defaults. They may be enabled, name a family-specific crew, or
 encode this repository's branches and gates. Re-init preserves them:
 
-- `ci-failure-remediation` — this repository's enabled, Orbit-specific
-  definition (ORB-10514, `crew: luna`). Distinct from the inert portable default
-  of the same name; managed-asset reconciliation treats the local file as
-  authored.
 - `doc-duties`, `model-price-audit`, `release-prep`, and this repository's
   enabled copies of catalog names such as `code-review` and
   `security-review`.
@@ -134,7 +115,7 @@ encode this repository's branches and gates. Re-init preserves them:
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
 - ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
-- ORB-10514 — Disabled CI-failure remediation definition.
+- ORB-10514 — Original workspace-authored CI-failure auto-task.
 - ORB-10549 — Embedded the portable, disabled friction-curation default and
   workspace materialization contract; [Auto-task primitive: file-backed recurring task templates + one generic scheduler routine](./4_decisions.md#auto-task-primitive-file-backed-recurring-task-templates-one-generic-scheduler-routine) should be updated through the
   Orbit ADR surface after this task lands.
@@ -142,17 +123,11 @@ encode this repository's branches and gates. Re-init preserves them:
   friction tool invocations on the registered `orbit tool run` surface.
 - ORB-10950 — Added the disabled weekly `security-review` default to the
   embedded catalog so new workspaces can opt into a recurring security review.
-- ORB-11054 — Added the disabled hourly `ci-failure-remediation` default to the
-  embedded catalog and split this overview so repo-local workspace-authored
-  definitions are no longer listed as if they were embedded defaults.
-- ORB-11059 — Routed the default's CI discovery through the read-only
-  `github.run.*` / `github.pr.list` / `github.auth.status` builtin tools and
-  added the capability-unavailable outcome.
-- ORB-11070 — Adopted those five exact names as the template's `required_tools`
-  so minted CI-remediation tasks can reach them under `agent_implement`
-  without changing that activity's baseline. DANI-10056 remains cited as
-  failed-validation evidence of the missing-requirements bug.
+- ORB-11054 — Split this overview so repo-local workspace-authored definitions
+  are no longer listed as if they were embedded defaults.
 - ORB-11095 — Added centralized finding-title provenance and established the
   shipped definition's canonical `code-review` name.
+- ORB-11115 — Retired the shipped CI-failure auto-task; CI-failure filing now
+  belongs to the `ci_failure_sweep` routine.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
