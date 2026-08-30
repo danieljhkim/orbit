@@ -750,3 +750,86 @@ fn initializing_requires_the_branch_to_stay_absent() {
     assert!(!fixture.remote_file(&foreign, "README.md").is_empty());
     assert_eq!(fixture.remote_history().len(), 1);
 }
+
+#[test]
+fn publication_preserves_crlf_bytes_and_skips_configured_filters() {
+    let fixture = fixture("ws_publish_crlf_attr");
+    let registry = fixture.registry();
+    let binding = registry
+        .find_workspace_checkout(&fixture.workspace_id)
+        .unwrap()
+        .unwrap();
+    let store = bundle_store(&registry, &binding);
+    let manifest = seed_crlf_gitattributes_attachments(&store, "ORB-00001");
+    let expected_sha = manifest
+        .files
+        .iter()
+        .find(|file| file.path == "payload.txt")
+        .expect("payload manifest entry")
+        .sha256
+        .clone();
+
+    let (env, sentinel) = poison_publication_git_filters(fixture.root.path());
+    let outcome = publish_task_snapshot(
+        &registry,
+        request(&fixture, 1, None),
+        &include_attachment_policy(),
+        None,
+    )
+    .expect("publish crlf attachments");
+    let inspection = inspect_publication(PublicationInspectRequest {
+        workspace_id: fixture.workspace_id.clone(),
+        source_repository_fingerprint: FINGERPRINT.to_string(),
+        publication_id: PUBLICATION_ID.to_string(),
+        authority_machine_id: AUTHORITY.to_string(),
+        publication_remote: fixture.remote_str(),
+        publication_branch: BRANCH.to_string(),
+        cache_dir: fixture.root.path().join("inspect-cache"),
+        commit: None,
+    })
+    .expect("inspect published crlf snapshot");
+    drop(env);
+
+    assert_eq!(outcome.status, PublicationPublishStatus::Initialized);
+    assert_eq!(inspection.label.commit_id, outcome.commit_id);
+    assert!(
+        !sentinel.exists(),
+        "publication or inspection executed an external Git filter"
+    );
+
+    let payload_spec = format!(
+        "{}:tasks/ORB-00001/artifacts/files/payload.txt",
+        outcome.commit_id
+    );
+    assert_eq!(
+        git_binary(&fixture.remote, &["cat-file", "blob", &payload_spec]),
+        CRLF_PAYLOAD
+    );
+    let attrs_spec = format!(
+        "{}:tasks/ORB-00001/artifacts/files/.gitattributes",
+        outcome.commit_id
+    );
+    assert_eq!(
+        git_binary(&fixture.remote, &["cat-file", "blob", &attrs_spec]),
+        GITATTRIBUTES_CRLF
+    );
+    let published_manifest = fixture.remote_file(
+        &outcome.commit_id,
+        "tasks/ORB-00001/artifacts/manifest.yaml",
+    );
+    assert!(
+        published_manifest.contains(&expected_sha),
+        "{published_manifest}"
+    );
+    assert_eq!(
+        expected_sha,
+        format!("{:x}", sha2::Sha256::digest(CRLF_PAYLOAD))
+    );
+    let inspected = fixture
+        .root
+        .path()
+        .join("inspect-cache")
+        .join(PUBLICATION_ID)
+        .join("tree/tasks/ORB-00001/artifacts/files/payload.txt");
+    assert_eq!(fs::read(inspected).unwrap(), CRLF_PAYLOAD);
+}

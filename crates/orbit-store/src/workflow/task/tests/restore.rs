@@ -112,7 +112,7 @@ fn fixture(kind: AttachmentPolicyKind) -> RestoreFixture {
     fs::create_dir_all(&remote).unwrap();
     git(&remote, &["init", "-b", "main"]);
     replace_worktree(&remote, &snapshot);
-    git(&remote, &["add", "-A"]);
+    git_add_literal(&remote);
     git(&remote, &["commit", "-m", "publication"]);
 
     let destination = TempDir::new().unwrap();
@@ -187,6 +187,84 @@ fn identical_retry_is_explicit_and_does_not_duplicate_or_advance() {
     assert_eq!(registry.allocator_next_number().unwrap(), allocator);
     assert_eq!(tree_bytes(&canonical), before);
     assert_eq!(registry.tasks_for_workspace(WORKSPACE).unwrap().len(), 2);
+}
+
+#[test]
+fn restore_preserves_crlf_attachment_bytes_despite_gitattributes() {
+    let source = TempDir::new().unwrap();
+    let source_registry = open_registry(source.path());
+    let source_binding = bind_restore(&source_registry, source.path());
+    let store = bundle_store(&source_registry, &source_binding);
+    seed(
+        &store,
+        &source_registry,
+        WORKSPACE,
+        &make_bundle("ORB-00001", "crlf", Vec::new()),
+    );
+    seed_crlf_gitattributes_attachments(&store, "ORB-00001");
+
+    let snapshot = source.path().join("snapshot");
+    build_publication_snapshot(
+        &source_registry,
+        &snapshot,
+        PublicationSnapshotMetadata {
+            publication_id: PUBLICATION.to_string(),
+            workspace_id: WORKSPACE.to_string(),
+            source_repository_fingerprint: FINGERPRINT.to_string(),
+            authority_machine_id: AUTHORITY.to_string(),
+            generation: 1,
+            published_at: Utc.with_ymd_and_hms(2026, 8, 30, 4, 0, 0).unwrap(),
+            previous_publication: None,
+        },
+        &include_attachment_policy(),
+        None,
+    )
+    .unwrap();
+
+    let remote = source.path().join("publication.git");
+    fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-b", "main"]);
+    replace_worktree(&remote, &snapshot);
+    git_add_literal(&remote);
+    git(&remote, &["commit", "-m", "publication"]);
+
+    let destination = TempDir::new().unwrap();
+    let destination_registry = open_registry(destination.path());
+    bind_restore(&destination_registry, destination.path());
+    let cache = destination.path().join("publication-cache");
+    let (env, sentinel) = poison_publication_git_filters(destination.path());
+    let outcome = restore_publication(
+        &destination_registry,
+        PublicationRestoreRequest {
+            publication: PublicationInspectRequest {
+                workspace_id: WORKSPACE.to_string(),
+                source_repository_fingerprint: FINGERPRINT.to_string(),
+                publication_id: PUBLICATION.to_string(),
+                authority_machine_id: AUTHORITY.to_string(),
+                publication_remote: remote.to_string_lossy().into_owned(),
+                publication_branch: "refs/heads/main".to_string(),
+                cache_dir: cache,
+                commit: None,
+            },
+            mode: PublicationRestoreMode::EmptyDestination,
+        },
+    )
+    .unwrap();
+    drop(env);
+
+    assert_eq!(outcome.restored_task_ids, ["ORB-00001"]);
+    assert!(
+        !sentinel.exists(),
+        "restore inspection executed an external Git filter"
+    );
+    let canonical = destination_registry
+        .canonical_task_bundle_path(WORKSPACE, "ORB-00001")
+        .unwrap();
+    assert_eq!(
+        fs::read(canonical.join("artifacts/files/payload.txt")).unwrap(),
+        CRLF_PAYLOAD
+    );
+    read_bundle_at(&canonical).expect("restored bundle validates");
 }
 
 #[test]
