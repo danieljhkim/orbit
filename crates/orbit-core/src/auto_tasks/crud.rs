@@ -12,7 +12,7 @@
 
 use orbit_common::OrbitError;
 use orbit_common::fs::io::atomic_write_text;
-use orbit_types::task::Task;
+use orbit_types::task::{Task, normalize_required_tools};
 use orbit_types::workflow::{
     AUTO_TASK_SCHEMA_VERSION, AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy,
 };
@@ -48,8 +48,9 @@ impl OrbitRuntime {
     /// name already exists (update or toggle it instead).
     pub fn auto_task_add(
         &self,
-        params: AutoTaskAddParams,
+        mut params: AutoTaskAddParams,
     ) -> Result<AutoTaskDefinition, OrbitError> {
+        params.template.required_tools = normalize_required_tools(params.template.required_tools);
         let now = chrono::Utc::now().to_rfc3339();
         let actor = self.actor_label().to_string();
         let definition = AutoTaskDefinition {
@@ -150,7 +151,8 @@ impl OrbitRuntime {
         if let Some(dedupe) = params.dedupe {
             definition.dedupe = dedupe;
         }
-        if let Some(template) = params.template {
+        if let Some(mut template) = params.template {
+            template.required_tools = normalize_required_tools(template.required_tools);
             definition.template = template;
         }
         self.stamp_and_write(definition)

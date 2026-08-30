@@ -29,7 +29,7 @@ impl Tool for OrbitAutoTaskAddTool {
             },
             ToolParam {
                 name: "template".to_string(),
-                description: "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, priority?, crew?, status? }`. Provider-neutral — no turn knobs. Required.".to_string(),
+                description: "Task template: `{ title, description?, acceptance_criteria?, task_type?, tags?, required_tools?, priority?, crew?, status? }`. `required_tools` is an exact canonical-name list copied to every minted task. Provider-neutral — no turn knobs. Required.".to_string(),
                 param_type: "object".to_string(),
                 required: true,
             },

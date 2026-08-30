@@ -46,6 +46,7 @@ pub(crate) fn task_to_json(
         "dependencies": task.dependencies(),
         "resolved_dependencies": dependency_labels(task, status_by_id),
         "tags": task.tags,
+        "required_tools": task.required_tools,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
@@ -279,6 +280,9 @@ pub(super) fn task_field_to_json(
             serde_json::to_value(task.dependencies()).map_err(|e| OrbitError::Io(e.to_string()))
         }
         "tags" => serde_json::to_value(&task.tags).map_err(|e| OrbitError::Io(e.to_string())),
+        "required_tools" => {
+            serde_json::to_value(&task.required_tools).map_err(|e| OrbitError::Io(e.to_string()))
+        }
         "resolved_dependencies" => serde_json::to_value(dependency_labels(
             task,
             status_by_id.ok_or_else(|| {
@@ -392,6 +396,12 @@ pub(super) fn print_single_task_field(
         "tags" => {
             for tag in &task.tags {
                 println!("{}", tag);
+            }
+            Ok(())
+        }
+        "required_tools" => {
+            for tool in &task.required_tools {
+                println!("{}", tool);
             }
             Ok(())
         }

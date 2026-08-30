@@ -4,7 +4,8 @@ use orbit_common::security::redaction::redact_all;
 use orbit_store::contracts::TaskCreateParams as StoreTaskCreateParams;
 use orbit_types::record::OrbitEvent;
 use orbit_types::task::{
-    Task, TaskStatus, TaskType, normalize_task_dependencies, normalize_task_tags,
+    Task, TaskStatus, TaskType, normalize_required_tools, normalize_task_dependencies,
+    normalize_task_tags,
 };
 
 use super::TaskRecordUpdateParams;
@@ -91,6 +92,7 @@ impl OrbitRuntime {
                 dependencies: dependencies.clone(),
                 relations: params.relations.clone(),
                 tags: normalize_task_tags(params.tags.clone()),
+                required_tools: normalize_required_tools(params.required_tools.clone()),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: kept_context_files.clone(),

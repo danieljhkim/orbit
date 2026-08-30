@@ -43,6 +43,9 @@ pub struct AutoTaskUpdateArgs {
     /// Replace tags. Repeat for multiple.
     #[arg(long = "tag", action = ArgAction::Append)]
     pub tags: Vec<String>,
+    /// Replacement exact canonical tools copied to minted tasks (empty clears).
+    #[arg(long = "required-tools")]
+    pub required_tools: Option<String>,
     /// New priority
     #[arg(long, value_enum)]
     pub priority: Option<TaskPriority>,
@@ -64,6 +67,7 @@ impl AutoTaskUpdateArgs {
             || !self.criteria.is_empty()
             || self.task_type.is_some()
             || !self.tags.is_empty()
+            || self.required_tools.is_some()
             || self.priority.is_some()
             || self.crew.is_some()
             || self.status.is_some()
@@ -97,6 +101,11 @@ impl Execute for AutoTaskUpdateArgs {
                 } else {
                     self.tags.clone()
                 },
+                required_tools: self
+                    .required_tools
+                    .as_deref()
+                    .map(crate::parse::csv_to_vec)
+                    .unwrap_or(current.required_tools),
                 priority: self.priority.unwrap_or(current.priority),
                 crew: self.crew.clone().or(current.crew),
                 status: self.status.unwrap_or(current.status),

@@ -30,8 +30,14 @@ spec:
 
 | Type | Required fields | Notes |
 |------|-----------------|-------|
-| `agent_loop` | `instruction`; optional `tools`, `provider`, `model`, `wall_clock_timeout_seconds` | Agent execution uses the CLI path only. `backend: cli` still parses and is ignored; `http` and `auto` fail catalog load. `orbit doctor --fix-retired-activity-backends` removes those retired keys. `max_iterations` is inert. |
+| `agent_loop` | `instruction`; optional `tools`, `provider`, `model`, `wall_clock_timeout_seconds` | `tools` is the activity baseline. For task-backed dispatch Orbit adds exact `task.required_tools`, deduplicates the union, and rejects invalid requirements before provider launch. Agent execution uses the CLI path only. `backend: cli` still parses and is ignored; `http` and `auto` fail catalog load. `orbit doctor --fix-retired-activity-backends` removes those retired keys. `max_iterations` is inert. |
 | `deterministic` | `action`; optional `config` | Runs a registered deterministic action. |
+
+The computed effective list is serialized as `tools` in the CLI execution
+envelope and exported as `ORBIT_ACTIVITY_TOOLS`. The task-requested list is
+serialized separately as `required_tools`; audit evidence records both lists.
+Allowlist inclusion never substitutes for runtime role, capability, policy,
+filesystem, subprocess, or authentication checks.
 
 ## Job Envelope
 

@@ -24,6 +24,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
             .map(|dependency| dependency.label())
             .collect::<Vec<_>>(),
         "tags": task.tags,
+        "required_tools": task.required_tools,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
@@ -131,6 +132,8 @@ fn task_field_to_json(
         "dependencies" => serde_json::to_value(task.dependencies())
             .map_err(serialize_error("serialize dependencies")),
         "tags" => serde_json::to_value(&task.tags).map_err(serialize_error("serialize tags")),
+        "required_tools" => serde_json::to_value(&task.required_tools)
+            .map_err(serialize_error("serialize required tools")),
         "resolved_dependencies" => serde_json::to_value(
             resolve_task_dependencies(
                 task,

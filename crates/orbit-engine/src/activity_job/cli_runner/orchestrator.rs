@@ -25,7 +25,7 @@ use super::argv::{
 };
 use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
-    task_id_from_input,
+    task_id_from_input, task_ids_from_input,
 };
 use super::spawn::{
     linux_bwrap_failed_write_diagnostic, macos_keychain_auth_diagnostic, orbit_tool_env,
@@ -58,11 +58,19 @@ pub fn run_cli_backend(
     };
     let wall_clock_timeout = Duration::from_secs(timeout_seconds);
 
+    let task_ids = task_ids_from_input(input);
+    let task_id = task_id_from_input(input);
+    let activity_tools = host.resolve_activity_tools(&task_ids, &spec.tools)?;
+
     // §6 allowlist-advisory event — emitted once per invocation before the
     // subprocess starts so a reviewer can see the enforcement gap at a glance.
     audit.emit_lossy(V2AuditEventKind::ToolAllowlistHarnessDelegated {
         provider: provider.clone(),
-        tools: spec.tools.clone(),
+        task_id: task_id.map(ToOwned::to_owned),
+        task_ids,
+        requested_tools: activity_tools.requested_tools.clone(),
+        effective_tools: activity_tools.effective_tools.clone(),
+        tools: activity_tools.effective_tools.clone(),
     });
 
     let task_ctx = host.task_context_for_agent_input(input)?;
@@ -99,7 +107,14 @@ pub fn run_cli_backend(
         .map_err(|error| DispatchError::CliInvocationPermanent(error.message))?;
     let sandbox = prepared_sandbox.effective;
 
-    let envelope_json = cli_agent_envelope_json(spec, run_id, input, task_ctx.as_ref())?;
+    let envelope_json = cli_agent_envelope_json(
+        spec,
+        run_id,
+        input,
+        task_ctx.as_ref(),
+        &activity_tools.requested_tools,
+        &activity_tools.effective_tools,
+    )?;
 
     let mut provider_config = host.provider_cli_config(&provider);
 
@@ -202,7 +217,6 @@ pub fn run_cli_backend(
         sandbox_read_enforcement: Some(prepared_sandbox.metadata.read_enforcement.clone()),
     });
 
-    let task_id = task_id_from_input(input);
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
@@ -219,9 +233,10 @@ pub fn run_cli_backend(
         agent_task_id: task_id,
     });
     dispatch_env.push(("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()));
-    if !spec.tools.is_empty() {
-        dispatch_env.push(("ORBIT_ACTIVITY_TOOLS".to_string(), spec.tools.join(",")));
-    }
+    dispatch_env.push((
+        "ORBIT_ACTIVITY_TOOLS".to_string(),
+        activity_tools.effective_tools.join(","),
+    ));
     if let Some(programs) = spec.proc_allowed_programs.as_deref() {
         dispatch_env.push((
             "ORBIT_PROC_ALLOWED_PROGRAMS".to_string(),

@@ -56,9 +56,13 @@ fn content(task: &Task) -> Value {
 #[test]
 fn mint_matches_a_scheduler_fire_field_for_field() {
     let runtime = runtime();
-    runtime
-        .auto_task_add(interval_params("chore", 60))
-        .expect("add");
+    let mut params = interval_params("chore", 60);
+    params.template.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
+    runtime.auto_task_add(params).expect("add");
     let t0 = at(2026, 1, 1, 0, 0);
 
     fire(&runtime, t0); // baseline
@@ -95,6 +99,10 @@ fn mint_matches_a_scheduler_fire_field_for_field() {
         minted.complexity,
         Some(orbit_types::task::TaskComplexity::Unassessed),
         "automated mint writes the explicit non-answer, never a fabricated assessment"
+    );
+    assert_eq!(
+        minted.required_tools,
+        vec!["github.auth.status", "github.run.list"]
     );
 }
 

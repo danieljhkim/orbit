@@ -32,6 +32,7 @@ orbit tool run orbit.task.add --input '{
   "description": "<multi-line markdown>",
   "acceptance_criteria": ["<observable outcome>", "<observable outcome>"],
   "context_files": ["file:src/lib.rs", "dir:src/command"],
+  "required_tools": ["<exact.canonical.tool>"],
   "workspace": "<selector>", "priority": "<low|medium|high|critical>",
   "complexity": "<low|medium|hard>", "type": "<feature|bug|refactor|chore>",
   "model": "<agent-family>"
@@ -80,6 +81,13 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
   emits a `TaskRelationDangling` audit event.
 - `parent_id`, `source_task_id` (the bug-introducing task; creation-time only —
   `update` silently drops it), `tags` (reuse existing before inventing new).
+- `required_tools: ["<exact.canonical.tool>", ...]` — tools the task must add to
+  any agent activity's baseline. Use only exact, active, agent-facing registered
+  names; wildcards and prefixes are rejected at dispatch. The list is sorted and
+  deduplicated on write, and cannot change once the task enters `in-progress`.
+  Inclusion grants only activity allowlist membership: caller role, host
+  capability, tool policy, filesystem/subprocess policy, and external
+  authentication can still deny execution.
 
 ## Quality bar
 

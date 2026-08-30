@@ -98,6 +98,7 @@ pub(super) fn create_task_with_crew(
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             plan: String::new(),
             execution_summary: String::new(),
             context_files: context_files

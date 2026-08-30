@@ -312,6 +312,7 @@ pub fn task_with_file(id: &str, title: &str, path: &str, implemented_by: &str) -
         description: String::new(),
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
+        required_tools: Vec::new(),
         plan: String::new(),
         // ORB-10313: the delivery gate reads the durable outcome before touching
         // the checkout. Individual tests override this meaningful default to

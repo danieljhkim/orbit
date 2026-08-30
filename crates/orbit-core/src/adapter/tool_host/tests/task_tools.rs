@@ -492,6 +492,81 @@ fn task_add_and_show_tools_roundtrip_crew() {
     assert_eq!(shown.get("orchestrator"), Some(&json!("sol")));
 }
 
+#[test]
+fn task_tools_roundtrip_required_tools_and_freeze_them_at_in_progress() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let agent = Some("codex".to_string());
+    let model = Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string());
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Task-scoped GitHub reads",
+                "description": "Exercise required tools on every task tool surface.",
+                "complexity": "low",
+                "workspace": ".",
+                "required_tools": [
+                    "github.run.list",
+                    "github.auth.status",
+                    "github.run.list"
+                ],
+            }),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("add task with requirements");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(
+        added["required_tools"],
+        json!(["github.auth.status", "github.run.list"])
+    );
+
+    let projected = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({"id": task_id, "fields": ["required_tools"]}),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("project requirements");
+    assert_eq!(projected, json!(["github.auth.status", "github.run.list"]));
+    let listed = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({"workspace": "."}),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("list task requirements");
+    assert_eq!(
+        listed[0]["required_tools"],
+        json!(["github.auth.status", "github.run.list"])
+    );
+
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task_id,
+                "plan": "Execute with the admitted tool surface.",
+                "status": "in-progress",
+            }),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("start task");
+    let error = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({"id": task_id, "required_tools": ["github.run.view"]}),
+            agent,
+            model,
+        )
+        .expect_err("active task requirements are frozen");
+    assert!(error.to_string().contains(task_id), "{error}");
+    assert!(error.to_string().contains("frozen"), "{error}");
+}
+
 /// ORB-10968: crew configuration is host-local, so a stored crew this host has
 /// no `[crews.*]` entry for — a legacy name, or one only the authoring machine
 /// defines — must not make the task unreadable. ORB-10586 established that for

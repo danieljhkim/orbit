@@ -412,6 +412,7 @@ pub fn task(id: &str, title: &str, execution_summary: &str) -> Task {
         description: String::new(),
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
+        required_tools: Vec::new(),
         plan: String::new(),
         execution_summary: execution_summary.to_string(),
         context_files: Vec::new(),

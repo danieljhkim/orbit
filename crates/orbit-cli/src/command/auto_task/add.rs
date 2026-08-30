@@ -38,6 +38,9 @@ pub struct AutoTaskAddArgs {
     /// Tag applied to each minted task (in addition to the provenance tag). Repeat.
     #[arg(long = "tag", action = ArgAction::Append)]
     pub tags: Vec<String>,
+    /// Exact canonical tool names copied to every minted task.
+    #[arg(long = "required-tool", action = ArgAction::Append, value_delimiter = ',')]
+    pub required_tools: Vec<String>,
     /// Priority (defaults to medium)
     #[arg(long, value_enum, default_value_t = TaskPriority::Medium)]
     pub priority: TaskPriority,
@@ -67,6 +70,7 @@ impl Execute for AutoTaskAddArgs {
             acceptance_criteria: self.criteria,
             task_type: self.task_type,
             tags: self.tags,
+            required_tools: self.required_tools,
             priority: self.priority,
             crew: self.crew,
             status: self.status,

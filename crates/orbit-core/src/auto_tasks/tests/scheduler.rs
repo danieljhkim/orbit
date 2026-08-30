@@ -48,9 +48,13 @@ fn first_observation_baselines_without_firing() {
 #[test]
 fn fires_and_stamps_provenance() {
     let runtime = runtime();
-    runtime
-        .auto_task_add(interval_params("chore", 60))
-        .expect("add");
+    let mut params = interval_params("chore", 60);
+    params.template.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
+    runtime.auto_task_add(params).expect("add");
     let t0 = at(2026, 1, 1, 0, 0);
 
     fire(&runtime, t0); // baseline
@@ -65,6 +69,10 @@ fn fires_and_stamps_provenance() {
         task.tags.contains(&auto_task_tag("chore")),
         "expected provenance tag, got {:?}",
         task.tags
+    );
+    assert_eq!(
+        task.required_tools,
+        vec!["github.auth.status", "github.run.list"]
     );
 }
 

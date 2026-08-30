@@ -81,6 +81,7 @@ fn envelope(
         orchestrator: None,
         relations,
         tags,
+        required_tools: Vec::new(),
         context_files: Vec::new(),
         external_refs: Vec::new(),
         created_by: Some("codex:gpt-5.5".to_string()),

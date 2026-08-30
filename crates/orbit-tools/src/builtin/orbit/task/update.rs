@@ -50,6 +50,12 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
+                name: "required_tools".to_string(),
+                description: "Replacement exact canonical tool requirements. Frozen once the task enters in-progress".to_string(),
+                param_type: "string_list".to_string(),
+                required: false,
+            },
+            ToolParam {
                 name: "plan".to_string(),
                 description: "Replacement task plan text (empty string clears)".to_string(),
                 param_type: "string".to_string(),

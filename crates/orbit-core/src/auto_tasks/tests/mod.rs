@@ -17,6 +17,7 @@ pub(super) fn template(title: &str) -> AutoTaskTemplate {
         acceptance_criteria: vec!["Chore is observable.".to_string()],
         task_type: TaskType::Chore,
         tags: vec![],
+        required_tools: Vec::new(),
         priority: TaskPriority::Medium,
         crew: None,
         status: orbit_types::task::TaskStatus::Backlog,

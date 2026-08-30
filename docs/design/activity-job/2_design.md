@@ -3,8 +3,8 @@ summary: "Activity / Job — Design"
 type: design
 title: "Activity / Job — Design"
 owner: codex
-last_updated: 2026-08-15
-last_validated: 2026-08-23
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Draft
 feature: activity-job
 doc_role: design
@@ -298,24 +298,34 @@ For example, `git_commit` now follows dispatcher → `execute_engine_action` →
 ## 7. Agent Loop Dispatch
 
 `agent_loop` has one execution path [ORB-10801]. Orbit does not enforce tool
-allowlists on it: the declared tool set is recorded as an advisory
+allowlists on it: the effective tool set is recorded as an advisory
 (`tool_allowlist.harness_delegated`) and enforcement is delegated to the
 provider harness.
+
+[ORB-11069] makes the activity `tools` list a baseline for task-backed
+dispatch. Before provider construction or launch, orbit-core loads every task
+selected by the agent activity and computes `effective_tools =
+deduplicate(activity.tools union selected_tasks.required_tools)`. Required
+names are exact canonical registered tools;
+wildcards, malformed or unknown names, disabled tools, and registered tools not
+on the agent-facing surface fail with `RequiredToolAdmission` naming the task
+and tool. An empty requirement list returns the baseline byte-for-byte. Task
+requirements are normalized in the task store and freeze once the task enters
+`in-progress`, including later blocked retries.
 
 ### 7.1 CLI agent path
 
 The path is driven by `cli_runner.rs`, added in [T20260419-0104]. The flow is:
 
-1. Ask the host for the concrete CLI executor: command plus static executor args.
-2. Build an `Agent` from `orbit-agent`.
-3. Ask the retained CLI runtime for an `AgentInvocationSpec` containing provider-specific per-request args.
-4. Emit the advisory `ToolAllowlistHarnessDelegated` event.
-5. Resolve the subprocess cwd from runtime-owned workspace context.
-6. Emit `CliInvocationStarted` with redacted argv, stdin blob ref, and resolved cwd.
-7. Spawn the subprocess in that cwd with a wall-clock timeout.
-8. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
-9. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host. After [ORB-10231] / [CLI response envelopes are optional for artifact-backed activities](./4_decisions.md#cli-response-envelopes-are-optional-for-artifact-backed-activities), envelope parsing is best-effort by default: provider exit status and timeout determine transport success while durable task/review/git artifacts remain authoritative. A valid envelope still projects its result fields, and an invalid or absent envelope is retained as bounded/redacted diagnostic metadata. Activities whose downstream templates require response fields set `require_response_envelope: true`, preserving fail-closed validation for that explicit contract.
-10. Apply the step-completion protocol check ([ORB-10449]) — see §7.6a.
+1. Ask the host for the concrete CLI executor and resolve every selected task's requested tools and the effective list.
+2. Emit the advisory `ToolAllowlistHarnessDelegated` event with the selected task ids, requested list, and effective list.
+3. Resolve the subprocess cwd from runtime-owned workspace context.
+4. Build an `Agent` and its provider-specific `AgentInvocationSpec`.
+5. Emit `CliInvocationStarted` with redacted argv, stdin blob ref, and resolved cwd.
+6. Spawn the subprocess in that cwd with a wall-clock timeout.
+7. Emit `CliInvocationFinished` with stdout/stderr blob refs and timeout state.
+8. Parse the captured provider output with the existing Orbit response parser and persist its `InvocationTrace` through the host. After [ORB-10231] / [CLI response envelopes are optional for artifact-backed activities](./4_decisions.md#cli-response-envelopes-are-optional-for-artifact-backed-activities), envelope parsing is best-effort by default: provider exit status and timeout determine transport success while durable task/review/git artifacts remain authoritative. A valid envelope still projects its result fields, and an invalid or absent envelope is retained as bounded/redacted diagnostic metadata. Activities whose downstream templates require response fields set `require_response_envelope: true`, preserving fail-closed validation for that explicit contract.
+9. Apply the step-completion protocol check ([ORB-10449]) — see §7.6a.
 
 ### 7.6a Step-completion protocol vs. response content
 
@@ -490,7 +500,7 @@ none depends solely on the environment inherited by its entry process. A
 missing launcher remains a permanent failure, but the diagnostic names the
 provider and every path Orbit searched.
 
-After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], agent dispatch also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
+After [T20260430-15], the CLI stdin envelope carries rendered activity input and durable `run_id` beside instruction, prompt, tools, and model. [ORB-11069] defines `tools` there as the computed effective list and adds the task's requested `required_tools`; the child also receives the effective list in `ORBIT_ACTIVITY_TOOLS`. When input identifies one task, orbit-core embeds a canonical task snapshot with `input.workspace_path` / `input.repo_root` taking precedence over stored paths. After [T20260508-8], agent dispatch also uses a shared workspace resolver for subprocess cwd: `input.workspace_path`, then `task.workspace_path`, then best-effort `ToolContext.workspace_root`. Declared input/task paths must already be directories; stale worktrees fail as `CliInvocationFailed` before `CliInvocationStarted` is emitted. After [T20260505-10], Orbit-managed CLI subprocesses receive `ORBIT_RUN_ID` plus an Orbit-managed run-context marker; `orbit tool run` requires both before it populates `ToolContext` reservation ownership. Direct manual CLI tool calls, including calls with only `ORBIT_RUN_ID`, remain unowned.
 
 The older `AgentRuntime` trait and `providers/*_cli.rs` files are not deprecated leftovers; they are the shipped CLI agent implementation.
 
@@ -744,7 +754,11 @@ The `Provider` enum names `claude`, `codex`, `gemini`, `grok`, `ollama`, and `op
 
 ### 11.2 Tool allowlists are advisory at dispatch
 
-Agent loops emit an advisory event and rely on the provider harness to enforce the declared `tools:` list.
+Agent loops emit an advisory event and rely on the provider harness to enforce
+the effective baseline-plus-task list. Composition is not an authorization
+bypass: nested tool execution still applies caller role, host capability,
+tool-specific policy, filesystem profile, subprocess allowlist, and external
+authentication checks independently.
 
 ### 11.3 Some structural controls are still literals
 

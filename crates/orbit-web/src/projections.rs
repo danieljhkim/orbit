@@ -209,6 +209,7 @@ pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
         "dependencies": task.dependencies(),
         "resolved_dependencies": dependency_labels(task, status_by_id),
         "tags": task.tags,
+        "required_tools": task.required_tools,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,

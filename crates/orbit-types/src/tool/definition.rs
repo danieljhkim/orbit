@@ -282,6 +282,24 @@ pub fn mcp_advertised_tool_name(canonical_name: &str) -> String {
     canonical_name.replace('.', "_")
 }
 
+/// Whether a task requirement is an exact canonical tool name rather than a
+/// wildcard, prefix, or transport spelling.
+pub fn is_exact_canonical_tool_name(name: &str) -> bool {
+    if name.is_empty() || name.trim() != name || name.contains('*') || name.contains(',') {
+        return false;
+    }
+    let mut segments = name.split('.');
+    let valid_segment = |segment: &str| {
+        !segment.is_empty()
+            && segment.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+            })
+    };
+    segments.next().is_some_and(valid_segment)
+        && segments.next().is_some_and(valid_segment)
+        && segments.all(valid_segment)
+}
+
 /// Validate schema-adjacent MCP definitions, including both canonical and advertised names.
 pub fn validate_mcp_tool_definitions(
     definitions: &[McpToolDefinition],

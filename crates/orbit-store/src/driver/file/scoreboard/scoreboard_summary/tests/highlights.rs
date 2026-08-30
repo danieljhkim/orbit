@@ -21,6 +21,7 @@ fn task_at(
         description: String::new(),
         acceptance_criteria: Vec::new(),
         tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+        required_tools: Vec::new(),
         plan: String::new(),
         execution_summary: summary.to_string(),
         context_files: Vec::new(),

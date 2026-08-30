@@ -17,6 +17,7 @@ fn create_params(runtime: &crate::OrbitRuntime) -> TaskCreateParams {
         dependencies: Vec::new(),
         relations: Vec::new(),
         tags: vec!["initial".to_string()],
+        required_tools: Vec::new(),
         plan: "Initial plan".to_string(),
         execution_summary: String::new(),
         context_files: vec!["file:src/lib.rs".to_string()],

@@ -8,7 +8,8 @@ use orbit_types::telemetry::TokenUsage;
 use serde_json::Value;
 
 use super::super::envelope::{
-    cli_agent_envelope_json, parse_cli_invocation_trace, task_id_from_input, user_prompt_from_input,
+    cli_agent_envelope_json, parse_cli_invocation_trace, task_id_from_input, task_ids_from_input,
+    user_prompt_from_input,
 };
 use super::test_support::{TestHost, test_agent_loop_spec};
 
@@ -62,8 +63,15 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
         "workspace_path": "/tmp/orbit-worktree"
     });
 
-    let raw = cli_agent_envelope_json(&spec, "jrun-context", &input, host.task_context.as_ref())
-        .expect("build cli agent envelope");
+    let raw = cli_agent_envelope_json(
+        &spec,
+        "jrun-context",
+        &input,
+        host.task_context.as_ref(),
+        &["github.run.list".to_string()],
+        &["orbit.task.show".to_string(), "github.run.list".to_string()],
+    )
+    .expect("build cli agent envelope");
     let envelope: Value = serde_json::from_slice(&raw).expect("parse envelope json");
 
     assert_eq!(envelope["schemaVersion"], 1);
@@ -74,6 +82,14 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
     assert_eq!(envelope["task"]["id"], "TCTX");
     assert_eq!(envelope["task"]["workspace_path"], "/tmp/orbit-worktree");
     assert_eq!(envelope["instruction"], "perform the requested task");
+    assert_eq!(
+        envelope["required_tools"],
+        serde_json::json!(["github.run.list"])
+    );
+    assert_eq!(
+        envelope["tools"],
+        serde_json::json!(["orbit.task.show", "github.run.list"])
+    );
     assert!(
         envelope.get("response_schema").is_none(),
         "the provider renderer owns response framing; the embedded task envelope must not duplicate it"
@@ -95,6 +111,32 @@ fn task_id_from_input_reads_common_activity_shapes() {
         Some("T3")
     );
     assert_eq!(task_id_from_input(&serde_json::json!({})), None);
+}
+
+#[test]
+fn task_ids_from_input_reads_batched_activity_shapes_without_duplicates() {
+    assert_eq!(
+        task_ids_from_input(&serde_json::json!({"task_ids": ["T3", "T4", "T3"]})),
+        vec!["T3", "T4"]
+    );
+    assert_eq!(
+        task_ids_from_input(&serde_json::json!({
+            "task_ids": [],
+            "candidates": [
+                {"task_id": "T5"},
+                {"task_id": "T6"},
+                {"task_id": "T5"}
+            ]
+        })),
+        vec!["T5", "T6"]
+    );
+    assert_eq!(
+        task_ids_from_input(&serde_json::json!({
+            "task_id": "T1",
+            "task_ids": ["not-selected-by-this-shape"]
+        })),
+        vec!["T1"]
+    );
 }
 
 #[test]

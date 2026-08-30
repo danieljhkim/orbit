@@ -71,6 +71,7 @@ updated_at: 2026-05-10T12:00:00Z
             orchestrator: None,
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             context_files: Vec::new(),
             external_refs: Vec::new(),
             created_by: None,
@@ -114,11 +115,29 @@ updated_at: 2026-05-10T12:00:00Z
     }
 
     #[test]
-    fn version_one_envelope_defaults_missing_orchestrator() {
+    fn version_one_envelope_defaults_compatible_fields() {
         let envelope = serde_yaml::from_str::<TaskEnvelopeV2>(&valid_envelope_yaml("ORB-00001"))
             .expect("legacy v1 envelope remains readable");
         assert_eq!(envelope.schema_version, TASK_ARTIFACT_SCHEMA_VERSION);
         assert_eq!(envelope.orchestrator, None);
+        assert!(envelope.required_tools.is_empty());
+    }
+
+    #[test]
+    fn version_one_envelope_normalizes_required_tools_deterministically() {
+        let yaml = format!(
+            "{}\nrequired_tools:\n  - github.run.list\n  - github.auth.status\n  - github.run.list\n",
+            valid_envelope_yaml("ORB-00001")
+        );
+        let envelope =
+            serde_yaml::from_str::<TaskEnvelopeV2>(&yaml).expect("deserialize required tools");
+
+        assert_eq!(
+            envelope.required_tools,
+            vec!["github.auth.status", "github.run.list"]
+        );
+        let serialized = serde_yaml::to_string(&envelope).expect("serialize required tools");
+        assert!(serialized.contains("required_tools:"));
     }
 
     #[test]

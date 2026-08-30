@@ -97,6 +97,7 @@ fn agent_task_context_json(
         "plan": task.plan.clone(),
         "context_files": kept_context_files,
         "tags": task.tags.clone(),
+        "required_tools": task.required_tools.clone(),
         "external_refs": task.external_refs.clone(),
         "workspace_path": workspace_path,
         "repo_root": repo_root,

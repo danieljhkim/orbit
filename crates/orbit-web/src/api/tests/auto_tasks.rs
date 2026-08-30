@@ -30,6 +30,7 @@ fn chore_params(name: &str) -> AutoTaskAddParams {
             acceptance_criteria: vec!["The chore is observable.".to_string()],
             task_type: TaskType::Chore,
             tags: vec![],
+            required_tools: Vec::new(),
             priority: TaskPriority::Medium,
             crew: None,
             status: TaskStatus::Backlog,
@@ -133,7 +134,13 @@ async fn list_reports_enabled_and_disabled_definitions() {
     let runtime = runtime();
     runtime.auto_task_add(chore_params("nightly")).expect("add");
     runtime.auto_task_toggle("nightly", false).expect("disable");
-    runtime.auto_task_add(chore_params("hourly")).expect("add");
+    let mut hourly_params = chore_params("hourly");
+    hourly_params.template.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
+    runtime.auto_task_add(hourly_params).expect("add");
     let path = cursor_state_path(&runtime.paths().state_dir);
     std::fs::create_dir_all(path.parent().expect("state dir")).expect("mkdir");
     std::fs::write(
@@ -168,6 +175,10 @@ async fn list_reports_enabled_and_disabled_definitions() {
     assert_eq!(nightly["enabled"], false);
     assert_eq!(hourly["enabled"], true);
     assert_eq!(hourly["dedupe"], "skip_if_open");
+    assert_eq!(
+        hourly["template"]["required_tools"],
+        serde_json::json!(["github.auth.status", "github.run.list"])
+    );
     assert!(
         hourly["template_summary"]
             .as_str()

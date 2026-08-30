@@ -17,6 +17,11 @@ fn document_update_rewrites_v2_documents_and_envelope() {
                 description: Some("Updated description".to_string()),
                 acceptance_criteria: Some(vec!["Updated criterion".to_string()]),
                 tags: Some(vec!["v2".to_string(), "store".to_string()]),
+                required_tools: Some(vec![
+                    "github.run.list".to_string(),
+                    "github.auth.status".to_string(),
+                    "github.run.list".to_string(),
+                ]),
                 plan: Some("1. Updated plan".to_string()),
                 execution_summary: Some("Updated summary".to_string()),
                 priority: Some(TaskPriority::Low),
@@ -34,6 +39,10 @@ fn document_update_rewrites_v2_documents_and_envelope() {
     assert_eq!(task.description, "Updated description");
     assert_eq!(task.acceptance_criteria, vec!["Updated criterion"]);
     assert_eq!(task.tags, vec!["v2", "store"]);
+    assert_eq!(
+        task.required_tools,
+        vec!["github.auth.status", "github.run.list"]
+    );
     assert_eq!(task.plan, "1. Updated plan");
     assert_eq!(task.execution_summary, "Updated summary");
     assert_eq!(task.priority, TaskPriority::Low);

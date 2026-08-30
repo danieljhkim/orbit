@@ -49,6 +49,7 @@ fn create_backlog_task(
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             plan: "test plan".to_string(),
             execution_summary: String::new(),
             context_files: Vec::new(),

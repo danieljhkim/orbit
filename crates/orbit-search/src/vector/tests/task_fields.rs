@@ -11,6 +11,7 @@ fn task() -> Task {
         title: "Index this".to_string(),
         description: "Task description".to_string(),
         acceptance_criteria: vec!["First criterion".to_string()],
+        required_tools: Vec::new(),
         plan: "Plan body".to_string(),
         execution_summary: "Summary body".to_string(),
         context_files: Vec::new(),

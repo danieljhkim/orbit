@@ -59,6 +59,12 @@ Orbit dispatches every agent loop through the provider's CLI agent. There is no
 backend to choose: the retired `backend:` key still parses as `cli` and is
 ignored, while `backend: http` and `backend: auto` are refused at load.
 
+Treat `tools` as the baseline every task using the activity needs. A task may
+add exact canonical names through `required_tools`; Orbit deduplicates that
+union at dispatch. Do not broaden an activity just for one specialized task.
+Task requirements affect allowlist inclusion only and do not bypass runtime
+capability, policy, sandbox, subprocess, or authentication checks.
+
 ## Use It
 
 ```bash

@@ -3379,7 +3379,7 @@ fail() {{
 [ "$ORBIT_RUN_ID" = "job-grok-registry-root" ] || fail run_id_missing
 [ "$ORBIT_MANAGED_RUN_CONTEXT" = "1" ] || fail managed_run_context_missing
 [ "$ORBIT_TASK_ACTOR_KIND" = "agent" ] || fail actor_kind_missing
-[ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn" ] || fail activity_tools_missing
+[ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn,github.run.list" ] || fail activity_tools_missing
 [ "$ORBIT_PROC_ALLOWED_PROGRAMS" = "git,rg" ] || fail proc_programs_missing
 [ "$ORBIT_ACTIVITY_FS_PROFILE" = "unrestricted" ] || fail fs_profile_missing
 [ "$ORBIT_ACTIVE_TASK_ID" = "ORB-10980" ] || fail active_task_missing
@@ -3403,7 +3403,10 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         executor_args: Vec::new(),
         provider_config: HashMap::new(),
         sandbox: None,
-        task_context: None,
+        task_context: Some(serde_json::json!({
+            "id": "ORB-10980",
+            "required_tools": ["github.run.list"]
+        })),
         workspace_root: None,
         orbit_registry_root: Some(registry_root.display().to_string()),
     };
@@ -3418,7 +3421,7 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         &host,
         &spec,
         "job-grok-registry-root",
-        audit,
+        audit.clone(),
         &serde_json::json!({"prompt": "hi", "task_id": "ORB-10980"}),
         None,
     )
@@ -3438,6 +3441,29 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         "managed child rejected its Orbit environment: {:?}",
         outcome.output
     );
+    let events = audit.events_snapshot().expect("audit snapshot");
+    let delegated = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::ToolAllowlistHarnessDelegated {
+                task_id,
+                task_ids,
+                requested_tools,
+                effective_tools,
+                tools,
+                ..
+            } => Some((task_id, task_ids, requested_tools, effective_tools, tools)),
+            _ => None,
+        })
+        .expect("tool allowlist audit event");
+    assert_eq!(delegated.0.as_deref(), Some("ORB-10980"));
+    assert_eq!(delegated.1, &["ORB-10980"]);
+    assert_eq!(delegated.2, &["github.run.list"]);
+    assert_eq!(
+        delegated.3,
+        &["orbit.task.show", "proc.spawn", "github.run.list"]
+    );
+    assert_eq!(delegated.4, delegated.3);
 }
 
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty

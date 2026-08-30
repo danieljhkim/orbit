@@ -27,6 +27,7 @@ orbit auto-task add \
   --criterion "The audit command and its output are recorded in the execution summary" \
   --type chore \
   --tag dependency-audit \
+  --required-tool github.run.list \
   --priority medium
 ```
 
@@ -41,6 +42,7 @@ review it in a PR like any other definition.
 | `--criterion` | Repeatable. This is the acceptance criteria of every minted task — write them as observably as you would for a hand-authored task. |
 | `--type` | `feature`, `bug`, `refactor`, `chore`. Defaults to `chore`. |
 | `--tag` | Repeatable, and worth setting: it is how the minted tasks are found later. A provenance tag is added automatically. |
+| `--required-tool` | Repeatable exact canonical tool name. Scheduled fires and manual `mint` copy the normalized list onto each task. |
 | `--status` | Status the minted task enters. Defaults to `backlog`; use `proposed` when a human should approve each instance before it becomes shippable work. |
 | `--crew` | Crew override for minted tasks. |
 | `--dedupe` | `skip-if-open` (default) or `always`. |
@@ -66,6 +68,11 @@ orbit auto-task mint <name>             # mint one right now
 scheduler's cursor untouched — so it is the safe way to test a definition's
 wording before enabling it. Over MCP: `orbit_auto_task_list` and
 `orbit_auto_task_mint`.
+
+Required tools in a template extend the selected agent activity's baseline;
+they do not replace it or bypass runtime capability, policy, filesystem,
+subprocess, or authentication checks. Invalid, inactive, wildcard, or
+non-agent-facing names fail dispatch before the provider starts.
 
 ## The five seeded definitions
 

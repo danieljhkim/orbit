@@ -52,6 +52,13 @@ pub struct TaskActivityUpdate {
     pub model: Option<String>,
 }
 
+/// Task requirements and the resulting activity allowlist fixed at admission.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResolvedActivityTools {
+    pub requested_tools: Vec<String>,
+    pub effective_tools: Vec<String>,
+}
+
 fn unsupported_runtime_capability(capability: &str) -> OrbitError {
     OrbitError::Execution(format!(
         "runtime host capability '{capability}' is unavailable"
@@ -436,6 +443,19 @@ pub trait RuntimeHost: Send + Sync {
     /// without leaking store or task-query details into orbit-engine.
     fn task_context_for_agent_input(&self, _input: &Value) -> Result<Option<Value>, DispatchError> {
         Ok(None)
+    }
+
+    /// Compose and validate the exact task-scoped tools for one agent launch.
+    /// Hosts without a task/tool registry preserve the activity baseline.
+    fn resolve_activity_tools(
+        &self,
+        _task_ids: &[String],
+        baseline_tools: &[String],
+    ) -> Result<ResolvedActivityTools, DispatchError> {
+        Ok(ResolvedActivityTools {
+            requested_tools: Vec::new(),
+            effective_tools: baseline_tools.to_vec(),
+        })
     }
 
     /// Persist a durable checkpoint after a completed top-level job step

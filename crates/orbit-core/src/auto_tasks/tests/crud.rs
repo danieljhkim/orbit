@@ -19,12 +19,20 @@ fn runtime() -> OrbitRuntime {
 #[test]
 fn add_list_show_roundtrip() {
     let runtime = runtime();
-    let created = runtime
-        .auto_task_add(interval_params("nightly-chore", 1440))
-        .expect("add");
+    let mut params = interval_params("nightly-chore", 1440);
+    params.template.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
+    let created = runtime.auto_task_add(params).expect("add");
     assert_eq!(created.name, "nightly-chore");
     assert!(created.enabled);
     assert_eq!(created.created_by.as_deref(), Some(runtime.actor_label()));
+    assert_eq!(
+        created.template.required_tools,
+        vec!["github.auth.status", "github.run.list"]
+    );
 
     let listed = runtime.auto_task_list().expect("list");
     assert_eq!(listed.len(), 1);
@@ -73,6 +81,12 @@ fn update_patches_present_fields() {
         .auto_task_add(interval_params("chore", 60))
         .expect("add");
 
+    let mut replacement = template("Renamed chore");
+    replacement.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
     let updated = runtime
         .auto_task_update(
             "chore",
@@ -82,13 +96,17 @@ fn update_patches_present_fields() {
                     cron: "0 9 * * *".to_string(),
                 }),
                 dedupe: Some(DedupePolicy::Always),
-                template: Some(template("Renamed chore")),
+                template: Some(replacement),
             },
         )
         .expect("update");
     assert_eq!(updated.description, "new body");
     assert_eq!(updated.dedupe, DedupePolicy::Always);
     assert_eq!(updated.template.title, "Renamed chore");
+    assert_eq!(
+        updated.template.required_tools,
+        vec!["github.auth.status", "github.run.list"]
+    );
     assert!(matches!(updated.schedule, AutoTaskSchedule::Cron { .. }));
     assert!(updated.updated_at >= updated.created_at);
 }
