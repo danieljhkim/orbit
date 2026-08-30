@@ -93,10 +93,10 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
   existing-task update surface rejects `required_tools`.
   Inclusion grants only activity allowlist membership: caller role, host
   capability, tool policy, filesystem/subprocess policy, and external
-  authentication can still deny execution. The shipped `ci-failure-remediation`
-  auto-task is the worked example: it names exactly `github.auth.status`,
-  `github.run.list`, `github.run.view`, `github.run.logs`, and `github.pr.list`,
-  so `agent_implement` stays unchanged and
+  authentication can still deny execution. A task that names exactly
+  `github.auth.status`, `github.run.list`, `github.run.view`,
+  `github.run.logs`, and `github.pr.list` is the worked example:
+  `agent_implement` stays unchanged and
   `effective_tools = activity baseline ∪ those five`. Reaching
   `github.auth.status` can still yield a structured `available: false` or
   `authenticated: false` capability-unavailable result when the lane has no

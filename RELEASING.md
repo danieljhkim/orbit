@@ -262,8 +262,8 @@ EOF
 
 Protection on `agent-main` exists only to prevent branch deletion
 (`allow_deletions: false`); merges are never gated on CI. CI failures are
-consumed asynchronously by the `qa-sweep` and `ci-failure-remediation`
-routines, which append remediation tasks to the queue.
+consumed asynchronously by the `qa-sweep` auto-task, which appends
+remediation tasks to the queue.
 
 If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
 

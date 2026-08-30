@@ -4,12 +4,11 @@
 
 //! `github.auth.status` on an execution lane that holds no GitHub credentials.
 //!
-//! This is the lane the shipped `ci-failure-remediation` definition has to
-//! survive: a sandbox that denies reading the GitHub CLI's configuration and
-//! an execution environment that forwards no GitHub token. The preflight must
-//! come back as an ordinary result naming the missing capability — not as a
-//! tool error, and never as something a caller could mistake for a clean CI
-//! pipeline.
+//! This is the lane GitHub-backed CI discovery has to survive: a sandbox that
+//! denies reading the GitHub CLI's configuration and an execution environment
+//! that forwards no GitHub token. The preflight must come back as an ordinary
+//! result naming the missing capability — not as a tool error, and never as
+//! something a caller could mistake for a clean CI pipeline.
 
 use std::path::{Path, PathBuf};
 

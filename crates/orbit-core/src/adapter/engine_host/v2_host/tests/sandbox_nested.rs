@@ -56,8 +56,8 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
 
     // `workspace init` freezes crew availability from PATH. Hosted macOS
     // runners do not provide an agent CLI, which otherwise seeds an explicit
-    // empty `[crews]` registry while the CI remediation auto-task still names
-    // the `system` crew. A disposable executable keeps this fixture
+    // empty `[crews]` registry while shipped auto-tasks still name the
+    // `system` crew. A disposable executable keeps this fixture
     // deterministic without dispatching an agent.
     let provider_bin = home.join("stub-bin");
     plant_agent_cli_stub(&provider_bin, "codex");
@@ -76,14 +76,58 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
         &orbit_bin,
         &repo,
         &home,
-        &["auto-task", "mint", "ci-failure-remediation", "--json"],
+        &["auto-task", "mint", "qa-sweep", "--json"],
         "auto-task mint",
         None,
     );
     let minted: Value = serde_json::from_slice(&minted.stdout).expect("mint JSON");
-    let task_id = minted["id"].as_str().expect("task id").to_string();
+    let minted_id = minted["id"].as_str().expect("task id").to_string();
+    assert!(
+        minted["required_tools"]
+            .as_array()
+            .is_some_and(|tools| tools.is_empty()),
+        "shipped qa-sweep must mint without extra required_tools: {}",
+        minted["required_tools"]
+    );
+
+    let github_capable = run_orbit(
+        &orbit_bin,
+        &repo,
+        &home,
+        &[
+            "task",
+            "add",
+            "--title",
+            "Nested GitHub-capable implementation",
+            "--description",
+            "Hand-authored neighbor carrying the five GitHub reads so nested dispatch stays task-scoped.",
+            "--acceptance-criteria",
+            "github.auth.status returns a structured capability result",
+            "--complexity",
+            "low",
+            "--required-tool",
+            "github.auth.status",
+            "--required-tool",
+            "github.pr.list",
+            "--required-tool",
+            "github.run.list",
+            "--required-tool",
+            "github.run.logs",
+            "--required-tool",
+            "github.run.view",
+            "--json",
+        ],
+        "github-capable task add",
+        None,
+    );
+    let github_capable: Value =
+        serde_json::from_slice(&github_capable.stdout).expect("github-capable task JSON");
+    let task_id = github_capable["id"]
+        .as_str()
+        .expect("github-capable task id")
+        .to_string();
     assert_eq!(
-        minted["required_tools"],
+        github_capable["required_tools"],
         serde_json::json!([
             "github.auth.status",
             "github.pr.list",
@@ -203,7 +247,7 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
         std::slice::from_ref(&task_id),
         &implement_spec.tools,
     )
-    .expect("resolve minted CI-remediation tools");
+    .expect("resolve GitHub-capable tools");
     assert_eq!(
         minted_tools.requested_tools,
         [
@@ -227,6 +271,14 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
             .iter()
             .any(|tool| tool == "github.auth.status")
     );
+    let minted_auto_tools = RuntimeHost::resolve_activity_tools(
+        &runtime,
+        std::slice::from_ref(&minted_id),
+        &implement_spec.tools,
+    )
+    .expect("resolve minted qa-sweep tools");
+    assert!(minted_auto_tools.requested_tools.is_empty());
+    assert_eq!(minted_auto_tools.effective_tools, implement_spec.tools);
     let ordinary_tools = RuntimeHost::resolve_activity_tools(
         &runtime,
         std::slice::from_ref(&ordinary_id),
@@ -288,7 +340,7 @@ fn managed_nested_orbit_dispatches_from_linked_worktree_under_sandbox() {
     );
     assert!(
         !stdout.contains("policy_denied") && !stderr.contains("policy_denied"),
-        "computed CI-remediation tools must not reproduce DANI-10056 policy_denied: {stderr}"
+        "computed GitHub-capable tools must not reproduce DANI-10056 policy_denied: {stderr}"
     );
 
     let ordinary_env = managed_nested_env(

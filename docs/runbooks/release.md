@@ -114,7 +114,7 @@ date has passed or its `revoked_at` field is set.
 
    Review the result of every job, but treat CI as informational on
    `agent-main`: no job is a merge gate. Failures are queued for asynchronous
-   remediation by the `qa-sweep` and `ci-failure-remediation` routines. Then
+   remediation by the `qa-sweep` auto-task. Then
    follow [RELEASING.md §10b](../../RELEASING.md#10b-promote-to-main) to
    promote `agent-main` to `main`, and
    [§10c](../../RELEASING.md#10c-post-merge-back-merge-to-agent-main) to

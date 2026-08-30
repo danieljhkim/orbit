@@ -16,10 +16,9 @@
 # double-filing; the job's failure-key dedupe makes a repeat pass idempotent in
 # any case.
 #
-# This is the intended long-run replacement for the shipped
-# `ci-failure-remediation` auto-task definition, which does its CI discovery
-# from inside the execution sandbox. Both ship inert, side by side, until this
-# sweep is proven.
+# Discovery runs on the host, not inside an execution sandbox: the job collects
+# bounded, redacted GitHub Actions evidence first, then files ordinary backlog
+# bug tasks for current non-stale failure clusters.
 schemaVersion: 1
 name: __ORBIT_ROUTINE_NAME__
 description: >
