@@ -35,7 +35,8 @@ spec:
 
 The computed effective list is serialized as `tools` in the CLI execution
 envelope and exported as `ORBIT_ACTIVITY_TOOLS`. The task-requested list is
-serialized separately as `required_tools`; audit evidence records both lists.
+serialized separately as `required_tools`; it is immutable after task creation,
+and audit evidence records both lists.
 Allowlist inclusion never substitutes for runtime role, capability, policy,
 filesystem, subprocess, or authentication checks.
 

@@ -18,7 +18,8 @@ dispatch see [orchestration.md](orchestration.md), and for scheduling it see
   `.orbit/state/job-runs/`, and an audit trail.
 
 For every task-backed agent activity, Orbit computes
-`effective_tools = deduplicate(activity.tools union task.required_tools)`. The
+`effective_tools = deduplicate(activity.tools union task.required_tools)`. Task
+requirements are immutable after creation. The
 activity list remains the baseline; an empty task requirement list preserves it
 exactly. When one agent activity selects a batch, Orbit unions the requirements
 from every selected task into that same effective list. Admission rejects

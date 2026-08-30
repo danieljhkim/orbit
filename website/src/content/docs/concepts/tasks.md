@@ -12,9 +12,10 @@ A task is a durable unit of work stored in workspace-local Orbit state. It carri
 Use tasks for work an agent can execute and a human can review. Do not use a task as a scratch note when no observable outcome exists.
 
 A task may also declare `required_tools` as exact canonical registered tool
-names. Orbit stores the list sorted and deduplicated, defaults older tasks to an
-empty list, and freezes it when the task enters `in-progress` so a current run
-or retry cannot gain authority through an update.
+names. Orbit normalizes, sorts, and deduplicates the list at creation and
+defaults older tasks to an empty list. The list is immutable authority:
+existing-task update APIs and commands reject `required_tools`, regardless of
+lifecycle status.
 
 ## Lifecycle
 

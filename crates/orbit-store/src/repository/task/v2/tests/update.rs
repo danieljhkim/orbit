@@ -4,9 +4,13 @@ use super::*;
 fn document_update_rewrites_v2_documents_and_envelope() {
     let temp = TempDir::new().expect("tempdir");
     let store = store(&temp);
-    store
-        .create_task(create_params("Original", TaskStatus::Backlog))
-        .expect("create task");
+    let mut create = create_params("Original", TaskStatus::Backlog);
+    create.required_tools = vec![
+        "github.run.list".to_string(),
+        "github.auth.status".to_string(),
+        "github.run.list".to_string(),
+    ];
+    store.create_task(create).expect("create task");
 
     store
         .update_task_document(
@@ -17,11 +21,6 @@ fn document_update_rewrites_v2_documents_and_envelope() {
                 description: Some("Updated description".to_string()),
                 acceptance_criteria: Some(vec!["Updated criterion".to_string()]),
                 tags: Some(vec!["v2".to_string(), "store".to_string()]),
-                required_tools: Some(vec![
-                    "github.run.list".to_string(),
-                    "github.auth.status".to_string(),
-                    "github.run.list".to_string(),
-                ]),
                 plan: Some("1. Updated plan".to_string()),
                 execution_summary: Some("Updated summary".to_string()),
                 priority: Some(TaskPriority::Low),

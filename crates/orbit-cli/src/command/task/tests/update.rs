@@ -84,26 +84,18 @@ fn task_update_complexity_uses_add_spellings() {
 }
 
 #[test]
-fn task_update_accepts_required_tools() {
-    let cli = Cli::try_parse_from([
+fn task_update_rejects_required_tools() {
+    let result = Cli::try_parse_from([
         "orbit",
         "task",
         "update",
         "ORB-00001",
         "--required-tools",
         "proc.spawn,orbit.task.show",
-    ])
-    .expect("parse task update required tools");
-
-    let Commands::Task(task) = cli.command else {
-        panic!("expected task command");
-    };
-    let TaskSubcommand::Update(args) = task.command else {
-        panic!("expected task update command");
+    ]);
+    let Err(error) = result else {
+        panic!("required tools are creation-only");
     };
 
-    assert_eq!(
-        args.required_tools.as_deref(),
-        Some("proc.spawn,orbit.task.show")
-    );
+    assert!(error.to_string().contains("--required-tools"), "{error}");
 }

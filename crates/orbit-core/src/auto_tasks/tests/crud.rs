@@ -112,6 +112,37 @@ fn update_patches_present_fields() {
 }
 
 #[test]
+fn template_updates_only_change_required_tools_for_future_tasks() {
+    let runtime = runtime();
+    let mut params = interval_params("authority", 60);
+    params.template.required_tools = vec!["github.run.list".to_string()];
+    runtime.auto_task_add(params).expect("add");
+    let first = runtime.auto_task_mint("authority").expect("first mint");
+
+    let mut replacement = template("Updated authority");
+    replacement.required_tools = vec!["github.auth.status".to_string()];
+    runtime
+        .auto_task_update(
+            "authority",
+            AutoTaskUpdateParams {
+                template: Some(replacement),
+                ..Default::default()
+            },
+        )
+        .expect("update template");
+    let second = runtime.auto_task_mint("authority").expect("second mint");
+
+    assert_eq!(
+        runtime
+            .get_task(&first.id)
+            .expect("read first minted task")
+            .required_tools,
+        vec!["github.run.list"]
+    );
+    assert_eq!(second.required_tools, vec!["github.auth.status"]);
+}
+
+#[test]
 fn toggle_disables_without_deleting() {
     let runtime = runtime();
     runtime

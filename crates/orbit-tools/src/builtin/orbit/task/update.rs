@@ -50,12 +50,6 @@ impl Tool for OrbitTaskUpdateTool {
                 required: false,
             },
             ToolParam {
-                name: "required_tools".to_string(),
-                description: "Replacement exact canonical tool requirements. Frozen once the task enters in-progress".to_string(),
-                param_type: "string_list".to_string(),
-                required: false,
-            },
-            ToolParam {
                 name: "plan".to_string(),
                 description: "Replacement task plan text (empty string clears)".to_string(),
                 param_type: "string".to_string(),
@@ -174,6 +168,15 @@ impl Tool for OrbitTaskUpdateTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         super::super::reject_agent_field(&input, "orbit.task.update")?;
+        if ["required_tools", "requiredTools", "required-tool"]
+            .iter()
+            .any(|field| input.get(*field).is_some())
+        {
+            return Err(OrbitError::InvalidInput(
+                "orbit.task.update does not accept `required_tools`; task tool requirements are immutable after creation"
+                    .to_string(),
+            ));
+        }
         if input.get("artifacts").is_some() {
             return Err(OrbitError::InvalidInput(
                 "orbit.task.update does not accept inline artifacts; use orbit.task.artifact.put"

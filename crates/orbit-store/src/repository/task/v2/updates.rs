@@ -38,11 +38,6 @@ impl TaskV2Store {
                 bundle.envelope.tags = normalize_task_tags(value.clone());
                 envelope_changed = true;
             }
-            if let Some(value) = &fields.required_tools {
-                bundle.envelope.required_tools =
-                    orbit_types::task::normalize_required_tools(value.clone());
-                envelope_changed = true;
-            }
             if let Some(value) = &fields.context_files {
                 bundle.envelope.context_files = value.clone();
                 envelope_changed = true;

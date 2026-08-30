@@ -26,9 +26,6 @@ pub struct TaskUpdateArgs {
     /// Replacement task tags. Repeat or comma-separate for multiple tags.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
     pub tags: Vec<String>,
-    /// Replacement exact canonical tool requirements (empty string clears).
-    #[arg(long = "required-tools")]
-    pub required_tools: Option<String>,
     /// New task plan (empty string clears)
     #[arg(long, alias = "instructions")]
     pub plan: Option<String>,
@@ -89,7 +86,6 @@ impl Execute for TaskUpdateArgs {
             acceptance_criteria,
             dependencies,
             tags,
-            required_tools,
             plan,
             execution_summary,
             comment,
@@ -164,7 +160,6 @@ impl Execute for TaskUpdateArgs {
                 acceptance_criteria,
                 dependencies,
                 tags,
-                required_tools: required_tools.map(|value| crate::parse::csv_to_vec(&value)),
                 plan,
                 execution_summary,
                 comment,

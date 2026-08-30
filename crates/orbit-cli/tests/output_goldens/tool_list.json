@@ -901,12 +901,6 @@
         "required": false
       },
       {
-        "description": "Replacement exact canonical tool requirements. Frozen once the task enters in-progress",
-        "name": "required_tools",
-        "param_type": "string_list",
-        "required": false
-      },
-      {
         "description": "Replacement task plan text (empty string clears)",
         "name": "plan",
         "param_type": "string",

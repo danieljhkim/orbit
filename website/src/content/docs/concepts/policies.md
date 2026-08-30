@@ -11,7 +11,7 @@ Policy is a filesystem-scoping surface. It controls what an activity can read or
 
 Activity tool inclusion is a separate admission boundary. For task-backed agent
 loops, `task.required_tools` extends the activity's baseline tool allowlist; it
-does not bypass caller-role or host-capability checks, tool-specific policy,
+is immutable after task creation and does not bypass caller-role or host-capability checks, tool-specific policy,
 filesystem profiles, subprocess allowlists, or external authentication. Any of
 those checks may still deny an included tool at execution time.
 

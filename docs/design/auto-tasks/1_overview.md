@@ -111,6 +111,8 @@ definition of the same name.
   names as `required_tools` so dispatch unions them with the ordinary
   `agent_implement` baseline rather than widening that activity (ORB-11070;
   DANI-10056 is the missing-requirements incident, not a clean result).
+  Updating the template changes this creation-time list only for later mints;
+  already-created tasks retain their immutable list.
 
 ## Workspace-authored definitions in this repo
 

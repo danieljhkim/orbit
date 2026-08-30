@@ -110,8 +110,9 @@ not a clean CI result).
   without weakening a check, and treats a clean current-head pass as a successful
   no-diff outcome. The body is GitHub-Actions-shaped; operators on other CI
   should adapt it before enabling. The template persists those five exact
-  GitHub-read names as `required_tools` so dispatch can union them with the
-  ordinary `agent_implement` baseline; it does not widen that activity or use
+  GitHub-read names as creation-time `required_tools` so dispatch can union them
+  with the ordinary `agent_implement` baseline. Template updates affect future
+  mints only; already-minted tasks retain their immutable list. It does not widen that activity or use
   `github.*`. **Execution-lane precondition:** all of its CI discovery goes
   through the read-only `github.auth.status`, `github.run.list`,
   `github.run.view`, `github.run.logs`, and `github.pr.list` builtin tools, which

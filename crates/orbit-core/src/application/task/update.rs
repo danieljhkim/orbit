@@ -3,8 +3,8 @@ use orbit_common::fs::task_io::prune_missing_context_files;
 use orbit_engine::TaskActivityUpdate;
 use orbit_types::record::OrbitEvent;
 use orbit_types::task::{
-    Task, TaskHistoryEntry, TaskStatus, normalize_required_tools, normalize_task_dependencies,
-    normalize_task_tags, validate_task_dependencies,
+    Task, TaskHistoryEntry, TaskStatus, normalize_task_dependencies, normalize_task_tags,
+    validate_task_dependencies,
 };
 
 use super::TaskRecordUpdateParams;
@@ -143,23 +143,6 @@ impl OrbitRuntime {
         }
         if let Some(tags) = params.tags.take() {
             params.tags = Some(normalize_task_tags(tags));
-        }
-        if let Some(required_tools) = params.required_tools.take() {
-            let normalized = normalize_required_tools(required_tools);
-            let requirements_changed = normalized != task.required_tools;
-            let entering_in_progress = params.status == Some(TaskStatus::InProgress)
-                && task.status != TaskStatus::InProgress;
-            let reached_in_progress = task.status == TaskStatus::InProgress
-                || self
-                    .get_task_history(id)?
-                    .iter()
-                    .any(|entry| entry.to_status == Some(TaskStatus::InProgress));
-            if requirements_changed && (entering_in_progress || reached_in_progress) {
-                return Err(OrbitError::InvalidInput(format!(
-                    "task {id} required_tools are frozen once the task enters in-progress"
-                )));
-            }
-            params.required_tools = Some(normalized);
         }
         if let Some(crew) = &params.crew {
             self.validate_crew_name(crew.as_deref())?;

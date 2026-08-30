@@ -247,8 +247,6 @@ pub(super) struct UpdateTaskBody {
     #[serde(default)]
     tags: Option<Vec<String>>,
     #[serde(default)]
-    required_tools: Option<Vec<String>>,
-    #[serde(default)]
     plan: Option<String>,
     #[serde(default)]
     execution_summary: Option<String>,
@@ -714,7 +712,6 @@ pub(super) async fn update_task_action(
         dependencies: body.dependencies,
         relations: body.relations,
         tags: body.tags,
-        required_tools: body.required_tools,
         plan: body.plan,
         execution_summary: body.execution_summary,
         comment: body.comment,

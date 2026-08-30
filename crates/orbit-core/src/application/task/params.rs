@@ -13,7 +13,6 @@ pub(crate) struct TaskRecordUpdateParams {
     pub(crate) dependencies: Option<Vec<String>>,
     pub(crate) relations: Option<Vec<TaskRelation>>,
     pub(crate) tags: Option<Vec<String>>,
-    pub(crate) required_tools: Option<Vec<String>>,
     pub(crate) plan: Option<String>,
     pub(crate) execution_summary: Option<String>,
     pub(crate) context_files: Option<Vec<String>>,
@@ -45,7 +44,6 @@ impl TaskRecordUpdateParams {
             || self.dependencies.is_some()
             || self.relations.is_some()
             || self.tags.is_some()
-            || self.required_tools.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.context_files.is_some()
@@ -143,8 +141,6 @@ pub struct TaskUpdateParams {
     pub dependencies: Option<Vec<OrbitId>>,
     pub relations: Option<Vec<TaskRelation>>,
     pub tags: Option<Vec<String>>,
-    /// Replacement task-scoped tool requirements. Frozen at execution admission.
-    pub required_tools: Option<Vec<String>>,
     pub plan: Option<String>,
     pub execution_summary: Option<String>,
     pub comment: Option<String>,
@@ -179,7 +175,6 @@ impl TaskUpdateParams {
             || self.dependencies.is_some()
             || self.relations.is_some()
             || self.tags.is_some()
-            || self.required_tools.is_some()
             || self.plan.is_some()
             || self.execution_summary.is_some()
             || self.status.is_some()
@@ -211,7 +206,6 @@ impl From<TaskUpdateParams> for TaskRecordUpdateParams {
             dependencies: p.dependencies,
             relations: p.relations,
             tags: p.tags,
-            required_tools: p.required_tools,
             plan: p.plan,
             execution_summary: p.execution_summary,
             status: p.status,

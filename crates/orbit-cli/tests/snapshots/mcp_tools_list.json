@@ -865,20 +865,6 @@
           "description": "Replacement typed task relations as an array of {type, target} objects",
           "type": "array"
         },
-        "required_tools": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Replacement exact canonical tool requirements. Frozen once the task enters in-progress"
-        },
         "source_task_id": {
           "description": "For bug tasks: originating task ID that introduced the defect (empty string clears)",
           "type": "string"
