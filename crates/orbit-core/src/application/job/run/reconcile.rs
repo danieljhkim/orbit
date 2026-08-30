@@ -91,49 +91,67 @@ impl OrbitRuntime {
     }
 
     pub(crate) fn reconcile_stale_job_run(&self, run: &JobRun) -> Result<bool, OrbitError> {
+        self.reconcile_stale_job_run_before_revalidation(run, || {})
+    }
+
+    fn reconcile_stale_job_run_before_revalidation<F>(
+        &self,
+        run: &JobRun,
+        before_revalidation: F,
+    ) -> Result<bool, OrbitError>
+    where
+        F: FnOnce(),
+    {
         if terminal_run_timing_is_incomplete(run) {
             return self.repair_terminal_job_run_timing(run);
         }
-        // [ORB-10070] Orphaned queued runs (claimed worker conclusively gone,
-        // or never claimed past the grace window) finalize exactly like
-        // orphaned running runs.
-        if let Some(reason) = pending_run_stale_reason(run) {
-            return self.finalize_orphaned_job_run(
-                run,
-                reason.error_code(),
-                &stale_pending_run_message(run, reason),
-            );
-        }
-        if !running_run_owner_is_stale(run) {
+        if stale_job_run_diagnostic(run).is_none() {
             return Ok(false);
         }
-        let stale_reason = running_run_owner_stale_reason(run);
-        self.finalize_orphaned_job_run(
-            run,
-            owner_identity_error_code(stale_reason),
-            &stale_job_run_message(run, stale_reason),
-        )
+
+        before_revalidation();
+        self.finalize_orphaned_job_run(&run.run_id)
+    }
+
+    /// Deterministic seam for reproducing a terminal writer winning after the
+    /// stale snapshot was classified but before reconciliation revalidates it.
+    #[cfg(test)]
+    pub(super) fn reconcile_stale_job_run_after_classification<F>(
+        &self,
+        run: &JobRun,
+        concurrent_completion: F,
+    ) -> Result<bool, OrbitError>
+    where
+        F: FnOnce(),
+    {
+        self.reconcile_stale_job_run_before_revalidation(run, concurrent_completion)
     }
 
     /// [ORB-10002] Orphaned runs (owner process conclusively gone) become
     /// `interrupted`, not `failed`: the job did not fail, its worker died.
     /// Interrupted runs are resumable from their step checkpoints via
     /// `orbit job resume <run_id>`.
-    fn finalize_orphaned_job_run(
-        &self,
-        run: &JobRun,
-        error_code: &str,
-        message: &str,
-    ) -> Result<bool, OrbitError> {
-        let finished_at = self.orphaned_run_finished_at(run);
-        let duration_ms = run.started_at.map(|started_at| {
+    fn finalize_orphaned_job_run(&self, run_id: &str) -> Result<bool, OrbitError> {
+        // [ORB-11116] The scan's candidate snapshot can go stale while a real
+        // worker is terminalizing. Re-read at the interruption boundary and
+        // re-run both state and owner classification so a completed run never
+        // receives a later interruption attempt (or its conflict diagnostic).
+        let Some(current) = self.get_job_run_backend(run_id)? else {
+            return Ok(false);
+        };
+        let Some((error_code, message)) = stale_job_run_diagnostic(&current) else {
+            return Ok(false);
+        };
+
+        let finished_at = self.orphaned_run_finished_at(&current);
+        let duration_ms = current.started_at.map(|started_at| {
             finished_at
                 .signed_duration_since(started_at)
                 .num_milliseconds()
                 .max(0) as u64
         });
         let changed = self.finalize_job_run_with_reservation_cleanup(
-            &run.run_id,
+            &current.run_id,
             JobRunState::Interrupted,
             finished_at,
             duration_ms,
@@ -143,25 +161,25 @@ impl OrbitRuntime {
             return Ok(false);
         }
 
-        let Some(current) = self.get_job_run_backend(&run.run_id)? else {
+        let Some(finalized) = self.get_job_run_backend(&current.run_id)? else {
             return Ok(false);
         };
-        if current.state != JobRunState::Interrupted || current.finished_at.is_none() {
+        if finalized.state != JobRunState::Interrupted || finalized.finished_at.is_none() {
             return Ok(false);
         }
 
-        let step_started_at = run.started_at.unwrap_or(run.scheduled_at);
+        let step_started_at = current.started_at.unwrap_or(current.scheduled_at);
         let _ = self.record_pipeline_diagnostic_step(
-            run,
+            &current,
             step_started_at,
             finished_at,
-            Some(error_code),
-            message,
+            Some(&error_code),
+            &message,
             JobRunState::Interrupted,
         );
         self.record_event(OrbitEvent::JobRunCompleted {
-            job_id: run.job_id.clone(),
-            run_id: run.run_id.clone(),
+            job_id: current.job_id.clone(),
+            run_id: current.run_id.clone(),
             state: JobRunState::Interrupted.to_string(),
         })?;
         Ok(true)
@@ -258,6 +276,29 @@ impl OrbitRuntime {
         }
         Ok(None)
     }
+}
+
+/// The diagnostic for a currently stale non-terminal run. Keeping
+/// classification and message construction together lets reconciliation
+/// repeat the authoritative decision against a fresh durable row.
+fn stale_job_run_diagnostic(run: &JobRun) -> Option<(String, String)> {
+    // [ORB-10070] Orphaned queued runs (claimed worker conclusively gone, or
+    // never claimed past the grace window) finalize exactly like orphaned
+    // running runs.
+    if let Some(reason) = pending_run_stale_reason(run) {
+        return Some((
+            reason.error_code().to_string(),
+            stale_pending_run_message(run, reason),
+        ));
+    }
+    if !running_run_owner_is_stale(run) {
+        return None;
+    }
+    let stale_reason = running_run_owner_stale_reason(run);
+    Some((
+        owner_identity_error_code(stale_reason).to_string(),
+        stale_job_run_message(run, stale_reason),
+    ))
 }
 
 fn terminal_run_timing_is_incomplete(run: &JobRun) -> bool {

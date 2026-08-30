@@ -3,6 +3,7 @@
 use super::*;
 
 use super::super::JobRunListParams;
+use crate::application::job::TERMINAL_OUTCOME_CONFLICT_CODE;
 use chrono::{Duration, Utc};
 use orbit_types::workflow::JobRunState;
 
@@ -238,6 +239,50 @@ fn pending_run_with_dead_claimed_owner_is_reconciled() {
                 .as_deref()
                 .is_some_and(|message| message.contains("no live worker process owns it"))
     }));
+}
+
+/// [ORB-11116] A worker may terminalize after the sweep reads/classifies its
+/// stale snapshot. Each terminal outcome wins before the interruption boundary
+/// is revalidated, so reconciliation must neither interrupt nor record a
+/// first-terminal-wins conflict afterward.
+#[test]
+fn concurrent_terminal_outcomes_win_before_stale_interruption_revalidation() {
+    for terminal_state in [
+        JobRunState::Success,
+        JobRunState::Failed,
+        JobRunState::Cancelled,
+    ] {
+        let (_root, runtime) = test_runtime();
+        let run = insert_pending_run(&runtime, "qa_reconcile_terminal_race");
+        runtime
+            .stores()
+            .jobs()
+            .mark_job_run_running(&run.run_id, Utc::now() - Duration::seconds(3), 999_999)
+            .expect("mark stale running");
+        let stale_snapshot = runtime
+            .get_job_run_backend(&run.run_id)
+            .expect("read stale snapshot")
+            .expect("stale run exists");
+
+        let reconciled = runtime
+            .reconcile_stale_job_run_after_classification(&stale_snapshot, || {
+                runtime
+                    .stores()
+                    .jobs()
+                    .finalize_job_run(&run.run_id, terminal_state, Utc::now(), Some(3_000))
+                    .expect("concurrent terminal writer wins");
+            })
+            .expect("reconcile stale snapshot");
+
+        assert!(!reconciled, "{terminal_state} must prevent interruption");
+        let stored = runtime.show_job_run(&run.run_id).expect("show winner");
+        assert_eq!(stored.state, terminal_state);
+        assert!(stored.finished_at.is_some());
+        assert!(stored.steps.iter().all(|step| {
+            step.state != JobRunState::Interrupted
+                && step.error_code.as_deref() != Some(TERMINAL_OUTCOME_CONFLICT_CODE)
+        }));
+    }
 }
 
 /// [ORB-10594] The incident shape, end to end through the sweep: a run whose
