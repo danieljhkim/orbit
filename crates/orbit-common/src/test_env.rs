@@ -135,3 +135,7 @@ pub fn harden_dir(path: &std::path::Path) {
 /// Non-Unix targets have no umask to defend against.
 #[cfg(not(unix))]
 pub fn harden_dir(_path: &std::path::Path) {}
+
+#[cfg(test)]
+#[path = "tests/test_env.rs"]
+mod tests;
