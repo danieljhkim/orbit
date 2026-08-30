@@ -23,6 +23,7 @@ use super::*;
 mod inspect;
 mod publication;
 mod publish;
+mod restore;
 
 /// Run `git` with a deterministic, non-interactive identity. Publication tests
 /// drive only local temporary repositories: there is no network service and no

@@ -97,6 +97,26 @@ pub struct PublicationInspection {
 pub fn inspect_publication(
     request: PublicationInspectRequest,
 ) -> Result<PublicationInspection, OrbitError> {
+    Ok(load_validated_publication(request)?.inspection)
+}
+
+/// Fully validated publication content retained for recovery. The public
+/// inspection surface deliberately omits append streams and attachment bytes;
+/// restore consumes this internal result so it cannot bypass the read-only
+/// consumer contract or validate a subtly different projection.
+pub(super) struct ValidatedPublicationSnapshot {
+    pub inspection: PublicationInspection,
+    pub bundles: Vec<ValidatedPublicationBundle>,
+}
+
+pub(super) struct ValidatedPublicationBundle {
+    pub bundle: TaskBundleV2,
+    pub source_dir: PathBuf,
+}
+
+pub(super) fn load_validated_publication(
+    request: PublicationInspectRequest,
+) -> Result<ValidatedPublicationSnapshot, OrbitError> {
     let request = validate_request(request)?;
     let fetched = fetch_publication(&request)?;
     let envelope = read_envelope(&fetched.tree_dir)?;
@@ -115,21 +135,25 @@ pub fn inspect_publication(
         freshness: fetched.freshness,
         render_authority: PublicationRenderAuthority::Snapshot,
     };
-    Ok(PublicationInspection {
+    let inspection = PublicationInspection {
         label: label.clone(),
         envelope,
         git_parent: fetched.git_parent,
         tasks: tasks
-            .into_iter()
+            .iter()
             .map(|task| InspectedPublicationTask {
                 label: label.clone(),
-                task: task.envelope,
-                description: task.description,
-                acceptance: task.acceptance,
-                plan: task.plan,
-                execution_summary: task.execution_summary,
+                task: task.bundle.envelope.clone(),
+                description: task.bundle.description.clone(),
+                acceptance: task.bundle.acceptance.clone(),
+                plan: task.bundle.plan.clone(),
+                execution_summary: task.bundle.execution_summary.clone(),
             })
             .collect(),
+    };
+    Ok(ValidatedPublicationSnapshot {
+        inspection,
+        bundles: tasks,
     })
 }
 
@@ -342,7 +366,7 @@ fn assert_pairing(
 fn read_validated_tasks(
     tree_dir: &Path,
     envelope: &PublicationEnvelope,
-) -> Result<Vec<TaskBundleV2>, OrbitError> {
+) -> Result<Vec<ValidatedPublicationBundle>, OrbitError> {
     let tasks_root = tree_dir.join(PUBLICATION_TASKS_DIR_NAME);
     let observed = published_task_ids(&tasks_root)?;
     if observed != envelope.task_ids {
@@ -373,7 +397,10 @@ fn read_validated_tasks(
                 bundle.envelope.id
             )));
         }
-        bundles.push(bundle);
+        bundles.push(ValidatedPublicationBundle {
+            bundle,
+            source_dir: bundle_dir,
+        });
     }
     Ok(bundles)
 }

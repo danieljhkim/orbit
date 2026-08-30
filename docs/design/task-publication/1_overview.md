@@ -99,11 +99,13 @@ encrypted secret store.
 | Canonical task-bundle format | [Task Artifacts](../task-artifacts/2_design.md) | — |
 | Current live cross-machine access | [Remote Access](../remote-access/1_overview.md) | — |
 | Current host-qualified MCP routing | [Federated MCP](../federated-mcp/1_overview.md) | — |
-| Portable archive and restore primitives | [`orbit-store` task workflow](../../../crates/orbit-store/src/workflow/task/mod.rs) | — |
+| Same-authority publication recovery | [`orbit-store` restore workflow](../../../crates/orbit-store/src/workflow/task/restore.rs) | [ORB-11076] |
+| Portable migration archive primitives | [`orbit-store` task workflow](../../../crates/orbit-store/src/workflow/task/mod.rs) | — |
 | Retired source-repository registry | [Task Sync](../_archive/task-sync/1_overview.md) | — |
 
 ## Task References
 
 - [ORB-11068] — designed authority-owned task publication through a dedicated private Git repository.
+- [ORB-11076] — implemented fail-closed same-authority publication restore.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
