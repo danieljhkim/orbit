@@ -22,7 +22,7 @@ spec:
     `pipeline_success_guard` after any cleanup that depends on the raw
     child status. The returned `status` mirrors the child Run's terminal state:
     `succeeded`,
-    `failed`, `cancelled`, or `timeout`. A `timeout` here means the
+    `failed`, `cancelled`, `interrupted`, or `timeout`. A `timeout` here means the
     WAIT side of the activity exceeded `timeout_seconds`; the child
     Run itself may still be running — callers that care must inspect
     `run_id` to decide follow-up. Gate workflows may pass
@@ -60,7 +60,7 @@ spec:
     properties:
       status:
         type: string
-        enum: [succeeded, failed, cancelled, timeout, pending, running]
+        enum: [succeeded, failed, cancelled, interrupted, timeout, pending, running]
       run_id:
         type: string
       finished_at:

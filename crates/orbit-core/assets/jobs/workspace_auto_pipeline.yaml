@@ -71,12 +71,18 @@ spec:
                 mode: all
               collect: leaf_results
 
-          - id: require_leaf_success
+          # A durably linked terminal child is an observed queue item, not a
+          # structural failure of this workspace sequencer. Retain its exact
+          # result and aggregate it, then let the next iteration reclassify
+          # unrelated work. Dispatch/wait errors still fail in ship_leaves,
+          # and malformed entries fail this recording step.
+          - id: record_leaf_outcomes
             when: "{{ steps.admissible.output.has_leaves }} == true"
             target: activity:pipeline_success_guard
             default_input:
               context: workspace auto leaf ship
               results: "{{ steps.leaf_results.output }}"
+              allow_non_success: true
 
           # Detached: the next iteration keeps shipping leaves while the epic
           # assembles its branch. `classify_workspace_auto_tasks` re-observes

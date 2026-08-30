@@ -52,7 +52,7 @@ fn test_runtime_with_workspace_config(
     (root, runtime, repo_root, global_root)
 }
 
-fn seed_default_catalogs(global_root: &Path) {
+pub(super) fn seed_default_catalogs(global_root: &Path) {
     seed_default_activities(&global_root.join("resources/activities"), true)
         .expect("seed default activities");
     seed_default_jobs(&global_root.join("resources/jobs"), true).expect("seed default jobs");
@@ -66,7 +66,11 @@ fn write_context_file(repo_root: &Path, relative_path: &str) {
     std::fs::write(path, "fixture\n").expect("write context file");
 }
 
-fn seed_gate_task(runtime: &OrbitRuntime, repo_root: &Path, status: TaskStatus) -> String {
+pub(super) fn seed_gate_task(
+    runtime: &OrbitRuntime,
+    repo_root: &Path,
+    status: TaskStatus,
+) -> String {
     write_context_file(repo_root, "src/lib.rs");
     runtime
         .add_task(TaskAddParams {
@@ -125,7 +129,7 @@ fn try_execute_gate_job(
     )
 }
 
-fn try_execute_named_job(
+pub(super) fn try_execute_named_job(
     runtime: &OrbitRuntime,
     repo_root: &Path,
     host: &dyn RuntimeHost,

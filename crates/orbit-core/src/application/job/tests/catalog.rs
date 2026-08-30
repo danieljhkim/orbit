@@ -1021,7 +1021,7 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         vec![
             "admissible",
             "ship_leaves",
-            "require_leaf_success",
+            "record_leaf_outcomes",
             "start_epic",
             "window",
             "idle_wait",
@@ -1057,12 +1057,17 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
     assert_eq!(ship_input["job_name"], "task_auto_pipeline");
     assert_eq!(ship_input["run_input"]["task_ids"], "{{ item.task_ids }}");
 
-    let JobV2StepBody::TargetRef(guard) = &drain.steps[2].body else {
-        panic!("leaf success guard must be an activity reference");
+    let JobV2StepBody::TargetRef(record) = &drain.steps[2].body else {
+        panic!("leaf outcome recorder must be an activity reference");
     };
+    assert_eq!(record.target, "activity:pipeline_success_guard");
     assert_eq!(
-        guard.default_input.as_ref().expect("guard input")["results"],
+        record.default_input.as_ref().expect("record input")["results"],
         "{{ steps.leaf_results.output }}"
+    );
+    assert_eq!(
+        record.default_input.as_ref().expect("record input")["allow_non_success"],
+        true
     );
 
     // The epic must NOT be waited on: blocking on a multi-hour epic would

@@ -78,6 +78,79 @@ fn pipeline_success_guard_rejects_mixed_results() {
 }
 
 #[test]
+fn pipeline_success_guard_records_exact_terminal_results_and_counts() {
+    let results = json!([
+        {
+            "run_id": "jrun-ok",
+            "status": "succeeded"
+        },
+        {
+            "run_id": "jrun-failed",
+            "status": "failed",
+            "error": "implementation failed"
+        },
+        {
+            "run_id": "jrun-cancelled",
+            "status": "cancelled",
+            "error": "operator cancelled"
+        },
+        {
+            "run_id": "jrun-interrupted",
+            "status": "interrupted",
+            "error": "worker disappeared"
+        },
+        {
+            "run_id": "jrun-timeout",
+            "status": "timeout",
+            "error": "wait deadline elapsed"
+        }
+    ]);
+    let output = pipeline_success_guard(
+        "pipeline_success_guard",
+        &json!({
+            "results": results,
+            "allow_non_success": true
+        }),
+    )
+    .expect("terminal child outcomes should be recorded");
+
+    assert_eq!(output["succeeded"], false);
+    assert_eq!(output["checked_count"], 5);
+    assert_eq!(output["succeeded_count"], 1);
+    assert_eq!(output["non_success_count"], 4);
+    assert_eq!(output["results"], results);
+}
+
+#[test]
+fn pipeline_success_guard_record_mode_rejects_malformed_or_non_terminal_results() {
+    for (result, expected) in [
+        (
+            json!({"status": "failed", "error": "missing linkage"}),
+            "missing non-empty string run_id",
+        ),
+        (
+            json!({"run_id": "jrun-running", "status": "running"}),
+            "has non-terminal status running",
+        ),
+        (
+            json!({"run_id": "jrun-bad-error", "status": "failed", "error": 42}),
+            "has non-string error",
+        ),
+    ] {
+        let err = pipeline_success_guard(
+            "pipeline_success_guard",
+            &json!({
+                "results": [result],
+                "allow_non_success": true
+            }),
+        )
+        .expect_err("malformed result must fail closed");
+        let message = action_failure_message(err, "pipeline_success_guard");
+        assert!(message.contains(expected), "{message}");
+    }
+}
+
+#[test]
 fn gate_starvation_fail_names_both_conflicting_files_and_unmet_dependencies() {
     // A dependency-starved gate previously reported an empty
     // `conflicting_files` list and named no blocker at all.

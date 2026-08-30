@@ -364,10 +364,12 @@ pub(crate) fn run_deterministic(
         CoreDeterministicAction::InvokeDetached => {
             pipeline_actions::invoke_detached(runtime, action, input, tool_context)
         }
-        // Fail a workflow if one or more child pipeline wait results did not
-        // reach `succeeded`.
+        // Fail a workflow if child wait results did not reach `succeeded`, or
+        // apply the explicit workspace-sequencer recording policy.
         CoreDeterministicAction::PipelineSuccessGuard => {
-            pipeline_actions::pipeline_success_guard(action, input)
+            let output = pipeline_actions::pipeline_success_guard(action, input)?;
+            pipeline_actions::record_pipeline_results_audit(runtime, action, input, &output)?;
+            Ok(output)
         }
         // Post-loop gate signal: the admission window never opened in
         // time. Emits a `gate.starvation` audit event with task_ids and
