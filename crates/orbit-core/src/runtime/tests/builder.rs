@@ -38,6 +38,7 @@ fn registry_neutral_binding_controls_workspace_id_repo_root_and_ship_mode() {
     std::fs::create_dir_all(&workspace_root).expect("create workspace root");
 
     let binding = WorkspaceRuntimeBinding {
+        logical_workspace_id: "ws_bound".to_string(),
         workspace_id: "ws_bound".to_string(),
         repo_root: custom_repo_root.clone(),
         ship_mode: ShipMode::Pr,
@@ -71,6 +72,7 @@ fn registry_neutral_binding_rejects_a_conflicting_workspace_config() {
         &global_root,
         &workspace_root,
         WorkspaceRuntimeBinding {
+            logical_workspace_id: "ws_other".to_string(),
             workspace_id: "ws_other".to_string(),
             repo_root: root.path().join("repo"),
             ship_mode: ShipMode::Local,

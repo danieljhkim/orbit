@@ -4,7 +4,7 @@ type: design
 title: "Auditability — Decisions"
 owner: codex
 last_updated: 2026-08-11
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Draft
 feature: auditability
 doc_role: decisions
@@ -427,7 +427,7 @@ Store friction reports under `.orbit/frictions/{yyyy}-{mm}/F{nnn}.md` with YAML 
 
 **Recorded:** 2026-08-09 19:30:11.118493Z · [ORB-10680]
 **Supersedes:** [Friction reports are append-only records, not lifecycle tasks](#friction-reports-are-append-only-records-not-lifecycle-tasks)
-**Paths:** `crates/orbit-store/src/file/friction_store/**`, `crates/orbit-store/src/sqlite/**`, `crates/orbit-core/src/runtime/orbit_tool_host/**`, `crates/orbit-dashboard/src/api/frictions.rs`, `docs/design/auditability/**`, `docs/design/mcp-bridge/**`
+**Paths:** `crates/orbit-store/src/driver/file/friction_store/**`, `crates/orbit-store/src/driver/sqlite/**`, `crates/orbit-core/src/adapter/tool_host/**`, `crates/orbit-web/src/api/frictions.rs`, `docs/design/auditability/**`, `docs/design/mcp-bridge/**`
 
 ### Context
 [Friction reports are append-only records, not lifecycle tasks](#friction-reports-are-append-only-records-not-lifecycle-tasks) correctly separated friction reports from planned task work, but coupled that semantic decision to Markdown files under `.orbit/frictions/`. File backing was reasonable while records were low-volume, Git-visible, and directly inspectable. Frictions are now hub-only coordination state, authors and operators mutate them through Orbit surfaces, and every filtered list or stats request parses and materializes the complete retained file corpus. The real alternatives are to retain per-record Markdown for direct inspection or preserve the artifact semantics while moving live persistence to indexed SQLite.
@@ -494,11 +494,11 @@ Ship-path PR transitions carry attribution on each automation update. The Review
 ## Derive invocation cost at query time from a versioned price table
 
 **Recorded:** 2026-07-20 04:06:48.987384Z · [ORB-10338]
-**Paths:** `crates/orbit-common/src/types/pricing.rs`, `crates/orbit-common/assets/model_prices.yaml`, `crates/orbit-store/src/sqlite/invocation_store/**`
+**Paths:** `crates/orbit-common/src/model/pricing.rs`, `crates/orbit-common/assets/model_prices.yaml`, `crates/orbit-store/src/driver/sqlite/invocation_store/**`
 
 **Context.** The invocation store already retains exact per-invocation token splits, but had no notion of USD cost — cost existed only as a provider-reported total buried in the worker's unparsed per-run JSON, never joined to a model or token split. [ORB-10338] adds cost. Two real alternatives existed: (a) compute cost once at ingest time and store it as a frozen column, or (b) keep rows token-only and derive cost from a versioned price table looked up by exact model string and the invocation's timestamp on every read/aggregate.
 
-**Decision.** Cost is derived at query time, not stored. `orbit_common::types::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range, parsed once behind a `OnceLock` cache. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a Rust code change.
+**Decision.** Cost is derived at query time, not stored. `orbit_common::model::pricing` ships a versioned price table as an in-repo YAML asset (`crates/orbit-common/assets/model_prices.yaml`), keyed by exact model string plus an `effective_from`/`effective_until` date range, parsed once behind a `OnceLock` cache. `InvocationRecord` gains `derived_cost_usd` (computed at read time from the row's token splits, model, and timestamp against the price table) alongside a new `provider_cost_usd` column that persists the provider's own reported total verbatim for monthly manual reconciliation. Adding or correcting a price row is a YAML edit, not a Rust code change.
 
 **Consequences.**
 - Historical invocation rows re-price automatically when a price row is corrected or backfilled — no migration/backfill script needed to fix a wrong rate.
@@ -534,7 +534,7 @@ The full reasoning is preserved in [Workflow alone creates shipment commits whil
 ## Provider subprocess liveness is a separate audit event probed at read time
 
 **Recorded:** 2026-07-27 02:57:13.483354Z · [ORB-10496]
-**Paths:** `crates/orbit-engine/src/activity_job/cli_runner/**`, `crates/orbit-core/src/runtime/run_audit.rs`, `crates/orbit-common/src/utility/process_identity.rs`, `crates/orbit-dashboard/src/api/runs.rs`
+**Paths:** `crates/orbit-engine/src/activity_job/cli_runner/**`, `crates/orbit-core/src/runtime/run_audit.rs`, `crates/orbit-common/src/process/identity.rs`, `crates/orbit-web/src/api/runs.rs`
 
 ### Context
 
@@ -552,7 +552,7 @@ Extending the existing `cli.invocation.started` event was not an option: it is e
 
 Emit one new `cli.invocation.process` v2 audit event (`provider`, `pid`, `pid_start_time`) immediately after spawn and before the supervision loop, ordered strictly between `cli.invocation.started` and `cli.invocation.finished`. The envelope writer persists synchronously, so the row is readable while the invocation is still running.
 
-Liveness is computed at read time, not stored. `orbit_common::utility::process_identity::probe_process_liveness` answers `alive` / `exited` / `unknown` from `kill(pid, 0)` plus the Linux zombie check, using the recorded `pid_start_time` token to reject a recycled PID. `OrbitRuntime::collect_run_provider_processes` pairs each process event with the `cli.invocation.finished` event that closes it within the same step and probes only the still-open ones. `GET /api/runs/:id` (bridge `workflow_run_status`) and `orbit run show` project the result.
+Liveness is computed at read time, not stored. `orbit_common::process::identity::probe_process_liveness` answers `alive` / `exited` / `unknown` from `kill(pid, 0)` plus the Linux zombie check, using the recorded `pid_start_time` token to reject a recycled PID. `OrbitRuntime::collect_run_provider_processes` pairs each process event with the `cli.invocation.finished` event that closes it within the same step and probes only the still-open ones. `GET /api/runs/:id` (bridge `workflow_run_status`) and `orbit run show` project the result.
 
 ### Consequences
 
@@ -566,7 +566,7 @@ Liveness is computed at read time, not stored. `orbit_common::utility::process_i
 ## Friction records carry an author-settable title; derivation is a structural fallback
 
 **Recorded:** 2026-08-02 23:41:57.916629Z · [ORB-10590], [ORB-10598]
-**Paths:** `crates/orbit-common/src/friction/**`, `crates/orbit-store/src/file/friction_store/**`
+**Paths:** `crates/orbit-common/src/governance/friction/**`, `crates/orbit-store/src/driver/file/friction_store/**`
 
 ### Context
 
@@ -599,7 +599,7 @@ The result is clamped to `FRICTION_TITLE_MAX_CHARS` (120) at a word boundary. An
 
 - Every friction lands with a handle that names its subject: an author's own title, or the first prose statement of the body, never a bare section label and never an unreadable paragraph.
 - The existing corpus self-heals on read for the section-label and overlong cases. A record whose body genuinely never states its subject still needs a human title; `update --title` is the supported way to give it one.
-- Title validation lives in one place (`orbit_common::friction::title`) and both tool-host implementations — the checkout-backed host and the checkoutless hub coordination executor — call it, so the two write paths cannot drift on what a legal title is.
+- Title validation lives in one place (`orbit_common::governance::friction::title`) and both tool-host implementations — the checkout-backed host and the checkoutless hub coordination executor — call it, so the two write paths cannot drift on what a legal title is.
 - Cost: the MCP tool schema for `orbit.friction.add` and `.update` gains a parameter. The addition is additive and optional — every existing call keeps working unchanged — but it is still a tool-surface change, and the snapshot guard treats schema drift as release-visible.
 - Cost: two structural rules are more code than a first-line read, and they can still be wrong. A body whose first section genuinely holds the subject in its second sentence derives a weaker title than a careful author would write. The stored field is the escape hatch, which is why it is the primary mechanism and derivation only the fallback.
 - Cost: the deployed `orbit` binary and the Bridge MCP server must be rebuilt before `--title` is reachable from a live surface; until then existing records cannot be retitled through the tools.
@@ -607,7 +607,7 @@ The result is clamped to `FRICTION_TITLE_MAX_CHARS` (120) at a word boundary. An
 ## Friction records move to SQLite with a legacy-evidence path projection
 
 **Recorded:** 2026-08-09 20:25:57.877485Z · [ORB-10680]
-**Paths:** `crates/orbit-store/src/sqlite/friction_store/**`, `crates/orbit-store/src/file/friction_store/**`
+**Paths:** `crates/orbit-store/src/repository/friction/**`, `crates/orbit-store/src/driver/sqlite/migration/**`, `crates/orbit-store/src/driver/file/friction_store/**`
 
 **Context.** Friction list, filtered-query, and stats operations discovered every Markdown record under a workspace's friction tree, parsed every YAML envelope and body, allocated the complete corpus as `Vec<StoredFrictionRecord>`, and only then filtered, sorted, paginated, or aggregated. Peak memory and parse work therefore grew with total retained friction history even when a caller asked for a 50-row page or a narrow status filter. The file-backed rationale no longer matched the runtime contract: frictions are hub-only coordination state, writes go through Orbit surfaces rather than human file edits, and the canonical hub already copies checkout-local records into a global per-workspace file tree. A public `path` field pointed at the backing Markdown file, so moving persistence could not silently leave it fictitious.
 

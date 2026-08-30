@@ -6,6 +6,8 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::publication::WorkspacePublicationBinding;
+
 /// Current on-disk schema version for `~/.orbit/workspaces.json`.
 pub const WORKSPACE_REGISTRY_SCHEMA_VERSION: u32 = 1;
 
@@ -142,6 +144,10 @@ pub struct WorkspaceRegistry {
     pub workspaces: Vec<Workspace>,
     #[serde(default)]
     pub checkouts: Vec<WorkspaceCheckout>,
+    /// Owner-local bindings to dedicated task-publication repositories.
+    /// Absent from registries that have never bound a publication remote.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publication_bindings: Vec<WorkspacePublicationBinding>,
 }
 
 impl Default for WorkspaceRegistry {
@@ -151,6 +157,7 @@ impl Default for WorkspaceRegistry {
             owner_host_ids: BTreeMap::new(),
             workspaces: Vec::new(),
             checkouts: Vec::new(),
+            publication_bindings: Vec::new(),
         }
     }
 }

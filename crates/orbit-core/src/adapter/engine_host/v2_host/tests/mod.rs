@@ -1,8 +1,11 @@
 mod backlog_exclusion;
+mod ci_failure_tasks;
 mod cli_executor;
 mod dispatch;
 mod pipeline_actions;
+mod required_tools;
 mod sandbox;
+mod sandbox_nested;
 mod scan_unresolved;
 mod task_context;
 mod task_pilot;

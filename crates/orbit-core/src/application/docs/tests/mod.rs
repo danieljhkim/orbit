@@ -12,6 +12,7 @@ mod frontmatter;
 mod migrate;
 mod path_util;
 mod search;
+mod types;
 mod walk;
 
 use std::io::Write;

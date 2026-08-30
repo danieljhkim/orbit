@@ -891,6 +891,7 @@ mod tests {
         let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
         let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
         let security_path = orbit_root.join("auto_tasks/security-review.yaml");
+        let code_review_path = orbit_root.join("auto_tasks/code-review.yaml");
         let friction = fs::read_to_string(&friction_path).expect("read seeded friction definition");
         let friction_definition = orbit_common::protocol::yaml::parse_auto_task_yaml(&friction)
             .expect("seeded friction definition parses through loader schema");
@@ -933,6 +934,24 @@ mod tests {
             security_definition.dedupe,
             orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
+        let code_review =
+            fs::read_to_string(&code_review_path).expect("read seeded code-review definition");
+        let code_review_definition =
+            orbit_common::protocol::yaml::parse_auto_task_yaml(&code_review)
+                .expect("seeded code-review definition parses through loader schema");
+        assert!(!code_review_definition.enabled);
+        assert_eq!(
+            code_review_definition.template.crew.as_deref(),
+            Some("system")
+        );
+        assert!(
+            code_review.contains("\n  crew: system"),
+            "seeded code-review default must name the system crew"
+        );
+        assert!(matches!(
+            code_review_definition.dedupe,
+            orbit_types::workflow::DedupePolicy::SkipIfOpen
+        ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
         let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
         assert!(
@@ -961,13 +980,21 @@ mod tests {
                 .iter()
                 .any(|loaded| loaded.definition.name == "security-review")
         );
+        assert!(
+            loaded
+                .definitions
+                .iter()
+                .any(|loaded| loaded.definition.name == "code-review")
+        );
 
         let authored_friction = "operator-authored friction definition\n";
         let authored_qa = "operator-authored QA definition\n";
         let authored_security = "operator-authored security-review definition\n";
+        let authored_code_review = "operator-authored code-review definition\n";
         fs::write(&friction_path, authored_friction).expect("write friction edit");
         fs::write(&qa_path, authored_qa).expect("write QA edit");
         fs::write(&security_path, authored_security).expect("write security-review edit");
+        fs::write(&code_review_path, authored_code_review).expect("write code-review edit");
         let repeated =
             init_workspace_at_root(&orbit_root, options).expect("reinitialize workspace");
         assert_eq!(repeated.seeded_default_auto_tasks, 0);
@@ -982,6 +1009,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(security_path).expect("read preserved security-review definition"),
             authored_security
+        );
+        assert_eq!(
+            fs::read_to_string(code_review_path).expect("read preserved code-review definition"),
+            authored_code_review
         );
     }
 

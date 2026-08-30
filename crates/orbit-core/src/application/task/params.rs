@@ -83,6 +83,8 @@ pub struct TaskAddParams {
     pub dependencies: Vec<OrbitId>,
     pub relations: Vec<TaskRelation>,
     pub tags: Vec<String>,
+    /// Exact canonical tools to add to the selected activity baseline.
+    pub required_tools: Vec<String>,
     pub plan: String,
     pub comment: Option<String>,
     pub context_files: Vec<String>,
@@ -113,6 +115,7 @@ impl Default for TaskAddParams {
             dependencies: Vec::new(),
             relations: Vec::new(),
             tags: Vec::new(),
+            required_tools: Vec::new(),
             plan: String::new(),
             comment: None,
             context_files: Vec::new(),

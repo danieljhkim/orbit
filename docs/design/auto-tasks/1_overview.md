@@ -1,8 +1,8 @@
 ---
 title: Auto-tasks — Overview
 owner: claude
-last_updated: 2026-08-22
-last_validated: 2026-07-27
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Accepted
 feature: auto-tasks
 doc_role: overview
@@ -11,7 +11,7 @@ summary: Dynamically-defined recurring task templates minted by one generic sche
 tags: [auto-tasks]
 paths: ["crates/orbit-core/src/auto_tasks/**"]
 related_features: [auto-tasks]
-related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950]
+related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950, ORB-11054, ORB-11095]
 ---
 
 # Auto-tasks — Overview
@@ -69,32 +69,45 @@ becomes just the first definition.
 
 | Concern | File | Task |
 |---|---|---|
-| Definition schema | `crates/orbit-common/src/types/auto_task.rs` | ORB-10149 |
+| Definition schema | `crates/orbit-types/src/workflow/auto_task.rs` | ORB-10149 |
 | Discovery (fail-closed) | `crates/orbit-core/src/auto_tasks/loader.rs` | ORB-10149 |
 | Due-math + catch-up | `crates/orbit-core/src/auto_tasks/schedule.rs` | ORB-10149 |
 | Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
 | Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
 | CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
 | Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
-| Deterministic action | `crates/orbit-core/src/runtime/v2_host/dispatch.rs` | ORB-10149 |
+| Deterministic action | `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 | Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |
 
-## Definitions shipped in this repo
+## Embedded default catalog
 
-- `qa-sweep` — hands-on validation of recent changes (ORB-10148).
+These four YAML files live under `crates/orbit-core/assets/auto_tasks/` and are
+registered in `DEFAULT_AUTO_TASK_FILES`. `orbit workspace init` materializes a
+missing file as `enabled: false`; re-init does not overwrite a workspace-authored
+definition of the same name.
+
+- `qa-sweep` — hands-on validation of recent changes (ORB-10148, embedded by ORB-10550).
 - `friction-curation` — disabled-by-default daily evidence-first pass that deduplicates open
   friction records, re-verifies survivors against current behavior, resolves
   records that no longer reproduce, and files non-duplicate fix tasks for
-  verified-real issues (ORB-10440).
+  verified-real issues (ORB-10440, embedded by ORB-10549).
 - `security-review` — disabled-by-default weekly evidence-backed review of
   applicable application code, dependencies, secret handling, and configuration;
   each actionable finding is filed as a durable Orbit task, and a clean review
   is a successful no-op (ORB-10950).
-- `ci-failure-remediation` — disabled-by-default hourly investigation and
-  remediation of current-head GitHub Actions failures across integration,
-  release, and open-PR refs, with stale-run filtering, root-cause clustering,
-  PR-hook deduplication, and evidence-backed no-diff outcomes (ORB-10514).
+- `code-review` — disabled-by-default six-hourly review of commits merged
+  since the previous sweep's recorded cursor.
+
+## Workspace-authored definitions in this repo
+
+Orbit's own checkout also carries extra `.orbit/auto_tasks/` files that are
+**not** embedded defaults. They may be enabled, name a family-specific crew, or
+encode this repository's branches and gates. Re-init preserves them:
+
+- `doc-duties`, `model-price-audit`, `release-prep`, and this repository's
+  enabled copies of catalog names such as `code-review` and
+  `security-review`.
 
 ## Task References
 
@@ -102,7 +115,7 @@ becomes just the first definition.
 - ORB-10148 — qa-sweep V1 (first definition; depends on this).
 - ORB-10439 — `orbit auto-task mint <name>`, the on-demand manual mint.
 - ORB-10440 — Daily friction-curation definition.
-- ORB-10514 — Disabled CI-failure remediation definition.
+- ORB-10514 — Original workspace-authored CI-failure auto-task.
 - ORB-10549 — Embedded the portable, disabled friction-curation default and
   workspace materialization contract; [Auto-task primitive: file-backed recurring task templates + one generic scheduler routine](./4_decisions.md#auto-task-primitive-file-backed-recurring-task-templates-one-generic-scheduler-routine) should be updated through the
   Orbit ADR surface after this task lands.
@@ -110,5 +123,11 @@ becomes just the first definition.
   friction tool invocations on the registered `orbit tool run` surface.
 - ORB-10950 — Added the disabled weekly `security-review` default to the
   embedded catalog so new workspaces can opt into a recurring security review.
+- ORB-11054 — Split this overview so repo-local workspace-authored definitions
+  are no longer listed as if they were embedded defaults.
+- ORB-11095 — Added centralized finding-title provenance and established the
+  shipped definition's canonical `code-review` name.
+- ORB-11115 — Retired the shipped CI-failure auto-task; CI-failure filing now
+  belongs to the `ci_failure_sweep` routine.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

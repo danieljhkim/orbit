@@ -111,9 +111,10 @@ use chrono::{DateTime, Utc};
 pub use contracts::incident::{
     CASCADE_WINDOW_SECS, DEFAULT_SCAN_LIMIT as FAILURE_INCIDENT_SCAN_LIMIT, FailureClass,
     FailureIncident, FailureIncidentQuery, FailureIncidentReport, IncidentEventRef,
-    PropagationLink, build_report as build_failure_incident_report, classify as classify_failure,
-    group_failure_incidents, normalize_message as normalize_failure_message,
-    signature_for as failure_signature_for,
+    JOB_RUN_LIFECYCLE_LABEL, LIFECYCLE_DIAGNOSTIC_LABEL, PropagationLink,
+    build_report as build_failure_incident_report, classify as classify_failure,
+    group_failure_incidents, is_failure_only_diagnostic_surface, is_lifecycle_diagnostic,
+    normalize_message as normalize_failure_message, signature_for as failure_signature_for,
 };
 pub use contracts::{
     ActiveTaskReservation, ActivityInvocationCount, ActivityInvocationMetrics,

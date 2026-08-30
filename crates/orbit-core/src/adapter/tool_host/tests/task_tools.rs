@@ -1,12 +1,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard, OnceLock};
 
-use orbit_store::maintenance::task_registry::read_workspace_config;
-use orbit_types::task::TaskStatus;
+use orbit_store::maintenance::task_registry::{
+    TaskRegistryStore, read_workspace_config, task_registry_path,
+};
+use orbit_types::task::{TASK_SHOW_PUBLIC_DTO_FIELDS, TaskStatus};
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Value, json};
 
+use super::super::HubCoordinationExecutor;
+use super::super::json::task_to_json;
 use super::super::test_support::{
     create_task, create_task_with_crew, invalid_input_message, run_tool_as_operator, test_runtime,
 };
@@ -60,6 +64,72 @@ fn assert_task_titles(output: &Value, expected: &[&str]) {
     expected.sort();
 
     assert_eq!(titles, expected);
+}
+
+fn checkoutless_executor() -> (
+    tempfile::TempDir,
+    HubCoordinationExecutor,
+    ToolSessionContext,
+) {
+    let root = tempfile::tempdir().expect("global root");
+    HubCoordinationExecutor::register_workspace(root.path(), "ws_checkoutless", "checkoutless")
+        .expect("register workspace");
+    let executor = HubCoordinationExecutor::new(root.path(), "ws_checkoutless", None)
+        .expect("coordination executor");
+    let context = ToolSessionContext::trusted_local(
+        Some("ws_checkoutless".to_string()),
+        Some("hm_hub".to_string()),
+        Some("hub".to_string()),
+    );
+    (root, executor, context)
+}
+
+fn checkoutless_review_task(
+    executor: &HubCoordinationExecutor,
+    context: &ToolSessionContext,
+    title: &str,
+) -> String {
+    let created = executor
+        .execute_tool(
+            "orbit.task.add",
+            json!({
+                "workspace": "ws_checkoutless",
+                "title": title,
+                "description": "Checkoutless review fixture",
+                "complexity": "low",
+                "model": "codex"
+            }),
+            context.clone(),
+        )
+        .expect("add checkoutless task");
+    let id = created["id"].as_str().expect("task id").to_string();
+    executor
+        .execute_tool(
+            "orbit.task.update",
+            json!({"id": id, "status": "backlog", "plan": "Execute", "model": "codex"}),
+            context.clone(),
+        )
+        .expect("move task to backlog");
+    executor
+        .execute_tool(
+            "orbit.task.start",
+            json!({"id": id, "model": "codex"}),
+            context.clone(),
+        )
+        .expect("start task");
+    executor
+        .execute_tool(
+            "orbit.task.update",
+            json!({
+                "id": id,
+                "status": "review",
+                "execution_summary": "Outcome: success",
+                "model": "codex"
+            }),
+            context.clone(),
+        )
+        .expect("move task to review");
+    id
 }
 
 #[test]
@@ -490,6 +560,208 @@ fn task_add_and_show_tools_roundtrip_crew() {
         .expect("task show tool succeeds");
     assert_eq!(shown.get("crew"), Some(&json!("sol")));
     assert_eq!(shown.get("orchestrator"), Some(&json!("sol")));
+}
+
+#[test]
+fn task_tools_roundtrip_required_tools_and_reject_updates() {
+    let (_root, runtime, _repo_root) = test_runtime();
+    let agent = Some("codex".to_string());
+    let model = Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string());
+    let added = runtime
+        .execute_tool_command(
+            "orbit.task.add",
+            json!({
+                "title": "Task-scoped GitHub reads",
+                "description": "Exercise required tools on every task tool surface.",
+                "complexity": "low",
+                "workspace": ".",
+                "required_tools": [
+                    "github.run.list",
+                    "github.auth.status",
+                    "github.run.list"
+                ],
+            }),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("add task with requirements");
+    let task_id = added["id"].as_str().expect("task id");
+    assert_eq!(
+        added["required_tools"],
+        json!(["github.auth.status", "github.run.list"])
+    );
+
+    let projected = runtime
+        .execute_tool_command(
+            "orbit.task.show",
+            json!({"id": task_id, "fields": ["required_tools"]}),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("project requirements");
+    assert_eq!(projected, json!(["github.auth.status", "github.run.list"]));
+    let listed = runtime
+        .execute_tool_command(
+            "orbit.task.list",
+            json!({"workspace": "."}),
+            agent.clone(),
+            model.clone(),
+        )
+        .expect("list task requirements");
+    assert_eq!(
+        listed[0]["required_tools"],
+        json!(["github.auth.status", "github.run.list"])
+    );
+
+    let error = runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({"id": task_id, "required_tools": ["github.run.view"]}),
+            agent,
+            model,
+        )
+        .expect_err("task requirements are creation-only");
+    assert!(error.to_string().contains("immutable"), "{error}");
+}
+
+#[test]
+fn stale_checkoutless_metadata_update_cannot_mutate_a_task_approved_to_done() {
+    let (_root, executor, context) = checkoutless_executor();
+    let id = checkoutless_review_task(&executor, &context, "Terminal race fixture");
+    let snapshot_read = Arc::new(Barrier::new(2));
+    let release_update = Arc::new(Barrier::new(2));
+    executor.set_after_pre_state_read_hook(Arc::new({
+        let id = id.clone();
+        let snapshot_read = Arc::clone(&snapshot_read);
+        let release_update = Arc::clone(&release_update);
+        move |task, input| {
+            if task.id == id && input["title"] == "Stale title" {
+                assert_eq!(task.status, TaskStatus::Review);
+                snapshot_read.wait();
+                release_update.wait();
+            }
+        }
+    }));
+
+    std::thread::scope(|scope| {
+        let stale_executor = executor.clone();
+        let stale_context = context.clone();
+        let stale_id = id.clone();
+        let stale_update = scope.spawn(move || {
+            stale_executor.execute_tool(
+                "orbit.task.update",
+                json!({"id": stale_id, "title": "Stale title", "model": "codex"}),
+                stale_context,
+            )
+        });
+
+        snapshot_read.wait();
+        let approved = executor
+            .execute_tool(
+                "orbit.task.approve",
+                json!({"id": id, "note": "Approved normally", "model": "codex"}),
+                context.clone(),
+            )
+            .expect("approve review task through the normal transition surface");
+        assert_eq!(approved["status"], "done");
+        assert_eq!(
+            approved["comments"]
+                .as_array()
+                .and_then(|comments| comments.last())
+                .and_then(|comment| comment["message"].as_str()),
+            Some("Approved normally")
+        );
+        release_update.wait();
+
+        let error = stale_update
+            .join()
+            .expect("stale update thread")
+            .expect_err("the terminal task must reject the stale metadata update");
+        assert!(error.to_string().contains("done is terminal"), "{error}");
+    });
+
+    let shown = executor
+        .execute_tool(
+            "orbit.task.show",
+            json!({"id": id, "fields": ["status", "title"]}),
+            context,
+        )
+        .expect("show terminal task");
+    assert_eq!(
+        shown,
+        json!({"status": "done", "title": "Terminal race fixture"})
+    );
+}
+
+#[test]
+fn checkoutless_updates_to_distinct_tasks_remain_independent() {
+    let (root, executor, context) = checkoutless_executor();
+    let first = checkoutless_review_task(&executor, &context, "First concurrent task");
+    let second = checkoutless_review_task(&executor, &context, "Second concurrent task");
+    let registry =
+        TaskRegistryStore::open(&task_registry_path(root.path())).expect("open task registry");
+    let first_lock_path = registry
+        .canonical_task_bundle_path("ws_checkoutless", &first)
+        .expect("first task bundle")
+        .join(".task.yaml.lock");
+    let first_locked = Arc::new(Barrier::new(2));
+    let release_first = Arc::new(Barrier::new(2));
+    executor.set_after_locked_state_read_hook(Arc::new({
+        let first = first.clone();
+        let first_locked = Arc::clone(&first_locked);
+        let release_first = Arc::clone(&release_first);
+        move |task, input| {
+            if task.id == first && input["title"] == "First task updated" {
+                first_locked.wait();
+                release_first.wait();
+            }
+        }
+    }));
+
+    std::thread::scope(|scope| {
+        let first_executor = executor.clone();
+        let first_context = context.clone();
+        let first_id = first.clone();
+        let first_update = scope.spawn(move || {
+            first_executor.execute_tool(
+                "orbit.task.update",
+                json!({
+                    "id": first_id,
+                    "title": "First task updated",
+                    "model": "codex"
+                }),
+                first_context,
+            )
+        });
+
+        first_locked.wait();
+        let first_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&first_lock_path)
+            .expect("open first task lock file");
+        let error = fs2::FileExt::try_lock_exclusive(&first_lock)
+            .expect_err("the updater must hold the task lock after its authoritative read");
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        let second_updated = executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({
+                    "id": second,
+                    "title": "Second task updated",
+                    "model": "codex"
+                }),
+                context.clone(),
+            )
+            .expect("a distinct task can update while the first task lock is held");
+        assert_eq!(second_updated["title"], "Second task updated");
+        release_first.wait();
+        let first_updated = first_update
+            .join()
+            .expect("first update thread")
+            .expect("first update succeeds after release");
+        assert_eq!(first_updated["title"], "First task updated");
+    });
 }
 
 /// ORB-10968: crew configuration is host-local, so a stored crew this host has
@@ -2044,12 +2316,30 @@ fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
         &["file:src/lib.rs"],
     );
 
+    runtime
+        .execute_tool_command(
+            "orbit.task.update",
+            json!({
+                "id": task.id,
+                "relations": [{"type": "related_to", "target": "DK-00042"}],
+                "job_run_id": "jrun-projection",
+            }),
+            Some("codex".to_string()),
+            Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+        )
+        .expect("projection fixture metadata update succeeds");
+
     let output = runtime
         .execute_tool_command(
             "orbit.task.show",
             json!({
                 "id": task.id,
-                "fields": ["status", "title", "context_files", "plan"],
+                "fields": [
+                    "status",
+                    "relations",
+                    "external_refs",
+                    "job_run_id",
+                ],
             }),
             Some("codex".to_string()),
             Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
@@ -2060,11 +2350,42 @@ fn task_show_tool_projects_mixed_top_level_and_sidecar_fields() {
         output,
         json!({
             "status": "in-progress",
-            "title": "Show mixed fields",
-            "context_files": ["file:src/lib.rs"],
-            "plan": "",
+            "relations": [{
+                "type": "related_to",
+                "target": "DK-00042",
+                "verification": "not verifiable here",
+            }],
+            "external_refs": [],
+            "job_run_id": "jrun-projection",
         })
     );
+}
+
+#[test]
+fn task_show_public_dto_and_projection_vocabulary_cannot_drift() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "DTO vocabulary drift",
+        "Keep every stable public DTO key classified.",
+        TaskStatus::Backlog,
+        &[],
+    );
+    let dto = task_to_json(
+        &task,
+        &runtime.task_status_index().expect("task status index"),
+    );
+    let mut actual = dto
+        .as_object()
+        .expect("task DTO object")
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    actual.sort_unstable();
+    let mut expected = TASK_SHOW_PUBLIC_DTO_FIELDS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -2093,6 +2414,27 @@ fn task_show_tool_rejects_unknown_projection_with_the_shared_vocabulary() {
         message.contains(orbit_types::task::TASK_SHOW_PROJECTION_FIELDS_CSV),
         "{message}"
     );
+}
+
+#[test]
+fn task_show_tool_rejects_terminal_with_status_guidance() {
+    let (_root, runtime, repo_root) = test_runtime();
+    let task = create_task(
+        &runtime,
+        &repo_root,
+        "Terminal projection",
+        "Exercise actionable lifecycle guidance.",
+        TaskStatus::Backlog,
+        &[],
+    );
+
+    let message = invalid_input_message(runtime.execute_tool_command(
+        "orbit.task.show",
+        json!({ "id": task.id, "field": "terminal" }),
+        Some("codex".to_string()),
+        Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
+    ));
+    assert!(message.contains("use `status`"), "{message}");
 }
 
 #[test]

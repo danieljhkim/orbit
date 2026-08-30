@@ -47,6 +47,14 @@ fn error_payload(err: &OrbitError) -> Value {
         object.insert("path".to_string(), json!(path));
         object.insert("reason".to_string(), json!(reason));
     }
+    if let Some(details) = err.friction_not_local_details()
+        && let Some(object) = payload.as_object_mut()
+    {
+        object.insert("friction_id".to_string(), json!(details.friction_id));
+        object.insert("task_id".to_string(), json!(details.task_id));
+        object.insert("workspace_id".to_string(), json!(details.workspace_id));
+        object.insert("found_in".to_string(), json!(details.found_in));
+    }
     payload
 }
 
@@ -69,6 +77,7 @@ fn error_code(err: &OrbitError) -> &str {
         OrbitError::CapabilityDenied(_) => "capability_denied",
         OrbitError::UnknownSelector(_) => "unknown_selector",
         OrbitError::AmbiguousDestination(_) => "ambiguous_destination",
+        OrbitError::AmbiguousCaller(_) => "ambiguous_caller",
         OrbitError::UnreachableDestination(_) => "unreachable_destination",
         OrbitError::StaleRoute(_) => "stale_route",
         OrbitError::UnhealthyCheckout(_) => "unhealthy_checkout",
@@ -89,6 +98,7 @@ fn error_code(err: &OrbitError) -> &str {
         OrbitError::WorkspaceClaimHeld(_) => "workspace_claim_held",
         OrbitError::RemoteArtifactUnavailable { .. } => "remote_artifact_unavailable",
         OrbitError::ArtifactNotLocal { .. } => "artifact_not_local",
+        OrbitError::FrictionNotLocal(_) => "friction_not_local",
         OrbitError::AgentProtocolViolation(_) => "agent_protocol_violation",
         OrbitError::UnsupportedAgentProvider(_) => "unsupported_provider",
         OrbitError::OwnerUnavailable(_) => "owner_unavailable",

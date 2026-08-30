@@ -183,6 +183,35 @@ pub(super) fn show_record(
     }
 }
 
+/// Workspace IDs other than `workspace_id` that already hold `friction_id`.
+///
+/// Friction IDs are workspace-local (ORB-11078). This lookup is the
+/// ownership probe that distinguishes a dangling local miss from a
+/// cross-workspace ID that must not count as coverage.
+pub(super) fn foreign_owners_of(
+    conn: &Connection,
+    workspace_id: &str,
+    friction_id: &str,
+) -> Result<Vec<String>, OrbitError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT workspace_id FROM friction_records \
+             WHERE friction_id = ?1 AND workspace_id != ?2 \
+             ORDER BY workspace_id",
+        )
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let rows = statement
+        .query_map(rusqlite::params![friction_id, workspace_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|error| OrbitError::Store(error.to_string()))?;
+    let mut owners = Vec::new();
+    for row in rows {
+        owners.push(row.map_err(|error| OrbitError::Store(error.to_string()))?);
+    }
+    Ok(owners)
+}
+
 /// Writes the record row and replaces its denormalized tag rows.
 ///
 /// `friction_record_tags` exists so a tag filter is an index probe instead of

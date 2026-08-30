@@ -601,7 +601,9 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
         .find(|r| r.tool_name == "orbit.search")
         .expect("orbit.search row");
     assert_eq!(search.total, 3);
+    assert_eq!(search.successes, 1);
     assert_eq!(search.failures, 2);
+    assert_eq!(search.denials, 0);
     assert_eq!(search.mcp_total, 1);
     assert_eq!(search.cli_total, 2);
     assert_eq!(search.mcp_failures, 1);
@@ -613,7 +615,9 @@ fn audit_event_aggregates_by_tool_splits_failures_by_surface() {
         .find(|r| r.tool_name == "unknown")
         .expect("unknown bucket");
     assert_eq!(unknown.total, 1);
+    assert_eq!(unknown.successes, 1);
     assert_eq!(unknown.failures, 0);
+    assert_eq!(unknown.denials, 0);
     assert_eq!(unknown.mcp_total, 0);
     assert_eq!(unknown.cli_total, 0);
 }

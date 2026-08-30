@@ -105,7 +105,7 @@ fn the_mux_advertises_the_canonical_surface() {
         names,
         canonical.iter().map(String::as_str).collect::<Vec<_>>()
     );
-    assert_eq!(names.len(), 23, "the frozen production surface changed");
+    assert_eq!(names.len(), 20, "the frozen production surface changed");
     let listing = definitions
         .iter()
         .find(|definition| definition.schema.name == FEDERATED_WORKSPACE_LIST_TOOL)
@@ -349,9 +349,9 @@ fn destination_registry_discovery_preserves_invalid_owner_and_replica_descriptor
 
 #[test]
 fn the_list_comes_only_from_probed_destinations() {
-    // A mux with no configured destinations lists nothing, whatever workspaces
-    // this machine's own registry happens to hold. The host has no registry
-    // handle at all, which is the structural half of that guarantee.
+    // Membership composition injects the implicit local destination. The mux
+    // itself still lists only the destinations it was given, so a host
+    // constructed with none — tests, not production serve — lists nothing.
     let host = FederatedMcpHost::new(Vec::new(), Arc::new(ScriptedProbe::new()));
 
     assert!(list(&host).is_empty());

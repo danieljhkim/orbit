@@ -1,0 +1,115 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: file_ci_failure_tasks
+spec:
+  type: deterministic
+  description: >
+    Turn one `collect_ci_evidence` snapshot into ordinary backlog bug tasks.
+    Clusters the snapshot's current, non-stale failures by root cause
+    (workflow, failing job, failing step, normalized error signature, and the
+    commit the runner actually tested) so one regression repeated across a push
+    run and a pull-request run of the same commit becomes one task rather than
+    several. Each surviving cluster is filed at `status: backlog` with the
+    collected evidence rendered inline in the description, so the implementing
+    agent never needs a GitHub credential; no `required_tools` are attached and
+    the task ships through the ordinary pull-request route. Filing is deduped
+    against still-open tasks by a commit-independent failure key carried as a
+    `ci-failure:<key>` tag, so a repeated sweep over a run that is still red
+    does not file the same root cause twice. The three endings stay distinct
+    and none of them is a CI pass: a snapshot with `collected: false` reports
+    `capability_unavailable` and files nothing, a snapshot with no current
+    failure reports `no_current_failure` and files nothing, and anything else
+    reports `current_failures` with what it filed, skipped as already open, or
+    left unfiled at the `max_tasks` cap.
+  input_schema_json:
+    type: object
+    required: [ci_evidence]
+    properties:
+      ci_evidence:
+        type: object
+        description: >
+          The snapshot emitted by `collect_ci_evidence`, passed through
+          unmodified.
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 20
+        description: >
+          Cap on tasks filed in one pass. Clusters beyond the cap are reported
+          in `skipped_over_cap` rather than dropped silently.
+  output_schema_json:
+    type: object
+    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_over_cap]
+    properties:
+      outcome:
+        type: string
+        enum: [capability_unavailable, no_current_failure, current_failures]
+      capability:
+        oneOf:
+          - type: object
+          - type: "null"
+      detail:
+        type: string
+      clusters:
+        type: number
+      filed_count:
+        type: number
+      max_tasks:
+        type: number
+      filed:
+        type: array
+        items:
+          type: object
+          required: [task_id, failure_key]
+          properties:
+            task_id:
+              type: string
+            failure_key:
+              type: string
+            cluster_key:
+              type: string
+            workflow:
+              type: string
+            job:
+              type: string
+            step:
+              type: string
+            tested_commit:
+              type: string
+            run_urls:
+              type: array
+              items:
+                type: string
+      skipped_existing:
+        type: array
+        items:
+          type: object
+          required: [failure_key, task_id]
+          properties:
+            failure_key:
+              type: string
+            cluster_key:
+              type: string
+            task_id:
+              type: string
+            workflow:
+              type: string
+      skipped_over_cap:
+        type: array
+        items:
+          type: object
+          required: [failure_key]
+          properties:
+            failure_key:
+              type: string
+            workflow:
+              type: string
+            job:
+              type: string
+            run_urls:
+              type: array
+              items:
+                type: string
+  action: file_ci_failure_tasks
+  config: {}

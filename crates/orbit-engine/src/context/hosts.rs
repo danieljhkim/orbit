@@ -52,6 +52,13 @@ pub struct TaskActivityUpdate {
     pub model: Option<String>,
 }
 
+/// Task requirements and the resulting activity allowlist fixed at admission.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResolvedActivityTools {
+    pub requested_tools: Vec<String>,
+    pub effective_tools: Vec<String>,
+}
+
 fn unsupported_runtime_capability(capability: &str) -> OrbitError {
     OrbitError::Execution(format!(
         "runtime host capability '{capability}' is unavailable"
@@ -210,14 +217,24 @@ pub trait RuntimeHost: Send + Sync {
         allowlisted_child_env(&[], required_env_vars)
     }
     /// The authoritative shared Orbit registry root to hand a spawned CLI
-    /// agent as `ORBIT_ROOT`.
+    /// agent as `ORBIT_REGISTRY_ROOT`.
     ///
     /// This is the registry that owns the task store, not the dispatching
-    /// checkout's workspace `.orbit`. A managed run executes in a linked
-    /// worktree whose workspace `.orbit` is mounted read-only, so pinning a
-    /// child there makes the documented `orbit tool run` fallback unable to
-    /// bootstrap, read, or update the injected task. [ORB-10980]
+    /// checkout's workspace `.orbit`. The locator selects only the global
+    /// registry. Workspace ownership for nested tool calls is the separate
+    /// logical selector from [`RuntimeHost::orbit_workspace_selector`].
+    /// [ORB-10980] [ORB-11066] [ORB-11117]
     fn orbit_registry_root(&self) -> Option<String> {
+        None
+    }
+    /// The trusted logical `ws_*` selector to hand a spawned CLI agent as
+    /// `ORBIT_WORKSPACE`.
+    ///
+    /// Nested MCP and CLI tool calls use this identity instead of inferring
+    /// durable ownership from a linked-worktree cwd. Hosts that are not bound
+    /// to a registered workspace return `None`, and the child then keeps its
+    /// ordinary fail-closed resolution. [ORB-11117]
+    fn orbit_workspace_selector(&self) -> Option<String> {
         None
     }
     fn missing_required_environment_vars(&self, _required_env_vars: &[&str]) -> Vec<String> {
@@ -437,6 +454,19 @@ pub trait RuntimeHost: Send + Sync {
     /// without leaking store or task-query details into orbit-engine.
     fn task_context_for_agent_input(&self, _input: &Value) -> Result<Option<Value>, DispatchError> {
         Ok(None)
+    }
+
+    /// Compose and validate the exact task-scoped tools for one agent launch.
+    /// Hosts without a task/tool registry preserve the activity baseline.
+    fn resolve_activity_tools(
+        &self,
+        _task_ids: &[String],
+        baseline_tools: &[String],
+    ) -> Result<ResolvedActivityTools, DispatchError> {
+        Ok(ResolvedActivityTools {
+            requested_tools: Vec::new(),
+            effective_tools: baseline_tools.to_vec(),
+        })
     }
 
     /// Persist a durable checkpoint after a completed top-level job step

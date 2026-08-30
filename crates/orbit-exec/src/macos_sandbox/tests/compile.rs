@@ -470,6 +470,8 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
     let artifact_path = global
         .join("tasks/workspaces/orbit-test/ORB-00009/artifacts/files/reports")
         .join("planner_a.md");
+    let global_audit_path = global.join("state/audit/v2_loop/nested.jsonl");
+    let workspace_audit_path = workspace.join("state/audit/blobs/aa/placeholder");
     let id_alloc_lock_path = workspace.join("state/.id_alloc.lock");
     let semantic_wal_path = workspace.join("state/semantic.db-wal");
     let denied_path = global.join("not-allowed.txt");
@@ -480,9 +482,11 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
         read: vec![parent.display().to_string()],
         modify: vec![
             format!("{}/state/logs/**", global.display()),
+            format!("{}/state/audit/**", global.display()),
             format!("{}/orbit.db*", global.display()),
             format!("{}/tasks/**", global.display()),
             format!("!{}/**", workspace.display()),
+            format!("{}/state/audit/**", workspace.display()),
             format!("{}/state/.id_alloc.lock", workspace.display()),
             format!("{}/state/semantic.db*", workspace.display()),
         ],
@@ -508,11 +512,19 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
     profile_file.flush().expect("flush");
 
     let script = format!(
-        "set -e\n: > {}\n: > {}\nmkdir -p {}\nprintf '%s\\n' '*authored by: gemini / gemini-3.1-pro*' > {}\n: > {}\n: > {}\nif : > {} 2>/dev/null; then exit 99; fi\nif : > {} 2>/dev/null; then exit 98; fi\n",
+        "set -e\n: > {}\n: > {}\nmkdir -p {}\nprintf '%s\\n' '*authored by: gemini / gemini-3.1-pro*' > {}\nmkdir -p {}\n: > {}\nmkdir -p {}\n: > {}\n: > {}\n: > {}\nif : > {} 2>/dev/null; then exit 99; fi\nif : > {} 2>/dev/null; then exit 98; fi\n",
         shell_escape(&log_path),
         shell_escape(&db_wal_path),
         shell_escape(artifact_path.parent().expect("artifact parent")),
         shell_escape(&artifact_path),
+        shell_escape(global_audit_path.parent().expect("global audit parent")),
+        shell_escape(&global_audit_path),
+        shell_escape(
+            workspace_audit_path
+                .parent()
+                .expect("workspace audit parent")
+        ),
+        shell_escape(&workspace_audit_path),
         shell_escape(&id_alloc_lock_path),
         shell_escape(&semantic_wal_path),
         shell_escape(&denied_path),
@@ -537,6 +549,14 @@ fn compiled_profile_allows_nested_orbit_runtime_writes_without_home_orbit_reallo
     assert!(
         artifact_path.exists(),
         "planner artifact should be writable"
+    );
+    assert!(
+        global_audit_path.exists(),
+        "global audit store should be writable"
+    );
+    assert!(
+        workspace_audit_path.exists(),
+        "workspace audit store should be writable"
     );
     assert!(
         id_alloc_lock_path.exists(),

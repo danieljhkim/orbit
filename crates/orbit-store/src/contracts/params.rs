@@ -22,6 +22,7 @@ pub struct TaskCreateParams {
     pub dependencies: Vec<OrbitId>,
     pub relations: Vec<TaskRelation>,
     pub tags: Vec<String>,
+    pub required_tools: Vec<String>,
     pub plan: String,
     pub execution_summary: String,
     pub context_files: Vec<String>,

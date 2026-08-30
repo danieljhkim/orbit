@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use orbit_common::OrbitError;
+use orbit_types::tool::ToolSessionContext;
 use serde_json::json;
 
 use super::super::probe::{DestinationSession, RoutedSession, SshRoutedSession};
@@ -92,7 +93,11 @@ fn routed_delivery_does_not_inherit_an_exhausted_probe_budget() {
     let mut routed = SshRoutedSession::new(stalled_session(Duration::ZERO), delivery);
     let started = Instant::now();
     let error = routed
-        .call_tool("orbit.command.exec", json!({ "command": "make ci-lint" }))
+        .call_tool(
+            "orbit.command.exec",
+            json!({ "command": "make ci-lint" }),
+            ToolSessionContext::default(),
+        )
         .expect_err("the destination never answers the dispatched call");
     let waited = started.elapsed();
 

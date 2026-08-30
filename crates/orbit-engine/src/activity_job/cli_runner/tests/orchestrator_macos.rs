@@ -46,6 +46,7 @@ fn run_cli_backend_audit_argv_starts_with_sandbox_exec_for_each_provider() {
             task_context: None,
             workspace_root: None,
             orbit_registry_root: None,
+            orbit_workspace_selector: None,
         };
         let spec = test_agent_loop_spec_for(provider_name, Duration::from_secs(5));
 

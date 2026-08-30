@@ -62,6 +62,10 @@ use crate::security::redaction;
 
 static FILE_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
+const ORBIT_MANAGED_RUN_CONTEXT_ENV: &str = "ORBIT_MANAGED_RUN_CONTEXT";
+const ORBIT_RUN_ID_ENV: &str = "ORBIT_RUN_ID";
+const ORBIT_REGISTRY_ROOT_ENV: &str = "ORBIT_REGISTRY_ROOT";
+
 /// Field formatter that redacts string-valued and `Debug`-formatted tracing
 /// event fields before they are written to stderr or the JSONL tracing feed.
 ///
@@ -415,28 +419,62 @@ pub(super) fn env_filter(default_filter: &str) -> EnvFilter {
 }
 
 /// Resolve the canonical path to the global JSONL tracing feed
-/// (`$HOME/.orbit/state/logs/orbit.jsonl`). Returned as `Result` because the
-/// path depends on `HOME` (or `USERPROFILE`); callers that need a fallback
-/// should fall back to a workspace-relative path or fail with a clear error.
+/// (`$HOME/.orbit/state/logs/orbit.jsonl`, or the managed child's registry
+/// root). A managed child uses `ORBIT_REGISTRY_ROOT` only when the complete
+/// managed-run context is present, matching global-root resolution in
+/// `orbit-core`. Returned as `Result` because the path depends on environment
+/// variables; callers that need a fallback should fall back to a
+/// workspace-relative path or fail with a clear error.
 ///
 /// Producers and readers MUST agree on this path — `init_default_subscriber`
 /// writes here, and `orbit log tail` reads here by default.
 pub fn global_jsonl_log_path() -> io::Result<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "cannot resolve HOME/USERPROFILE for JSONL tracing log",
-            )
-        })?;
+    let orbit_root = match managed_registry_root()? {
+        Some(root) => root,
+        None => {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "cannot resolve HOME/USERPROFILE for JSONL tracing log",
+                    )
+                })?;
+            PathBuf::from(home).join(".orbit")
+        }
+    };
 
-    Ok(PathBuf::from(home)
-        .join(".orbit")
-        .join("state")
-        .join("logs")
-        .join("orbit.jsonl"))
+    Ok(orbit_root.join("state").join("logs").join("orbit.jsonl"))
+}
+
+/// Resolve the registry root carried by an Orbit-managed child. The run ID is
+/// part of the trust boundary: an inherited locator without it must not
+/// redirect ordinary commands' logs.
+fn managed_registry_root() -> io::Result<Option<PathBuf>> {
+    let managed = std::env::var(ORBIT_MANAGED_RUN_CONTEXT_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "TRUE"));
+    if !managed
+        || std::env::var(ORBIT_RUN_ID_ENV)
+            .ok()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Ok(None);
+    }
+
+    let Some(value) = std::env::var_os(ORBIT_REGISTRY_ROOT_ENV).filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let root = PathBuf::from(value);
+    if !root.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ORBIT_REGISTRY_ROOT must be an absolute path inside an Orbit-managed run",
+        ));
+    }
+    Ok(Some(root))
 }
 
 // Visible to sibling-layout logging tests so file-layer behavior can be

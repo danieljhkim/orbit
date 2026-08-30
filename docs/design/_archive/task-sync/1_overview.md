@@ -3,11 +3,13 @@ summary: "Task Sync — Overview"
 type: design
 title: "Task Sync — Overview"
 owner: claude
-last_updated: 2026-07-02
+last_updated: 2026-08-29
 status: Superseded
 feature: task-sync
 doc_role: overview
-tags: ["task-sync"]
+tags: ["task-sync", "task-publication"]
+related_features: [task-sync, task-publication, remote-access]
+related_artifacts: [ORB-11068]
 ---
 
 # Task Sync — Overview
@@ -17,6 +19,8 @@ tags: ["task-sync"]
 Task sync is an opt-in, git-orphan-branch task registry that lets engineers on the same team see each other's tasks without running a shared Orbit instance. **Sync is a future feature.** Orbit still ships per-engineer per the [README](../../../README.md) and [POSITIONING](../../POSITIONING.md) doctrines — each operator runs Orbit on their own machine, with locks and audit DB local to that machine. This document captures the sync design on top of the current v2 task-artifact store: canonical task bundles live under `~/.orbit/tasks/workspaces/<workspace-id>/<task-id>/`, workspace checkouts expose `.orbit/tasks/<task-id>` projections, and task IDs use `ORB-00000`. Historical `T...` task references in this folder are archival references, not current sync-design inputs.
 
 This document is the entry point. [2_design.md](./2_design.md) specifies the mechanism, call sites, and migration paths in detail; [3_vision.md](./3_vision.md) names open questions and prior work; [4_decisions.md](./4_decisions.md) is the ADR log.
+
+> **Narrow successor:** the draft [Task Publication](../../task-publication/1_overview.md) proposal rejects a source-repository orphan branch in favor of an authority-owned dedicated private repository for backup and recovery. It does **not** revive online-only mutation, shared allocation, operation-aware merging, or a writable cross-machine registry. A team that genuinely needs shared writable state would still have to revisit those problems directly. [ORB-11068] records the distinction.
 
 ---
 

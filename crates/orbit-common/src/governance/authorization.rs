@@ -30,10 +30,14 @@
 //! availability, so an unadvertised tool is still reachable through
 //! `orbit tool run`.
 //!
-//! *Permission* is [`GOVERNED_OPERATIONS`], resolved by [`authorize`] at one
-//! chokepoint per surface. This is the only authorization statement Orbit
-//! makes about a tool, and it is surface-independent: the same answer for an
-//! MCP call, a CLI `tool run`, the dashboard, and the deterministic dispatcher.
+//! *Permission* for exceptional operations is [`GOVERNED_OPERATIONS`], resolved
+//! by [`authorize`] at one chokepoint per surface. Remote-originated MCP calls
+//! also have a baseline rule at that chokepoint: a destination-side caller
+//! grant must include [`McpCapability::Agent`] before it can use ordinary,
+//! ungoverned tools. The registry remains the only operation-specific
+//! authorization statement Orbit makes, and its answer is surface-independent:
+//! the same answer for an MCP call, a CLI `tool run`, the dashboard, and the
+//! deterministic dispatcher.
 //!
 //! The two therefore need not agree, and deliberately do not. A tool may be
 //! advertised and governed (the operator MCP surface: a session served by
@@ -57,7 +61,7 @@
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
-use orbit_types::tool::{McpCapability, ToolSessionContext};
+use orbit_types::tool::{McpCapability, RemoteCallerGrant, ToolSessionContext};
 
 /// Environment variable that grants [`McpCapability::Operator`] to a caller the
 /// envelope would otherwise leave unprivileged.
@@ -97,10 +101,12 @@ pub enum OperationSurface {
 
 /// One operation whose performance requires a capability.
 ///
-/// An operation absent from [`GOVERNED_OPERATIONS`] is ungoverned and executes
-/// as before. Governance is opt-in per operation on purpose: the registry is
-/// meant to name the operations whose accidental invocation actually destroys
-/// something, not to become a second copy of the tool registry.
+/// An operation absent from [`GOVERNED_OPERATIONS`] has no operation-specific
+/// capability check. Governance is opt-in per operation on purpose: the
+/// registry is meant to name the operations whose accidental invocation
+/// actually destroys something, not to become a second copy of the tool
+/// registry. The runtime separately enforces the `agent` baseline for ordinary
+/// tools when a destination-side grant identifies a remote MCP caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GovernedOperation {
     /// Canonical tool name, or `"<command> <subcommand>"` for a CLI command.
@@ -324,6 +330,13 @@ pub fn governed_dashboard(id: &str) -> Option<&'static GovernedOperation> {
 pub enum CallerProvenance {
     /// A trusted transport or the run's own dispatcher asserted the grants.
     Session,
+    /// The destination's callers file granted a remote-originated session
+    /// these capabilities, capping what its argv requested [ORB-11052].
+    ///
+    /// Distinct from [`Self::Session`] on purpose: a local session's stamp is
+    /// the process's own statement about itself, while this one is the
+    /// executing machine's statement about somebody else.
+    RemoteGrant,
     /// [`OPERATOR_OVERRIDE_ENV`] was set. Always logged, never silent.
     OperatorOverride,
     /// The process environment declares an agent envelope.
@@ -338,6 +351,7 @@ impl Display for CallerProvenance {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Session => "session",
+            Self::RemoteGrant => "remote-grant",
             Self::OperatorOverride => "operator-override",
             Self::AgentEnvelope => "agent-envelope",
             Self::InteractiveTerminal => "interactive-terminal",
@@ -381,6 +395,14 @@ pub struct CallerEnvelope {
     pub agent_declared: bool,
     /// Standard input and error are both terminals.
     pub interactive_terminal: bool,
+    /// The destination's callers-file statement that capped a
+    /// remote-originated MCP session [ORB-11052].
+    ///
+    /// Carried alongside [`Self::session_capabilities`] rather than folded
+    /// into it because it is the *ceiling*, not the result: the session's
+    /// capabilities are already the intersection of this grant with what the
+    /// caller's argv asked for, and the denial message needs both halves.
+    pub remote_caller_grant: Option<RemoteCallerGrant>,
 }
 
 impl CallerEnvelope {
@@ -392,6 +414,7 @@ impl CallerEnvelope {
             operator_override: env_truthy(OPERATOR_OVERRIDE_ENV),
             agent_declared: agent_declared_in_env(),
             interactive_terminal: interactive_terminal(),
+            remote_caller_grant: session.remote_caller_grant.clone(),
         }
     }
 
@@ -405,6 +428,7 @@ impl CallerEnvelope {
         Self {
             resolution: CapabilityResolution::SessionOnly,
             session_capabilities: session.effective_capabilities.clone(),
+            remote_caller_grant: session.remote_caller_grant.clone(),
             ..Self::default()
         }
     }
@@ -416,6 +440,7 @@ pub struct CallerCapabilities {
     grants: BTreeSet<McpCapability>,
     provenance: CallerProvenance,
     resolution: CapabilityResolution,
+    remote_caller_grant: Option<RemoteCallerGrant>,
 }
 
 impl CallerCapabilities {
@@ -423,6 +448,11 @@ impl CallerCapabilities {
     ///
     /// Precedence, highest first:
     ///
+    /// 0. **A destination-side caller grant.** A remote-originated MCP session
+    ///    already carries the executing machine's own statement about the
+    ///    caller, and it is authoritative even when it grants nothing — a
+    ///    `deny` row must not fall through to the rules below and pick up
+    ///    capabilities from the destination's ambient state [ORB-11052].
     /// 1. **Session grants.** A validated MCP session or a run-stamped tool
     ///    context already carries an authorization decision made by a trusted
     ///    seam; re-deriving it from ambient process state would be strictly
@@ -440,10 +470,17 @@ impl CallerCapabilities {
             grants,
             provenance,
             resolution: envelope.resolution,
+            remote_caller_grant: envelope.remote_caller_grant.clone(),
         }
     }
 
     fn resolve_grants(envelope: &CallerEnvelope) -> (BTreeSet<McpCapability>, CallerProvenance) {
+        if envelope.remote_caller_grant.is_some() {
+            return (
+                envelope.session_capabilities.clone(),
+                CallerProvenance::RemoteGrant,
+            );
+        }
         if !envelope.session_capabilities.is_empty() {
             return (
                 envelope.session_capabilities.clone(),
@@ -486,17 +523,28 @@ impl CallerCapabilities {
         self.provenance == CallerProvenance::OperatorOverride
     }
 
+    /// The destination-side grant that capped this caller, if any.
+    pub fn remote_caller_grant(&self) -> Option<&RemoteCallerGrant> {
+        self.remote_caller_grant.as_ref()
+    }
+
     /// The grants, rendered for a human.
     fn grants_label(&self) -> String {
-        if self.grants.is_empty() {
-            return "none".to_string();
-        }
-        self.grants
-            .iter()
-            .map(McpCapability::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
+        capabilities_label(&self.grants)
     }
+}
+
+/// A capability set, rendered for a human. Empty reads as `none` rather than
+/// as an empty bracket a reader would have to interpret.
+fn capabilities_label(capabilities: &BTreeSet<McpCapability>) -> String {
+    if capabilities.is_empty() {
+        return "none".to_string();
+    }
+    capabilities
+        .iter()
+        .map(McpCapability::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A refused governed operation.
@@ -515,6 +563,9 @@ pub struct AuthorizationDenial {
     /// Which signals the refusing surface honored, and therefore which remedy
     /// the caller actually has.
     pub resolution: CapabilityResolution,
+    /// The destination-side grant that capped the caller, when the refusal came
+    /// from a callers file rather than from the session's own argv.
+    pub remote_caller_grant: Option<RemoteCallerGrant>,
 }
 
 impl AuthorizationDenial {
@@ -522,8 +573,24 @@ impl AuthorizationDenial {
     ///
     /// The remedy is surface-specific because [`OPERATOR_OVERRIDE_ENV`] is
     /// deliberately ignored under [`CapabilityResolution::SessionOnly`];
-    /// advising it there would send an operator in a circle.
+    /// advising it there would send an operator in a circle. A caller capped
+    /// by a destination's callers file gets a third remedy, because neither of
+    /// the other two is reachable from the calling machine: no argv and no
+    /// environment variable on the caller's side raises that ceiling.
     fn remedy(&self) -> String {
+        if let Some(grant) = &self.remote_caller_grant {
+            return format!(
+                "caller '{caller}' is granted [{granted}] by {source} on the machine that \
+                 executes this call; '{operation}' requires {required}. Raise it by editing \
+                 that file on the destination (`orbit mcp callers check {caller}` shows what \
+                 it resolves to) — no flag or environment variable on the calling side can.",
+                caller = grant.caller_machine_id,
+                granted = capabilities_label(&grant.granted_capabilities),
+                source = grant.source,
+                operation = self.operation.id,
+                required = self.operation.allowed_label(),
+            );
+        }
         match self.resolution {
             CapabilityResolution::ProcessEnvelope => format!(
                 "If this is a deliberate operator action, re-run it with {OPERATOR_OVERRIDE_ENV}=1 \
@@ -572,6 +639,7 @@ pub fn authorize(
         granted: caller.grants_label(),
         provenance: caller.provenance,
         resolution: caller.resolution,
+        remote_caller_grant: caller.remote_caller_grant.clone(),
     })
 }
 

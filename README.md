@@ -48,6 +48,15 @@ One command gets you a released, signed build. Within your first fifteen minutes
 # install
 curl -sSf https://raw.githubusercontent.com/danieljhkim/orbit/main/install.sh | sh
 # or: brew install danieljhkim/tap/orbit
+# or, in Claude Code:
+#   /plugin marketplace add danieljhkim/orbit
+#   /plugin install orbit
+# or, in Codex CLI:
+#   codex plugin marketplace add danieljhkim/orbit --ref main
+#   codex plugin add orbit@orbit
+# or, in Cursor from an Orbit checkout:
+#   mkdir -p ~/.cursor/plugins/local
+#   ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
 ```
 
 <details>
@@ -202,6 +211,36 @@ After install, task writes are embedded automatically in the background; `orbit 
 
 ---
 
+## Agent Plugins vs CLI
+
+Orbit ships Claude Code, Codex, and Cursor Agent Plugins 1.0 integrations. Use
+a plugin when you want Orbit's MCP tools and canonical `orbit` skill attached
+to one agent without putting the CLI on `$PATH`; use the signed CLI install for
+the dashboard and cross-agent workspace setup.
+
+```bash
+# Claude Code
+/plugin marketplace add danieljhkim/orbit
+/plugin install orbit
+
+# Codex CLI
+codex plugin marketplace add danieljhkim/orbit --ref main
+codex plugin add orbit@orbit
+
+# Cursor local Agent Plugin (public marketplace submission is separate)
+git clone https://github.com/danieljhkim/orbit.git
+cd orbit
+mkdir -p ~/.cursor/plugins/local
+ln -sfn "$(pwd)/plugin" ~/.cursor/plugins/local/orbit
+# Restart Cursor or run Developer: Reload Window.
+```
+
+All three plugin paths load `plugin/skills/orbit` and launch the same portable
+`npx -y @orbit-tools/cli@latest mcp serve` transport. Cursor reads the root
+`plugin/plugin.json` and `plugin/mcp.json` manifests; there is intentionally no
+`plugin/.cursor-plugin` directory. The CLI path remains `curl … | sh` or
+Homebrew, followed by `orbit workspace init --mcp`.
+
 > **Cowork users:** Orbit advertises its canonical MCP surface independently of the
 > server's launch directory. Workspace routing comes from the server's
 > `--workspace` binding, MCP initialize/session context, or an explicit registered
@@ -256,8 +295,11 @@ workspaces that have a checkout registered on that machine.
 
 ### Federated MCP
 
-The opt-in federated server presents one MCP namespace over SSH destinations
-listed in the operator's machine-global `~/.orbit/mcp-destinations.toml`:
+The opt-in federated server presents one MCP namespace over this machine's
+workspaces plus SSH remotes listed in the operator's machine-global
+`~/.orbit/mcp-destinations.toml`. Local workspaces need no destination row; a
+missing or empty file is a valid local-only federated server. Additional remotes
+are declared as SSH destinations:
 
 ```toml
 [[destinations]]

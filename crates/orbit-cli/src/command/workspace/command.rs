@@ -5,6 +5,7 @@ use crate::command::{CommandOut, Execute};
 
 use super::init::WorkspaceInitArgs;
 use super::list::WorkspaceListArgs;
+use super::publication::WorkspacePublicationCommand;
 use super::remove::WorkspaceRemoveArgs;
 use super::role::WorkspaceRoleArgs;
 use super::show::WorkspaceShowArgs;
@@ -27,6 +28,8 @@ pub enum WorkspaceSubcommand {
     Show(WorkspaceShowArgs),
     /// Validate or reassert this checkout's declared local role
     Role(WorkspaceRoleArgs),
+    /// Manage the owner-local task-publication repository binding
+    Publication(WorkspacePublicationCommand),
     /// Remove a workspace from the registry (does not delete .orbit)
     Remove(WorkspaceRemoveArgs),
     /// Remove all Orbit artifacts from this workspace
@@ -43,6 +46,7 @@ impl Execute for WorkspaceCommand {
             WorkspaceSubcommand::List(args) => args.execute(runtime),
             WorkspaceSubcommand::Show(args) => args.execute(runtime),
             WorkspaceSubcommand::Role(args) => args.execute(runtime),
+            WorkspaceSubcommand::Publication(command) => command.execute(runtime),
             WorkspaceSubcommand::Remove(args) => args.execute(runtime),
             WorkspaceSubcommand::Teardown(args) => args.execute(runtime),
         }

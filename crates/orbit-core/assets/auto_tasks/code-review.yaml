@@ -1,7 +1,7 @@
 schemaVersion: 1
-name: code-review-sweep
+name: code-review
 description: Post-merge code review of changes merged since the last completed sweep
-enabled: true
+enabled: false
 schedule:
   cron: 40 */6 * * *
 template:
@@ -14,10 +14,16 @@ template:
 
     ## Rules and command surfaces
 
-    - Use the registered Orbit tool surface. Find the previous sweep with
-      `orbit tool run orbit.task.list --input '{"status":["done"],"tag":"code-review-sweep","model":"<agent-family>"}'`
-      and read its cursor with
+    - Use the registered Orbit tool surface. Find the newest current-name sweep with
+      `orbit tool run orbit.task.list --input '{"status":["done"],"type":"chore","tag":["code-review","no-diff-expected"],"limit":1,"model":"<agent-family>"}'`
+      and the newest legacy-name sweep with
+      `orbit tool run orbit.task.list --input '{"status":["done"],"type":"chore","tag":["code-review-sweep","no-diff-expected"],"limit":1,"model":"<agent-family>"}'`.
+      Both tag filters use AND semantics. Compare the first result from each
+      newest-first list by `created_at`, with the lexicographically smaller task ID
+      winning an equal timestamp, and read the selected sweep's cursor with
       `orbit tool run orbit.task.show --input '{"id":"<id>","model":"<agent-family>"}'`.
+      A finding is a `bug` tagged only `code-review`, so it is never a sweep
+      candidate even when it completed after the selected sweep.
       Search existing coverage with
       `orbit tool run orbit.search --input '{"query":"<distinctive symptom, symbol, or file terms>","kind":"task","all":true,"model":"<agent-family>"}'`
       and list open review work with
@@ -30,11 +36,13 @@ template:
 
     ## Determine the review window
 
-    Find the most recent done task tagged `code-review-sweep` and read the
-    last-reviewed commit recorded in its execution summary. Review the commits from
-    that point to the current HEAD of the workspace's integration branch. If no
-    prior sweep task exists, record the current HEAD as the baseline and stop — the
-    first run seeds the cursor.
+    Run both completed-sweep queries above and select the newer result using the
+    stated ordering. Read the last-reviewed commit recorded in that sweep's
+    execution summary, then review the commits from that point to the current HEAD
+    of the workspace's integration branch. Never use a `code-review`-only finding
+    as a cursor, and never treat a selected sweep's missing cursor as a first run.
+    If neither sweep query returns a result, record the current HEAD as the baseline
+    and stop — only that case seeds the cursor.
 
     ## Review the window
 
@@ -62,12 +70,12 @@ template:
   - A window with no confirmed findings succeeds as a no-op.
   task_type: chore
   tags:
-  - code-review-sweep
+  - code-review
   - no-diff-expected
   priority: medium
   # The portable system lane is seeded per machine and compatibility-aliased
   # for configs written before that crew existed.
-  crew: opus
+  crew: system
   status: backlog
 dedupe: skip_if_open
 created_by: system

@@ -31,8 +31,8 @@ pub mod test_env;
 pub mod test_fixtures;
 
 pub use error::{
-    ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, NotFoundKind, OrbitError,
-    WorkspaceClaimHeld,
+    ArtifactOrigin, ArtifactOriginMode, DependencyNotDelivered, FrictionNotLocal, NotFoundKind,
+    OrbitError, WorkspaceClaimHeld,
 };
 pub use fs::task_io::{prune_missing_context_files, task_artifact_from_source_file};
 pub use model::pricing::{derive_cost_usd, normalize_token_usage};

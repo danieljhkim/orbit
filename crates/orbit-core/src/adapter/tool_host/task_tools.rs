@@ -53,6 +53,11 @@ pub(super) fn add(
             dependencies: Vec::new(),
             relations: parse_relations(&input)?.unwrap_or_default(),
             tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
+            required_tools: optional_csv_or_string_list_alias(
+                &input,
+                &["required_tools", "requiredTools", "required-tool"],
+            )?
+            .unwrap_or_default(),
             plan: String::new(),
             comment: None,
             context_files: raw_context_files.clone(),
@@ -269,6 +274,15 @@ pub(super) fn update(
     agent: Option<String>,
     model: Option<String>,
 ) -> Result<Value, OrbitError> {
+    if ["required_tools", "requiredTools", "required-tool"]
+        .iter()
+        .any(|field| input.get(*field).is_some())
+    {
+        return Err(OrbitError::InvalidInput(
+            "orbit.task.update does not accept `required_tools`; task tool requirements are immutable after creation"
+                .to_string(),
+        ));
+    }
     let id = required_string(&input, &["id"], "id")?;
     let task = runtime.update_task_with_identity(
         &id,

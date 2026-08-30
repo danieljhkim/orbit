@@ -1,0 +1,16 @@
+{
+  "name": "orbit",
+  "owner": {
+    "name": "danieljhkim",
+    "url": "https://github.com/danieljhkim"
+  },
+  "plugins": [
+    {
+      "name": "orbit",
+      "source": "./plugin",
+      "description": "Task, documentation search, and workflow orchestration for AI coding agents.",
+      "category": "developer-tools",
+      "tags": ["task-management", "documentation", "orchestration", "mcp"]
+    }
+  ]
+}

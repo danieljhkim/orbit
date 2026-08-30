@@ -207,12 +207,27 @@ impl Commands {
                 dispatch_init,
             ),
             Commands::Workspace(command) => {
+                use super::workspace::WorkspacePublicationSubcommand;
                 use super::workspace::WorkspaceSubcommand;
                 let (subcommand, runtime_need, governed) = match &command.command {
                     WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden, false),
                     WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required, false),
+                    WorkspaceSubcommand::Publication(command) => match &command.command {
+                        WorkspacePublicationSubcommand::Bind(_) => {
+                            ("publication-bind", RuntimeNeed::Required, false)
+                        }
+                        WorkspacePublicationSubcommand::Show(_) => {
+                            ("publication-show", RuntimeNeed::Required, false)
+                        }
+                        WorkspacePublicationSubcommand::Rebind(_) => {
+                            ("publication-rebind", RuntimeNeed::Required, true)
+                        }
+                        WorkspacePublicationSubcommand::Remove(args) => {
+                            ("publication-remove", RuntimeNeed::Required, args.confirm)
+                        }
+                    },
                     WorkspaceSubcommand::Remove(_) => ("remove", RuntimeNeed::Required, true),
                     WorkspaceSubcommand::Teardown(args) => {
                         ("teardown", RuntimeNeed::Required, args.confirm)
@@ -430,6 +445,7 @@ impl Commands {
             }
             Commands::Task(command) => {
                 use super::locks::LocksSubcommand;
+                use super::task::TaskPublicationSubcommand;
                 use super::task::TaskSubcommand;
                 use super::task::artifact::TaskArtifactSubcommand;
                 let (subcommand, target_type, target_id) = match &command.command {
@@ -463,6 +479,20 @@ impl Commands {
                         None,
                         Some(args.archive.to_str().unwrap_or_default()),
                     ),
+                    TaskSubcommand::Publication(command) => match &command.command {
+                        TaskPublicationSubcommand::Publish(_) => {
+                            ("publication-publish", Some("workspace"), None)
+                        }
+                        TaskPublicationSubcommand::Status(_) => {
+                            ("publication-status", Some("workspace"), None)
+                        }
+                        TaskPublicationSubcommand::Inspect(_) => {
+                            ("publication-inspect", Some("publication"), None)
+                        }
+                        TaskPublicationSubcommand::Restore(_) => {
+                            ("publication-restore", Some("workspace"), None)
+                        }
+                    },
                     TaskSubcommand::Reindex(_) => ("reindex", None, None),
                 };
                 let runtime_need = match &command.command {
@@ -480,6 +510,19 @@ impl Commands {
                     None,
                     false,
                     boxed_runtime_dispatch!(Task),
+                )
+                .governed_when(
+                    matches!(
+                        &command.command,
+                        TaskSubcommand::Publication(publication)
+                            if matches!(
+                                publication.command,
+                                TaskPublicationSubcommand::Publish(_)
+                                    | TaskPublicationSubcommand::Restore(_)
+                            )
+                    ),
+                    "task",
+                    subcommand,
                 )
             }
             Commands::Search(command) => CommandOperation::new(
@@ -780,6 +823,7 @@ impl Commands {
                     McpSubcommand::Remove(_) => "remove",
                     McpSubcommand::Serve(_) => "serve",
                     McpSubcommand::Listen(_) => "listen",
+                    McpSubcommand::Callers(_) => "callers",
                 };
                 CommandOperation::new(
                     RuntimeNeed::Forbidden,
@@ -885,6 +929,9 @@ fn dispatch_mcp(command: Commands, context: DispatchContext<'_>) -> CommandOut {
         }) => args.execute_without_runtime(context.root_override),
         Commands::Mcp(McpCommand {
             command: McpSubcommand::Listen(args),
+        }) => args.execute_without_runtime(context.root_override),
+        Commands::Mcp(McpCommand {
+            command: McpSubcommand::Callers(args),
         }) => args.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Mcp"),
     }

@@ -56,6 +56,15 @@ pub struct ToolSessionContext {
     /// resolution, or any authorization decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub self_reported_actor: Option<String>,
+    /// The destination-side statement that capped this session, present only
+    /// on a remote-originated session [ORB-11052].
+    ///
+    /// Its presence is what distinguishes "this destination granted the
+    /// caller these capabilities" from "the local server process stamped its
+    /// own authority", so the audit trail can tell a downgraded caller from
+    /// one that never asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_caller_grant: Option<RemoteCallerGrant>,
 }
 
 impl ToolSessionContext {
@@ -88,11 +97,65 @@ impl ToolSessionContext {
             // Trusted defaults describe the accepting machine; a claim only
             // ever arrives from the client, at initialize.
             self_reported_actor: None,
+            remote_caller_grant: None,
         }
     }
 
     pub fn has_capability(&self, capability: McpCapability) -> bool {
         self.effective_capabilities.contains(&capability)
+    }
+}
+
+/// What a destination's callers file granted the caller of a remote-originated
+/// MCP session [ORB-11052].
+///
+/// The session's effective capabilities are this set intersected with what the
+/// session's argv requested, so recording the grant separately is what makes a
+/// downgrade legible: `effective` alone cannot distinguish a caller that was
+/// capped from one that never asked for more.
+///
+/// `caller_machine_id` is only as strong as [`Self::identity`] says it is:
+/// under [`CallerIdentityProof::SelfAsserted`] it is a label the caller chose,
+/// and it selects a row rather than proving anything.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteCallerGrant {
+    /// Caller identity the destination resolved the grant for.
+    pub caller_machine_id: String,
+    /// Capabilities the destination is willing to serve that caller.
+    pub granted_capabilities: BTreeSet<McpCapability>,
+    /// Display path of the file that made the statement, for the denial
+    /// message a refused caller has to act on.
+    pub source: String,
+    /// How [`Self::caller_machine_id`] was established [ORB-11053].
+    #[serde(default)]
+    pub identity: CallerIdentityProof,
+}
+
+/// How a destination established the caller identity it resolved a grant for.
+///
+/// A destination may run either tier of caller authorization, so the trail has
+/// to say which one answered rather than leaving a reader to assume: the two
+/// grants look identical once resolved, and only this field separates a row a
+/// caller merely named from one it proved it holds the key for.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum CallerIdentityProof {
+    /// The caller named itself. It selects a row and proves nothing, so the
+    /// grant is an accident guard rather than a boundary.
+    #[default]
+    SelfAsserted,
+    /// sshd authenticated the key whose `authorized_keys` entry names this
+    /// caller, and the destination — not the caller — composed the argv that
+    /// carries the identity.
+    KeyBound,
+}
+
+impl Display for CallerIdentityProof {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SelfAsserted => "self-asserted",
+            Self::KeyBound => "key-bound",
+        })
     }
 }
 
@@ -217,6 +280,24 @@ pub enum McpToolDefinitionError {
 /// Convert a canonical Orbit tool name to its MCP-advertised form.
 pub fn mcp_advertised_tool_name(canonical_name: &str) -> String {
     canonical_name.replace('.', "_")
+}
+
+/// Whether a task requirement is an exact canonical tool name rather than a
+/// wildcard, prefix, or transport spelling.
+pub fn is_exact_canonical_tool_name(name: &str) -> bool {
+    if name.is_empty() || name.trim() != name || name.contains('*') || name.contains(',') {
+        return false;
+    }
+    let mut segments = name.split('.');
+    let valid_segment = |segment: &str| {
+        !segment.is_empty()
+            && segment.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+            })
+    };
+    segments.next().is_some_and(valid_segment)
+        && segments.next().is_some_and(valid_segment)
+        && segments.all(valid_segment)
 }
 
 /// Validate schema-adjacent MCP definitions, including both canonical and advertised names.

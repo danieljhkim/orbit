@@ -116,6 +116,8 @@ pub(super) struct CreateTaskBody {
     #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
+    required_tools: Vec<String>,
+    #[serde(default)]
     plan: String,
     #[serde(default)]
     context_files: Vec<String>,
@@ -659,6 +661,7 @@ pub(super) async fn create_task_action(
         dependencies: body.dependencies,
         relations: body.relations,
         tags: body.tags,
+        required_tools: body.required_tools,
         plan: body.plan,
         comment: None,
         context_files: body.context_files,

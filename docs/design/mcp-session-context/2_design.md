@@ -3,8 +3,8 @@ summary: "MCP Session Context — Design"
 type: design
 title: "MCP Session Context — Design"
 owner: codex
-last_updated: 2026-08-22
-last_validated: 2026-08-22
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Accepted
 feature: mcp-session-context
 doc_role: design
@@ -51,10 +51,10 @@ For a workspace-scoped tool, the authoritative server chooses the first non-empt
 
 1. workspace in the tool input;
 2. workspace announced during initialize;
-3. the workspace this server was launched for (`orbit mcp serve --workspace`);
+3. the workspace this server was launched for (`orbit mcp serve --workspace`, or a trusted managed child's `ORBIT_WORKSPACE` envelope when the flag is omitted);
 4. otherwise, a missing-workspace error.
 
-Steps 2 and 3 are one session field, resolved once at initialize: an announced workspace replaces the launch binding for that session, and a client that announces nothing falls back to the binding rather than clearing it. The fallback is the immutable launch value, so a re-initialize never inherits the previous client's claim. Most MCP clients cannot put _meta on their initialize at all, which is why a managed integration — what `orbit mcp init` and `orbit workspace init --mcp` generate — writes the binding into the argv it registers, using the logical `ws_*` ID so a linked worktree whose checkout identity diverged still names one workspace. A server the operator launched with no binding stays unbound, and every workspace-scoped call there must name its own workspace.
+Steps 2 and 3 are one session field, resolved once at initialize: an announced workspace replaces the launch binding for that session, and a client that announces nothing falls back to the binding rather than clearing it. The fallback is the immutable launch value, so a re-initialize never inherits the previous client's claim. Most MCP clients cannot put _meta on their initialize at all, which is why a managed integration — what `orbit mcp init` and `orbit workspace init --mcp` generate — writes the binding into the argv it registers, using the logical `ws_*` ID so a linked worktree whose checkout identity diverged still names one workspace. A managed worker that launches `orbit mcp serve` without that argv still inherits the same logical selector from `ORBIT_WORKSPACE`, which is honored only together with managed-run provenance [ORB-11117]. A server the operator launched with no binding stays unbound, and every workspace-scoped call there must name its own workspace. An inherited `ORBIT_WORKSPACE` without that provenance is not a binding.
 
 Process cwd is not an MCP fallback. The server resolves the selector against its registry, opens the selected local runtime, writes the resolved workspace_id into context, and normalizes an explicit workspace argument to the selected checkout path before Core dispatch.
 

@@ -32,7 +32,7 @@ is host-local and never synced. [2_design.md](./2_design.md) is the v1 contract;
 > scheduler, validation, and dispatch kernels.
 
 `orbit workspace init` creates the complete default set (`auto_task_scheduler`,
-`task_triage`, `task_pilot`, `ship_sweep`, and `worktree_gc`) under
+`task_triage`, `task_pilot`, `ship_sweep`, `worktree_gc`, and `ci_failure_sweep`) under
 `.orbit/routines/`. Every default is `enabled: false`: scheduled execution is an explicit,
 versioned opt-in made by changing the reviewed definition to `enabled: true`. Re-init
 creates newly introduced missing defaults but never rewrites existing routine files; those
@@ -118,6 +118,9 @@ fragmentation this feature exists to end.
   over `orbit-registry` local files without fleet registry/cache state.
 - [ORB-10739] — added the disabled `task_pilot` default routine; its zero-input target
   leaves eligibility and bounded partitioning to `prepare_task_pilot`.
+- [ORB-11107] — added the disabled `ci_failure_sweep` default routine, hourly at `5 * * * *`.
+  It targets `job:ci_failure_sweep_pipeline`, whose two deterministic steps collect CI
+  evidence on the host and file each current failure cluster as an ordinary backlog task.
 - [ORB-00374] — removed the `shell` activity variant and `run_shell` dispatch (fail-closed);
   routines inherit this constraint.
 

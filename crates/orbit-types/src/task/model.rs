@@ -706,6 +706,13 @@ pub struct Task {
     pub acceptance_criteria: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Exact canonical tool names the task adds to an agent activity baseline.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_required_tools",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub required_tools: Vec<String>,
     #[serde(default, alias = "instructions")]
     pub plan: String,
     #[serde(default)]
@@ -815,6 +822,27 @@ pub fn normalize_task_tags(raw_tags: Vec<String>) -> Vec<String> {
         }
     }
     normalized
+}
+
+/// Canonical persisted ordering for task-scoped tool requirements.
+///
+/// Names are deliberately not trimmed or case-folded here: admission owns
+/// validating exact canonical registry names, and malformed values must remain
+/// visible until that fail-closed check. A sorted set makes every task store
+/// and transport serialize the same deduplicated list.
+pub fn normalize_required_tools(raw_tools: Vec<String>) -> Vec<String> {
+    raw_tools
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub fn deserialize_required_tools<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer).map(normalize_required_tools)
 }
 
 pub fn task_matches_tags(task: &Task, required_tags: &[String]) -> bool {

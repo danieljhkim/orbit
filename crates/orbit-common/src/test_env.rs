@@ -39,6 +39,7 @@ pub const MANAGED_RUN_ENV: &[&str] = &[
     "ORBIT_ACTIVE_TASK_ID",
     "ORBIT_SESSION_ID",
     "ORBIT_MANAGED_RUN_CONTEXT",
+    "ORBIT_WORKSPACE",
 ];
 
 /// Restores the variables captured by [`unset`] when dropped.
@@ -135,3 +136,7 @@ pub fn harden_dir(path: &std::path::Path) {
 /// Non-Unix targets have no umask to defend against.
 #[cfg(not(unix))]
 pub fn harden_dir(_path: &std::path::Path) {}
+
+#[cfg(test)]
+#[path = "tests/test_env.rs"]
+mod tests;

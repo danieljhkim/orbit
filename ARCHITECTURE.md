@@ -75,24 +75,27 @@ feature.
   Retrieval and ranking live in `orbit-search`. `orbit-core` owns the domain (corpora, records, lifecycle) and projects records into search-source structs. `orbit-search` owns lexical (BM25), semantic (cosine), and hybrid scoring. CLI verbs are presets layered on the same backend.
   It also builds `orbit-search-companion`, a separately installed search companion binary, as an additional `[[bin]]` target (folded from the standalone `orbit-search-companion` crate, ORB-10357); that target alone depends on fastembed-rs and is not linked into the default `orbit` CLI binary.
 - **orbit-registry**: machine identity and workspace registry feature crate. It
-  owns `host.toml`, the logical workspace catalog and local checkout bindings,
-  validation, and atomic file persistence. It contains no shared database,
-  command orchestration, MCP transport, or Core runtime execution. Depends only
-  on `orbit-types` and `orbit-common` among workspace crates.
+  owns `host.toml`, the logical workspace catalog, local checkout bindings,
+  owner-local task-publication repository bindings, validation, and atomic file
+  persistence. It contains no shared database, command orchestration, MCP
+  transport, or Core runtime execution. Depends only on `orbit-types` and
+  `orbit-common` among workspace crates.
 - **orbit-store**: one directional persistence crate. `contracts` owns every
   consumer-visible trait, parameter, query/filter, and result projection;
   `fs` owns narrowly named lock, path-safety, and YAML mechanics; private
   `driver/file` and `driver/sqlite` modules implement exactly one persistence
   technology each. `repository` owns live invariants that join drivers (task
   bundles + registry indexes + checkout projections, and friction SQLite +
-  file taxonomy). `workflow` owns explicit import/export/reindex/repair and
-  layout-upgrade operations. `compose` constructs concrete implementations and
+  file taxonomy). `workflow` owns explicit import/export/reindex/repair,
+  owner-only task-publication transport, read-only task-publication
+  inspection, and layout-upgrade operations.
+  `compose` constructs concrete implementations and
   returns contract-facing stores. The crate retains the namespaced feature
   migration ledger and immutable historical bootstrap migrations. It depends
   on `orbit-types` and `orbit-common`; the semantic vector schema remains owned
   by `orbit-search::vector`.
-- **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-types`, `orbit-common`, `orbit-exec`, and `orbit-policy`; MCP composes these with its machine-local discovery definitions.
-- **orbit-mcp**: Model Context Protocol feature crate using `rmcp`. It owns stdio framing, advertised-name translation, per-call trace creation, structured responses, canonical tool discovery, server identity presentation, the TCP listener transport, the direct SSH stdio proxy, and the federated mux over operator-configured destinations (`FederatedMcpHost`: live list plus fail-closed host-qualified routing). Registry supplies machine-local facts and Tools supplies definitions whose only routing metadata is global versus workspace-required scope. The CLI-owned `ServerMcpHost` resolves server-local workspaces; the federated host advertises that callers copy `selector` from federated `orbit.workspace.list`, routes a copied `hm_*/ws_*` selector to the encoded destination, and does not resolve against this machine's catalog. Core owns domain validation, auditing, and the future authorization boundary.
+- **orbit-tools**: generic tool registry plus built-in fs, policy-aware exec, and workspace-scoped Orbit definitions. It depends on `orbit-types`, `orbit-common`, `orbit-exec`, and `orbit-policy`; MCP composes these with its machine-local discovery definitions. It is also the single owner of the GitHub CLI contract: `github_cli` re-exports the `gh` argv builders, JSON projections, and bounded/redacted log helpers so `orbit-engine`'s host-owned CI evidence collection runs the same queries as the `github.*` tools without a second copy of them and without routing through `ToolRegistry`.
+- **orbit-mcp**: Model Context Protocol feature crate using `rmcp`. It owns stdio framing, advertised-name translation, per-call trace creation, structured responses, canonical tool discovery, server identity presentation, the TCP listener transport, the direct SSH stdio proxy, destination-side caller authorization (including machine-global `mcp-callers.toml` and hashed `mcp-ssh-acceptance/` forced-command capabilities), and the federated mux (`FederatedMcpHost`: implicit local membership plus operator-configured SSH remotes, live list, fail-closed host-qualified routing). Registry supplies machine-local facts and Tools supplies definitions whose only routing metadata is global versus workspace-required scope. The CLI-owned `ServerMcpHost` resolves server-local workspaces and is the in-process destination for local federated selectors. The federated host advertises that callers copy `selector` from federated `orbit.workspace.list` and routes a copied `hm_*/ws_*` selector to the encoded destination — locally without SSH, otherwise over the configured remote. Core owns domain validation and auditing behind the session envelope.
 - **orbit-web**: HTTP API, embedded dashboard UI, and remote web connection. It owns axum handlers/assets, dashboard mutations, and the dashboard-specific SSH local-forward lifecycle. Depends on `orbit-core` for runtime-backed operations and projections and on `orbit-registry` for global workspace discovery; consumed by `orbit-cli` via `web serve` and `web connect`. Public surface is `ServeArgs`, `ConnectArgs`, and their serve/connect entry points.
 - **orbit-agent**: per-provider `AgentRuntime` implementations under `providers/<name>/<name>_runtime.rs` (claude, codex, gemini, gemini_http, grok, openai_compat, anthropic, ollama, mock_agent). Provides the CLI agent runtimes Orbit dispatches, plus a standalone HTTP `LoopTransport` / `AgentLoop` SDK surface with its own examples — Orbit's job execution no longer reaches that loop ([ORB-10801]). Depends on `orbit-types`, `orbit-common`, and `orbit-tools`.
 - **orbit-engine**: activity/job execution, template rendering, retry logic, subprocess execution, and tool-aware automation. Owns the CLI agent subprocess runner (`activity_job::cli_runner`), which references `orbit-agent::{Agent, AgentConfig}` directly so orbit-core stays clean of orbit-agent types. Depends on `orbit-agent`, `orbit-types`, `orbit-common`, `orbit-exec`, `orbit-store`, and `orbit-tools`.
@@ -145,8 +148,9 @@ Live task writes are committed by the composite task repository: canonical
 bundle durability is the file-driver operation, allocation/binding/index rows
 are the registry-driver operation, and `.orbit/tasks` symlinks are disposable
 checkout projections. The drivers do not call each other. Task archive
-import/export/reindex, friction Markdown import/SQLite export, legacy audit and
-job-run import, and workspace layout upgrades are explicit `workflow` modules.
+import/export/reindex, owner-only task-publication transport and its read-only
+inspection, friction Markdown import/SQLite export, legacy audit and job-run
+import, and workspace layout upgrades are explicit `workflow` modules.
 In particular, constructing a friction repository does not perform a hidden
 Markdown import; `compose::workspace_friction_store` invokes the idempotent,
 transactional workflow before opening the live repository.

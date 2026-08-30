@@ -4,8 +4,10 @@
 //! Codex, Gemini, and Grok. `orbit mcp serve` serves the Orbit tool surface over
 //! MCP so external clients can discover and invoke Orbit operations with typed
 //! JSON schemas, and `orbit mcp listen` serves that same surface on a TCP
-//! socket for deployments that need one.
+//! socket for deployments that need one. `orbit mcp callers` reads the
+//! destination-side file that decides what a remote session may do here.
 
+mod callers;
 mod command;
 mod listen;
 mod server;

@@ -24,6 +24,7 @@ pub(super) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStat
             .map(|dependency| dependency.label())
             .collect::<Vec<_>>(),
         "tags": task.tags,
+        "required_tools": task.required_tools,
         "plan": task.plan,
         "execution_summary": task.execution_summary,
         "context_files": task.context_files,
@@ -95,7 +96,10 @@ pub(super) fn task_fields_to_json(
     task: &Task,
     fields: &[String],
 ) -> Result<Value, OrbitError> {
-    let status_by_id = if fields.iter().any(|field| field == "resolved_dependencies") {
+    let status_by_id = if fields
+        .iter()
+        .any(|field| matches!(field.as_str(), "resolved_dependencies" | "relations"))
+    {
         Some(runtime.task_status_index()?)
     } else {
         None
@@ -131,6 +135,8 @@ fn task_field_to_json(
         "dependencies" => serde_json::to_value(task.dependencies())
             .map_err(serialize_error("serialize dependencies")),
         "tags" => serde_json::to_value(&task.tags).map_err(serialize_error("serialize tags")),
+        "required_tools" => serde_json::to_value(&task.required_tools)
+            .map_err(serialize_error("serialize required tools")),
         "resolved_dependencies" => serde_json::to_value(
             resolve_task_dependencies(
                 task,
@@ -145,6 +151,13 @@ fn task_field_to_json(
             .collect::<Vec<_>>(),
         )
         .map_err(serialize_error("serialize resolved dependencies")),
+        "relations" => serde_json::to_value(resolve_task_relations(
+            task,
+            status_by_id.ok_or_else(|| {
+                OrbitError::Execution("missing task status index for relations".to_string())
+            })?,
+        ))
+        .map_err(serialize_error("serialize relations")),
         "history" => serialize_history(&runtime.get_task_history(&task.id)?),
         "context_files" => serde_json::to_value(&task.context_files)
             .map_err(serialize_error("serialize context files")),

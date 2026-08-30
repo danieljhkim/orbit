@@ -4,7 +4,7 @@ type: design
 title: "Agent Families — Decisions"
 owner: grok
 last_updated: 2026-08-11
-last_validated: 2026-07-27
+last_validated: 2026-08-29
 status: Draft
 feature: agent-families
 doc_role: decisions
@@ -115,7 +115,7 @@ Family is identity, model is configuration, and slot is role. Orbit identity sur
 
 AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in May 2026, ad-hoc task selection, model versions not held constant (gemini-2.5-pro on two runs, gemini-3.1-pro-preview on three). The thread is explicitly framed as decision-grade-for-us, not an objective ranking.
 
-**Decision.** Until new evidence warrants otherwise, default the planner role on planning duels and design-shaped plans to **claude** (currently `claude-opus-4-x` per workspace crew config). This applies to both implementation-shaped planning and UX / design-shaped planning. The choice is provisional and bound to AO-002's evidence window; AO-002's open questions (post-rubric run on `gemini-3.1-pro-preview` against an implementation task, plan-depth response to a volume-rubric clause, new model-family releases) are the natural triggers for revisiting.
+**Decision.** Until new evidence warrants otherwise, default the planner role on planning duels and design-shaped plans to **claude** (currently the `opus` crew/model alias in the workspace defaults). This applies to both implementation-shaped planning and UX / design-shaped planning. The choice is provisional and bound to AO-002's evidence window; AO-002's open questions (post-rubric run on `gemini-3.1-pro-preview` against an implementation task, plan-depth response to a volume-rubric clause, new model-family releases) are the natural triggers for revisiting.
 
 **Consequences.**
 
@@ -144,7 +144,7 @@ AO-002 scope: planning-duel plan quality on the Orbit codebase, single window in
 
 **Recorded:** 2026-07-11 19:53:22.638085Z · [ORB-10130]
 **Supersedes:** [Replace \[agent.<role>\] tables with named \[crews.*\] registry](#replace-agentrole-tables-with-named-crews-registry)
-**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-dashboard/src/**`, `docs/CONFIG.md`
+**Paths:** `crates/orbit-types/src/identity/agent_pair.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-store/src/**`, `crates/orbit-web/src/**`, `docs/CONFIG.md`
 
 ### Context
 Named crews currently carry separate planner, implementer, and reviewer assignments, but production crews are homogeneous and only the implementer is on the primary ship path. Role labels still matter for prompts and telemetry, while model selection through three independent slots adds configuration and persistence complexity without selecting distinct behavior.
@@ -177,7 +177,7 @@ Agent availability is detected once during init using `DetectedAgents`, rendered
 ## Retire crew role slots and role-based model resolution
 
 **Recorded:** 2026-08-09 06:33:12.872319Z · [ORB-10620], [ORB-10621], [ORB-10622]
-**Paths:** `crates/orbit-common/src/types/agent_pair.rs`, `crates/orbit-common/src/types/activity_job/activity_v2.rs`, `crates/orbit-common/src/types/activity_job/job_v2.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-core/assets/activities/**`, `docs/CONFIG.md`
+**Paths:** `crates/orbit-types/src/identity/agent_pair.rs`, `crates/orbit-types/src/workflow/activity_job/activity_v2.rs`, `crates/orbit-types/src/workflow/activity_job/job_v2.rs`, `crates/orbit-config/src/**`, `crates/orbit-core/src/runtime/**`, `crates/orbit-engine/src/activity_job/**`, `crates/orbit-core/assets/activities/**`, `docs/CONFIG.md`
 
 ### Context
 
@@ -187,7 +187,7 @@ This amends two clauses of [Flatten crews to one provider-model assignment](#fla
 
 ### Decision
 
-Crew configuration accepts flat `provider`/`model`/`backend` only; the legacy role sub-tables are rejected at load with rewrite guidance rather than collapsed. `AgentRole` and the role-to-assignment resolution path are removed from config, runtime, and asset schemas. Routing becomes: an activity or step with an explicit `crew` input dispatches on that crew, and one without dispatches on the run's resolved crew — replacing today's inline-baseline fallback, so no activity is left without a crew when its role is removed.
+Crew configuration accepts flat `provider`/`model` only; the retired `backend` key is accepted only as inert `cli` or rejected at load. Legacy role sub-tables are rejected at load with rewrite guidance rather than collapsed. `AgentRole` and the role-to-assignment resolution path are removed from config, runtime, and asset schemas. Routing becomes: an activity or step with an explicit `crew` input dispatches on that crew, and one without dispatches on the run's resolved crew — replacing today's inline-baseline fallback, so no activity is left without a crew when its role is removed.
 
 ### Consequences
 
@@ -195,7 +195,7 @@ Crew configuration accepts flat `provider`/`model`/`backend` only; the legacy ro
 - A heterogeneous legacy crew now fails loudly at load instead of losing its planner and reviewer assignments behind a log line.
 - System activities that need a model distinct from the run's crew must name a configured crew through an input, making that choice visible in config rather than in engine code.
 - Cost: breaking config change. Any workspace carrying the three-role shape fails to load until rewritten, and shipped activity assets carrying `role:` must be reseeded in the same release.
-- Cost: the planning duel still overrides provider and model at dispatch time through its own override path, so a duel activity's asset alone does not tell you which model ran it. That carve-out, inherited from [Flatten crews to one provider-model assignment](#flatten-crews-to-one-provider-model-assignment), is unchanged here.
+- Cost: the planning-duel override carve-out described by the superseded crew decision was removed with the planning-duel path; current activity assets use explicit crew input or the run's resolved crew.
 
 ## Task References
 

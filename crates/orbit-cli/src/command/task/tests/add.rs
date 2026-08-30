@@ -33,6 +33,10 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
         "ORB-00001,ORB-00002",
         "--dependency",
         "ORB-00003",
+        "--required-tools",
+        "proc.spawn,orbit.task.show",
+        "--required-tools",
+        "orbit.task.update",
         "--context",
         "file:one.rs,file:two.rs",
         "--context",
@@ -49,12 +53,41 @@ fn task_add_parses_repeat_and_comma_delimited_lists() {
     assert_eq!(args.acceptance_criteria, ["first", "second"]);
     assert_eq!(args.tags, ["cli", "surface", "test"]);
     assert_eq!(args.dependencies, ["ORB-00001", "ORB-00002", "ORB-00003"]);
+    assert_eq!(
+        args.required_tools,
+        ["proc.spawn", "orbit.task.show", "orbit.task.update"]
+    );
     assert_eq!(args.context, ["file:one.rs", "file:two.rs", "dir:three"]);
     assert_eq!(args.description, "Plain description");
     assert_eq!(args.plan, "Plain plan");
     assert_eq!(args.priority, orbit_core::TaskPriority::High);
     assert_eq!(args.complexity, orbit_core::TaskComplexity::Hard);
     assert_eq!(args.task_type, Some(orbit_core::TaskType::Bug));
+}
+
+#[test]
+fn task_add_accepts_legacy_required_tool_alias() {
+    let cli = Cli::try_parse_from([
+        "orbit",
+        "task",
+        "add",
+        "--title",
+        "Legacy required tool",
+        "--complexity",
+        "low",
+        "--required-tool",
+        "proc.spawn",
+    ])
+    .expect("parse task add with legacy required-tool alias");
+
+    let Commands::Task(task) = cli.command else {
+        panic!("expected task command");
+    };
+    let TaskSubcommand::Add(args) = task.command else {
+        panic!("expected task add command");
+    };
+
+    assert_eq!(args.required_tools, ["proc.spawn"]);
 }
 
 #[test]

@@ -51,6 +51,7 @@ pub(super) fn create_params(title: &str, status: TaskStatus) -> TaskCreateParams
         dependencies: Vec::new(),
         relations: Vec::new(),
         tags: vec!["task-artifacts".to_string(), "v2".to_string()],
+        required_tools: Vec::new(),
         plan: "1. Do the work".to_string(),
         execution_summary: String::new(),
         context_files: vec!["docs/design/task-artifacts/1_overview.md".to_string()],

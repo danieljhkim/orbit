@@ -1692,6 +1692,33 @@ async fn update_task_rejects_an_undeclared_body_field_without_partial_applicatio
 }
 
 #[tokio::test]
+async fn update_task_rejects_required_tools_as_creation_only() {
+    let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
+    let task = seed_backlog_task(&runtime, "Immutable tool authority");
+
+    let response = patch_task(
+        runtime.clone(),
+        &task.id,
+        json!({ "required_tools": ["proc.spawn"] }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let message = body_json(response).await["error"]
+        .as_str()
+        .expect("error message")
+        .to_string();
+    assert!(message.contains("required_tools"), "{message}");
+    assert!(
+        runtime
+            .get_task(&task.id)
+            .expect("read task")
+            .required_tools
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn create_task_requires_assessed_complexity() {
     let runtime = Arc::new(OrbitRuntime::in_memory().expect("build runtime"));
 

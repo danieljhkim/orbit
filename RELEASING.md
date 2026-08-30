@@ -2,7 +2,7 @@
 
 Runbook for cutting an Orbit release. Codified from [T20260510-23] (v0.4.0).
 
-See also [docs/runbooks/release.md](docs/runbooks/release.md) for the npm package and GitHub Release publishing steps.
+See also [docs/runbooks/release.md](docs/runbooks/release.md) for the plugin, npm package, and GitHub Release publishing steps.
 
 ## Versioning policy
 
@@ -105,7 +105,7 @@ Surface the breaking-change candidate list before drafting the final section. Sh
 
 ### 4. Bump versions
 
-Four files change every release:
+Seven version-bearing files change every release:
 
 | File | Field |
 |------|-------|
@@ -113,6 +113,14 @@ Four files change every release:
 | `Cargo.lock` | refresh via `cargo update --workspace` (no third-party drift) |
 | `npm/package.json` | `version` |
 | `server.json` | top-level `version` and `packages[0].version` |
+| `plugin/.claude-plugin/plugin.json` | `version` |
+| `plugin/.codex-plugin/plugin.json` | `version` |
+| `plugin/plugin.json` | `version` |
+
+`crates/orbit-core/assets/skills/orbit/` is the canonical skill source. After
+editing it, run `scripts/sync-plugin-skills.sh`; CI runs the same script with
+`--check` and rejects drift in the committed `plugin/skills/orbit/` package
+mirror, so the plugin tree is never maintained independently.
 
 The other `0.X.Y` matches in the repo (install-script doc comments, the website task pages, the Node engine pin in `website/package-lock.json`) are intentional — leave them.
 
@@ -150,10 +158,16 @@ context_files:
   - file:Cargo.lock
   - file:npm/package.json
   - file:server.json
+  - file:plugin/.claude-plugin/plugin.json
+  - file:plugin/.codex-plugin/plugin.json
+  - file:plugin/plugin.json
   - file:scripts/smoke-npm-install.sh
+  - file:scripts/smoke-plugin-install.sh
 ```
 
-Acceptance criteria: Cargo, npm, and `server.json` report the new version, Cargo.lock is refreshed without third-party drift, the CHANGELOG section is in place with the agreed structure, every confirmed breaking change appears under Breaking Changes, and the npm-install smoke script still drives this cycle's CLI non-interactively.
+Acceptance criteria: Cargo, npm, `server.json`, and all three plugin manifests
+report the new version; Cargo.lock is refreshed without third-party drift; the
+CHANGELOG section is in place; both npm and plugin install smokes pass.
 
 ### 7. Human approval
 
@@ -248,8 +262,8 @@ EOF
 
 Protection on `agent-main` exists only to prevent branch deletion
 (`allow_deletions: false`); merges are never gated on CI. CI failures are
-consumed asynchronously by the `qa-sweep` and `ci-failure-remediation`
-routines, which append remediation tasks to the queue.
+consumed asynchronously by the `qa-sweep` auto-task, which appends
+remediation tasks to the queue.
 
 If a release ever ships without the back-merge, drift compounds (N commits behind `main` after N skipped releases). Recover by either running the same back-merge above (resolves cleanly regardless of N) or, if `agent-main` has no in-flight work, reset it to `main` directly:
 

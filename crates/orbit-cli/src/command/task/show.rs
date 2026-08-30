@@ -130,6 +130,14 @@ impl Execute for TaskShowArgs {
             if !task.tags.is_empty() {
                 let _ = writeln!(out, "{} {}", bold("Tags:"), task.tags.join(", "));
             }
+            if !task.required_tools.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "{} {}",
+                    bold("Required Tools:"),
+                    task.required_tools.join(", ")
+                );
+            }
             if !task.external_refs.is_empty() {
                 let _ = writeln!(out, "{}", bold("External refs:"));
                 for external_ref in &task.external_refs {

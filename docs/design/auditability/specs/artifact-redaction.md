@@ -23,12 +23,11 @@ This is the author-facing inventory for the shipped artifact-write redactor. Red
 | `orbit.friction.add` | `body` | - | `model`, `during_task`, tags |
 | `orbit.friction.update` | `body` | - | `id`, status, tags |
 | `orbit.auto_task.add` / `orbit.auto_task.update` | `description`, `template.title`, `template.description`, `template.acceptance_criteria[]` | - | name, schedule, dedupe, template enums/tags |
-| `orbit.session_log.append` | `body` | - | kind, related task/run ids |
 | `orbit.docs.add` | - | - | DocsAdd only registers a validated repo-relative path; it does not persist document content. |
 
 Task and friction tags are taxonomy fields and pass through verbatim.
 
-The table establishes the artifact boundary: ADRs, tasks, frictions, auto-task definitions, and session-log entries are covered on their listed write operations. `DocsAdd` makes an explicit no-redaction decision because it only registers a checked path; registered docs remain ordinary repository files rather than a tool mutation primitive.
+The table establishes the artifact boundary: ADRs, tasks, frictions, and auto-task definitions are covered on their listed write operations. `DocsAdd` makes an explicit no-redaction decision because it only registers a checked path; registered docs remain ordinary repository files rather than a tool mutation primitive. Session-log writes are no longer a public tool mutation, so they are not in this inventory ([ORB-11097]).
 
 `policy_for_action` exhaustively matches `OrbitBuiltinAction`. Adding any builtin action therefore fails to compile until it receives either a field policy or an explicit no-redaction decision, instead of falling through to an unredacted default.
 

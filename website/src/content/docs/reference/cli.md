@@ -11,6 +11,7 @@ sidebar:
 |---------|---------|
 | `orbit init` | Initialize the global Orbit root, skills, and skill links. |
 | `orbit workspace` | Initialize and manage workspaces. |
+| `orbit workspace publication bind/show/rebind/remove` | Manage one owner-local binding to a dedicated task-publication repository; privacy remains operator-managed. |
 | `orbit config` | Show or update Orbit configuration. |
 | `orbit semantic` | Manage the local embedding companion: `install`, `uninstall`, `stats`, and `index`. |
 
@@ -23,6 +24,9 @@ sidebar:
 | `orbit run ship --mode local [task_id ...]` | Run the local-only task path for backlog or explicitly selected tasks. |
 | `orbit task` | Create, update, and manage tasks. |
 | `orbit task artifact put <task_id> <source_path>` | Store a UTF-8 file under a task's artifacts directory. |
+| `orbit task publication publish/status` | Explicitly publish an owned workspace snapshot or validate its recorded status; task mutation never publishes automatically. |
+| `orbit task publication inspect` | Validate and render a labelled repository snapshot without adopting it as live task state. |
+| `orbit task publication restore --confirm` | Deliberately restore same-authority task IDs into an empty destination; identical retries require a separate flag. |
 | `orbit search <query>` | Search tasks, docs, learnings, and ADRs; add `--hybrid` for task/doc vector ranking, use `orbit search similar <id>` for task neighbors, or `orbit search path <path>` for applicability lookup. |
 | `orbit docs` | List, show, add, index, and migrate the docs corpus. |
 | `orbit learning` | Create, inspect, update, sync, and prune project learnings. |

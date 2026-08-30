@@ -13,7 +13,6 @@ const RETIRED_AGENT_TOOL_NAMES: &[&str] = &[
     "github.pr.comment.reply",
     "github.pr.comments",
     "github.pr.create",
-    "github.pr.list",
     "github.pr.merge",
     "github.pr.review",
     "github.pr.review.comment",
@@ -59,12 +58,14 @@ fn unused_tools_are_not_registered_in_public_surface() {
     for removed in [
         "git.commit",
         "git.stage_paths",
-        "github.auth.status",
         "github.pr.checkout",
         "github.pr.checks",
         "github.pr.close",
         "github.repo.view",
         "net.http",
+        "orbit.session_log.append",
+        "orbit.session_log.list",
+        "orbit.session_log.resolve",
         "proc.which",
         "time.now",
         "time.sleep",
@@ -140,6 +141,62 @@ fn retired_agent_tools_are_absent_from_every_registry_surface_and_dispatch() {
     }
 }
 
+/// The read-only GitHub discovery surface a CI-remediation body depends on.
+///
+/// `github.pr.list` was retired with the write-side PR tools; it is back
+/// deliberately, as a read-only listing, because a body that cannot enumerate
+/// open pull-request heads cannot tell a current failure from a stale one.
+/// Nothing that mutates GitHub joined it.
+#[test]
+fn read_only_github_ci_discovery_is_registered_and_write_operations_are_not() {
+    let names = registered_tool_names();
+
+    for retained in [
+        "github.auth.status",
+        "github.pr.list",
+        "github.run.list",
+        "github.run.logs",
+        "github.run.view",
+    ] {
+        assert!(
+            names.contains(retained),
+            "CI discovery tool missing from the agent surface: {retained}"
+        );
+    }
+
+    for absent in [
+        "github.pr.checkout",
+        "github.pr.checks",
+        "github.pr.close",
+        "github.repo.view",
+    ] {
+        assert!(
+            !names.contains(absent),
+            "non-discovery github tool must stay unregistered: {absent}"
+        );
+    }
+}
+
+/// A bounded `github.run.logs` is the whole point of routing log reads through
+/// a tool: an unbounded one would hand a multi-megabyte runner log straight to
+/// the executing agent.
+#[test]
+fn run_logs_advertises_its_output_bound() {
+    let mut registry = ToolRegistry::new();
+    registry.register_builtins();
+
+    let schema = registry
+        .get_active_schema("github.run.logs")
+        .expect("github.run.logs schema");
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .any(|param| param.name == "max_bytes" && !param.required),
+        "github.run.logs must expose an optional output bound"
+    );
+}
+
 #[test]
 fn remote_discovery_is_not_registered_in_the_generic_tool_surface() {
     let mut registry = ToolRegistry::new();
@@ -166,9 +223,6 @@ fn workflow_critical_tools_remain_registered() {
         "orbit.pipeline.wait",
         "orbit.search",
         "orbit.workflow.ship",
-        "orbit.session_log.append",
-        "orbit.session_log.list",
-        "orbit.session_log.resolve",
         "orbit.workflow.run.show",
         "orbit.workflow.run.list",
         "orbit.workflow.run.resume",
@@ -339,6 +393,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "workspace",
             "acceptance_criteria",
             "tags",
+            "required_tools",
             "context_files",
             "priority",
             "complexity",
@@ -365,6 +420,13 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
     let schema = registry
         .get_schema("orbit.task.update")
         .expect("orbit.task.update schema");
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .all(|param| param.name != "required_tools"),
+        "required_tools is creation-only"
+    );
     let dependency_param = schema
         .parameters
         .iter()
@@ -410,6 +472,9 @@ fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
         "complexity",
         "created_at",
         "updated_at",
+        "relations",
+        "job_run_id",
+        "external_refs",
     ] {
         assert!(
             fields.description.contains(field),

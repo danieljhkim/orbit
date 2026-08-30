@@ -14,11 +14,20 @@ on:
   pull_request:
     paths:
       - "crates/orbit-exec/**"
+      # [ORB-11055] Child-runtime write-root inventory lives in orbit-core and
+      # is compiled into the SBPL profile the macOS sandbox job enforces.
+      - "crates/orbit-core/src/adapter/engine_host/v2_host/sandbox.rs"
+      - "crates/orbit-core/src/adapter/engine_host/v2_host/tests/sandbox.rs"
+      - "crates/orbit-core/src/adapter/engine_host/v2_host/tests/sandbox_nested.rs"
       # [ORB-10009] SBPL profiles are compiled from resolved policy rules, so
       # policy-evaluation changes can alter what the macOS sandbox enforces.
       - "crates/orbit-policy/**"
       - "crates/orbit-common/src/types/policy_def.rs"
       - "crates/orbit-common/src/utility/glob.rs"
+      # [ORB-11067] Managed-child logging must use the registry root authorized
+      # by the macOS sandbox rather than the provider-specific HOME.
+      - "crates/orbit-common/src/observability/logging.rs"
+      - "crates/orbit-common/src/observability/tests/logging.rs"
       # [ORB-10682] Darwin owner/cancellation liveness uses native libproc
       # state so unreaped zombies do not look like surviving work.
       - "crates/orbit-common/src/utility/process_identity.rs"
@@ -66,6 +75,14 @@ jobs:
       # apply-time tests rather than failing — never worse than the Linux gate.
       - name: Run orbit-exec sandbox tests (real sandbox-exec)
         run: cargo test -p orbit-exec --locked
+
+      # [ORB-11055] The nested `orbit.task.update` regression needs the CLI
+      # binary; the child-runtime inventory test lives in orbit-core.
+      - name: Build orbit CLI for nested sandbox regression
+        run: cargo build -p orbit-cli --locked --bin orbit
+
+      - name: Run orbit-core sandbox tests
+        run: cargo test -p orbit-core --locked sandbox
 
       # Linux cannot exercise Darwin's libproc zombie/group semantics. Keep
       # these filters aligned with the owner/liveness path triggers above.

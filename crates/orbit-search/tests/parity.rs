@@ -21,6 +21,7 @@ fn fixture_task(id: &str) -> Task {
         title: "Index this".to_string(),
         description: "Task description".to_string(),
         acceptance_criteria: vec!["First criterion".to_string()],
+        required_tools: Vec::new(),
         plan: "Plan body".to_string(),
         execution_summary: String::new(),
         context_files: Vec::new(),

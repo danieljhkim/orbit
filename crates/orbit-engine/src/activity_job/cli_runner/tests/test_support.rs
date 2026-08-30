@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
 
-use crate::context::CrewConfig;
+use crate::context::{CrewConfig, ResolvedActivityTools};
 use orbit_agent::loop_engine::audit::{AuditSink, LoopAuditEvent};
 use orbit_common::observability::logging::RedactingFields;
 #[cfg(target_os = "macos")]
@@ -242,6 +242,7 @@ pub(in crate::activity_job::cli_runner) struct TestHost {
     pub(in crate::activity_job::cli_runner) task_context: Option<Value>,
     pub(in crate::activity_job::cli_runner) workspace_root: Option<PathBuf>,
     pub(in crate::activity_job::cli_runner) orbit_registry_root: Option<String>,
+    pub(in crate::activity_job::cli_runner) orbit_workspace_selector: Option<String>,
 }
 
 impl TestHost {
@@ -254,6 +255,7 @@ impl TestHost {
             task_context: None,
             workspace_root: None,
             orbit_registry_root: None,
+            orbit_workspace_selector: None,
         }
     }
 }
@@ -293,6 +295,40 @@ impl RuntimeHost for TestHost {
         Ok(self.task_context.clone())
     }
 
+    fn resolve_activity_tools(
+        &self,
+        _task_ids: &[String],
+        baseline_tools: &[String],
+    ) -> Result<ResolvedActivityTools, DispatchError> {
+        let requested_tools = self
+            .task_context
+            .as_ref()
+            .and_then(|task| task.get("required_tools"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if requested_tools.is_empty() {
+            return Ok(ResolvedActivityTools {
+                requested_tools,
+                effective_tools: baseline_tools.to_vec(),
+            });
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let effective_tools = baseline_tools
+            .iter()
+            .chain(requested_tools.iter())
+            .filter(|tool| seen.insert((*tool).clone()))
+            .cloned()
+            .collect();
+        Ok(ResolvedActivityTools {
+            requested_tools,
+            effective_tools,
+        })
+    }
+
     fn agent_crew_config_for_input(
         &self,
         input: &Value,
@@ -322,6 +358,10 @@ impl RuntimeHost for TestHost {
 
     fn orbit_registry_root(&self) -> Option<String> {
         self.orbit_registry_root.clone()
+    }
+
+    fn orbit_workspace_selector(&self) -> Option<String> {
+        self.orbit_workspace_selector.clone()
     }
 }
 

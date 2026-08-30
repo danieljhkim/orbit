@@ -26,11 +26,21 @@ use super::super::super::dispatcher::DispatchError;
 use super::super::super::dispatcher::ResolvedSandbox;
 use super::super::super::sqlite_sink::V2SqliteSink;
 use super::super::super::workspace::{WorktreeBoundaryGuard, validate_declared_worktree_pair};
+use super::super::orchestrator::resolved_activity_fs_profile_name;
 use super::super::run_cli_backend;
 use super::test_support::{
     RecordingSink, TestHost, capture_events, test_agent_loop_spec, test_agent_loop_spec_for,
     write_executable,
 };
+
+#[test]
+fn cli_activity_fs_profile_resolver_preserves_named_profile() {
+    assert_eq!(resolved_activity_fs_profile_name(None), "unrestricted");
+    assert_eq!(
+        resolved_activity_fs_profile_name(Some("implementer")),
+        "implementer"
+    );
+}
 
 #[test]
 fn run_cli_backend_finished_audit_event_keeps_stdout_stderr_blob_refs() {
@@ -876,6 +886,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -936,6 +947,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1006,6 +1018,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1116,6 +1129,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1185,6 +1199,7 @@ fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() 
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2985,6 +3000,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -3058,6 +3074,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3135,6 +3152,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3189,6 +3207,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3244,6 +3263,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3269,21 +3289,21 @@ fi
     );
 }
 
-/// [ORB-10909] CLI-runner dispatch must inject ORBIT_ROOT from the host so a
+/// [ORB-10909] CLI-runner dispatch must inject the registry locator from the host so a
 /// spawned agent whose HOME does not contain the Orbit registry can still
 /// resolve `orbit tool run` against the dispatching run's root.
 #[test]
-fn run_cli_backend_injects_orbit_root_from_host() {
+fn run_cli_backend_injects_managed_registry_root_from_host() {
     let temp = tempdir().expect("tempdir");
     let script = temp.path().join("grok");
     write_executable(
         &script,
         r#"#!/bin/sh
 cat > /dev/null
-if [ "$ORBIT_ROOT" = "/resolved/orbit/root" ]; then
+if [ "$ORBIT_REGISTRY_ROOT" = "/resolved/orbit/root" ] && [ -z "$ORBIT_ROOT" ] && [ "$ORBIT_WORKSPACE" = "ws_orbit" ]; then
   printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
 else
-  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"orbit_root_missing","message":"ORBIT_ROOT was not injected","details":null}}'
+  printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"registry_root_missing","message":"managed registry routing was not isolated","details":null}}'
   exit 1
 fi
 "#,
@@ -3304,6 +3324,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: Some("/resolved/orbit/root".to_string()),
+        orbit_workspace_selector: Some("ws_orbit".to_string()),
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3324,9 +3345,10 @@ fi
 
 /// [ORB-10980] A managed run executes in a linked worktree whose workspace and
 /// worktree-local `.orbit` state roots are mounted read-only. The child must be
-/// pinned to the authoritative registry root the host reports, and the existing
+/// routed to the authoritative registry root the host reports without turning
+/// that locator into an explicit workspace/data-root pin. The existing
 /// binary/PATH pinning plus managed provenance bindings must survive alongside
-/// it — those are what let the documented `orbit tool run` fallback work at all.
+/// it — those are what let the documented `orbit tool run` fallback work.
 #[test]
 fn run_cli_backend_injects_registry_root_not_worktree_state_root() {
     let temp = tempdir().expect("tempdir");
@@ -3359,17 +3381,20 @@ fail() {{
   printf '%s\n' "{{\"schemaVersion\":1,\"status\":\"failed\",\"error\":{{\"code\":\"$1\",\"message\":\"$1\",\"details\":null}}}}"
   exit 1
 }}
-[ "$ORBIT_ROOT" = "{registry}" ] || fail orbit_root_not_registry
-[ "$ORBIT_ROOT" = "{workspace_state}" ] && fail orbit_root_is_workspace_state_root
-[ "$ORBIT_ROOT" = "{worktree_state}" ] && fail orbit_root_is_worktree_state_root
+[ "$ORBIT_REGISTRY_ROOT" = "{registry}" ] || fail registry_root_not_authoritative
+[ -z "$ORBIT_ROOT" ] || fail operator_root_leaked_into_managed_child
+[ "$ORBIT_WORKSPACE" = "ws_orbit" ] || fail workspace_selector_missing
+[ "$ORBIT_WORKSPACE" = "daniel-e9c542" ] && fail workspace_selector_is_worktree_identity
+[ "$ORBIT_REGISTRY_ROOT" = "{workspace_state}" ] && fail registry_root_is_workspace_state_root
+[ "$ORBIT_REGISTRY_ROOT" = "{worktree_state}" ] && fail registry_root_is_worktree_state_root
 [ -n "$ORBIT_BIN" ] || fail orbit_bin_missing
 [ -n "$PATH" ] || fail path_missing
 [ "$ORBIT_RUN_ID" = "job-grok-registry-root" ] || fail run_id_missing
 [ "$ORBIT_MANAGED_RUN_CONTEXT" = "1" ] || fail managed_run_context_missing
 [ "$ORBIT_TASK_ACTOR_KIND" = "agent" ] || fail actor_kind_missing
-[ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn" ] || fail activity_tools_missing
+[ "$ORBIT_ACTIVITY_TOOLS" = "orbit.task.show,proc.spawn,github.run.list" ] || fail activity_tools_missing
 [ "$ORBIT_PROC_ALLOWED_PROGRAMS" = "git,rg" ] || fail proc_programs_missing
-[ "$ORBIT_ACTIVITY_FS_PROFILE" = "implementer" ] || fail fs_profile_missing
+[ "$ORBIT_ACTIVITY_FS_PROFILE" = "unrestricted" ] || fail fs_profile_missing
 [ "$ORBIT_ACTIVE_TASK_ID" = "ORB-10980" ] || fail active_task_missing
 printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"}},"error":null}}'
 "#,
@@ -3391,22 +3416,28 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         executor_args: Vec::new(),
         provider_config: HashMap::new(),
         sandbox: None,
-        task_context: None,
+        task_context: Some(serde_json::json!({
+            "id": "ORB-10980",
+            "required_tools": ["github.run.list"]
+        })),
         workspace_root: None,
         orbit_registry_root: Some(registry_root.display().to_string()),
+        orbit_workspace_selector: Some("ws_orbit".to_string()),
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
     spec.tools = vec!["orbit.task.show".to_string(), "proc.spawn".to_string()];
     spec.proc_allowed_programs = Some(vec!["git".to_string(), "rg".to_string()]);
+    let ambient_root = registry_root.to_string_lossy().into_owned();
+    let _ambient = orbit_common::test_env::scoped([("ORBIT_ROOT", Some(ambient_root.as_str()))]);
 
     let outcome = run_cli_backend(
         &host,
         &spec,
         "job-grok-registry-root",
-        audit,
+        audit.clone(),
         &serde_json::json!({"prompt": "hi", "task_id": "ORB-10980"}),
-        Some("implementer"),
+        None,
     )
     .expect("run succeeds");
 
@@ -3424,6 +3455,29 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         "managed child rejected its Orbit environment: {:?}",
         outcome.output
     );
+    let events = audit.events_snapshot().expect("audit snapshot");
+    let delegated = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            V2AuditEventKind::ToolAllowlistHarnessDelegated {
+                task_id,
+                task_ids,
+                requested_tools,
+                effective_tools,
+                tools,
+                ..
+            } => Some((task_id, task_ids, requested_tools, effective_tools, tools)),
+            _ => None,
+        })
+        .expect("tool allowlist audit event");
+    assert_eq!(delegated.0.as_deref(), Some("ORB-10980"));
+    assert_eq!(delegated.1, &["ORB-10980"]);
+    assert_eq!(delegated.2, &["github.run.list"]);
+    assert_eq!(
+        delegated.3,
+        &["orbit.task.show", "proc.spawn", "github.run.list"]
+    );
+    assert_eq!(delegated.4, delegated.3);
 }
 
 /// AGENT_MODEL/AGENT_TASK must be omitted (unset), not set to an empty

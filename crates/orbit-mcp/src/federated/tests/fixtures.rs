@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{TimeZone, Utc};
 use orbit_common::OrbitError;
-use orbit_types::tool::mcp_advertised_tool_name;
+use orbit_types::tool::{ToolSessionContext, mcp_advertised_tool_name};
 use orbit_types::workspace::{Workspace, WorkspaceStatus};
 use serde_json::Value;
 
@@ -19,10 +19,11 @@ pub(super) const OWNER_MACHINE: &str = "hm_owner";
 pub(super) const REPLICA_MACHINE: &str = "hm_replica";
 
 pub(super) fn destination(ssh: &str, machine_id: &str) -> Destination {
-    Destination {
-        ssh: ssh.to_string(),
-        machine_id: machine_id.to_string(),
-    }
+    Destination::ssh(ssh, machine_id)
+}
+
+pub(super) fn local_destination(machine_id: &str, host_id: &str) -> Destination {
+    Destination::local(machine_id, host_id)
 }
 
 pub(super) fn workspace(id: &str, owner_machine_id: Option<&str>) -> Workspace {
@@ -224,7 +225,12 @@ impl RoutedSession for ScriptedRoute {
         Ok(self.tools.clone())
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         self.log.lock().expect("call log").push(RoutedCall {
             machine_id: self.machine_id.clone(),
             tool: name.to_string(),

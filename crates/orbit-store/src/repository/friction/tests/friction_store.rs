@@ -72,6 +72,16 @@ fn identical_friction_ids_in_two_workspaces_stay_distinct() {
     assert_eq!(isolated.record.body, "Second workspace report");
     assert_eq!(one.list(&FrictionListFilter::default()).unwrap().len(), 1);
     assert_eq!(two.list(&FrictionListFilter::default()).unwrap().len(), 1);
+    assert_eq!(
+        one.foreign_owners_of(&first.record.id)
+            .expect("owners from one"),
+        vec!["ws_two".to_string()]
+    );
+    assert_eq!(
+        two.foreign_owners_of(&second.record.id)
+            .expect("owners from two"),
+        vec!["ws_one".to_string()]
+    );
 }
 
 /// The bound this task exists to establish: a fixed-size page decodes exactly

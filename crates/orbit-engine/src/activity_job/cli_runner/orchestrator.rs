@@ -9,6 +9,7 @@ use orbit_agent::{
 };
 use orbit_common::process::identity::process_start_identity_token;
 use orbit_common::security::redaction::{PatternRedactor, redact_sensitive_env_text};
+use orbit_types::policy::UNRESTRICTED_FS_PROFILE;
 use orbit_types::workflow::activity_job::{AgentLoopSpec, V2AuditEventKind};
 use serde_json::Value;
 
@@ -24,7 +25,7 @@ use super::argv::{
 };
 use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
-    task_id_from_input,
+    task_id_from_input, task_ids_from_input,
 };
 use super::spawn::{
     linux_bwrap_failed_write_diagnostic, macos_keychain_auth_diagnostic, orbit_tool_env,
@@ -57,11 +58,19 @@ pub fn run_cli_backend(
     };
     let wall_clock_timeout = Duration::from_secs(timeout_seconds);
 
+    let task_ids = task_ids_from_input(input);
+    let task_id = task_id_from_input(input);
+    let activity_tools = host.resolve_activity_tools(&task_ids, &spec.tools)?;
+
     // §6 allowlist-advisory event — emitted once per invocation before the
     // subprocess starts so a reviewer can see the enforcement gap at a glance.
     audit.emit_lossy(V2AuditEventKind::ToolAllowlistHarnessDelegated {
         provider: provider.clone(),
-        tools: spec.tools.clone(),
+        task_id: task_id.map(ToOwned::to_owned),
+        task_ids,
+        requested_tools: activity_tools.requested_tools.clone(),
+        effective_tools: activity_tools.effective_tools.clone(),
+        tools: activity_tools.effective_tools.clone(),
     });
 
     let task_ctx = host.task_context_for_agent_input(input)?;
@@ -98,7 +107,14 @@ pub fn run_cli_backend(
         .map_err(|error| DispatchError::CliInvocationPermanent(error.message))?;
     let sandbox = prepared_sandbox.effective;
 
-    let envelope_json = cli_agent_envelope_json(spec, run_id, input, task_ctx.as_ref())?;
+    let envelope_json = cli_agent_envelope_json(
+        spec,
+        run_id,
+        input,
+        task_ctx.as_ref(),
+        &activity_tools.requested_tools,
+        &activity_tools.effective_tools,
+    )?;
 
     let mut provider_config = host.provider_cli_config(&provider);
 
@@ -201,7 +217,6 @@ pub fn run_cli_backend(
         sandbox_read_enforcement: Some(prepared_sandbox.metadata.read_enforcement.clone()),
     });
 
-    let task_id = task_id_from_input(input);
     // ADR-0182: external CLI agents get the same active-task hook binding as
     // direct-agent executions. The AGENT_* fields preserve ORB-10342's
     // commit-telemetry contract and omit unknown model/task values.
@@ -218,37 +233,50 @@ pub fn run_cli_backend(
         agent_task_id: task_id,
     });
     dispatch_env.push(("ORBIT_TASK_ACTOR_KIND".to_string(), "agent".to_string()));
-    if !spec.tools.is_empty() {
-        dispatch_env.push(("ORBIT_ACTIVITY_TOOLS".to_string(), spec.tools.join(",")));
-    }
+    dispatch_env.push((
+        "ORBIT_ACTIVITY_TOOLS".to_string(),
+        activity_tools.effective_tools.join(","),
+    ));
     if let Some(programs) = spec.proc_allowed_programs.as_deref() {
         dispatch_env.push((
             "ORBIT_PROC_ALLOWED_PROGRAMS".to_string(),
             programs.join(","),
         ));
     }
-    if let Some(profile) = fs_profile {
-        dispatch_env.push(("ORBIT_ACTIVITY_FS_PROFILE".to_string(), profile.to_string()));
-    }
+    dispatch_env.push((
+        "ORBIT_ACTIVITY_FS_PROFILE".to_string(),
+        resolved_activity_fs_profile_name(fs_profile).to_string(),
+    ));
     dispatch_env.extend(
         orbit_tool_env().map_err(|error| DispatchError::CliInvocationPermanent(error.message))?,
     );
-    // Spawned CLI agents resolve the Orbit registry from $HOME unless
-    // ORBIT_ROOT is set. A dispatching run already knows its registry; inject
-    // it so a provider whose HOME is a tool-specific directory (e.g. ~/.codex)
-    // can still reach `orbit tool run`. [ORB-10909]
+    // Spawned CLI agents resolve the Orbit registry from $HOME unless a
+    // managed registry locator is set. A dispatching run already knows its
+    // registry; inject it so a provider whose HOME is a tool-specific
+    // directory (e.g. ~/.codex) can still reach `orbit tool run`. [ORB-10909]
     //
     // The injected value is the authoritative shared registry root, never the
     // dispatching checkout's workspace `.orbit`. A managed run's workspace
     // state root is mounted read-only inside the sandbox and does not own the
-    // task store, so pinning a child there breaks the documented CLI fallback
-    // before any task work can start. Workspace routing is unchanged: a
-    // mutation still needs its own workspace selector and fails closed
-    // without a resolvable one. [ORB-10980]
-    if let Some(registry_root) = host.orbit_registry_root()
-        && !dispatch_env.iter().any(|(key, _)| key == "ORBIT_ROOT")
-    {
-        dispatch_env.push(("ORBIT_ROOT".to_string(), registry_root));
+    // task store. `ORBIT_ROOT` cannot carry this contract because it is the
+    // operator's explicit data-root override and deliberately pins global,
+    // shared, and local roots together. The managed-only locator changes only
+    // the global registry. Workspace selection is the separate logical
+    // `ORBIT_WORKSPACE` selector below, not the linked-worktree cwd.
+    // [ORB-10980] [ORB-11066] [ORB-11117]
+    let registry_locator_injected = if let Some(registry_root) = host.orbit_registry_root() {
+        dispatch_env.push(("ORBIT_REGISTRY_ROOT".to_string(), registry_root));
+        true
+    } else {
+        false
+    };
+    // Carry the trusted logical `ws_*` identity so nested `orbit tool run`
+    // and `orbit mcp serve` do not rediscover ownership from a linked-worktree
+    // cwd. The child honors this only together with managed-run provenance;
+    // an explicit `--workspace` or tool-payload selector still wins and still
+    // fails closed. [ORB-11117]
+    if let Some(workspace) = host.orbit_workspace_selector() {
+        dispatch_env.push(("ORBIT_WORKSPACE".to_string(), workspace));
     }
     // The child's whole environment is composed here and applied to a cleared
     // one by every launcher, so the `[execution.env]` allowlist governs what an
@@ -258,6 +286,13 @@ pub fn run_cli_backend(
     // this run's identity and tool pinning override any same-named value the
     // allowlist forwarded from an outer process. [ORB-10917]
     let mut child_env = host.agent_subprocess_environment(invocation.required_env_vars);
+    if registry_locator_injected {
+        // A host process may itself have been launched with an operator
+        // `ORBIT_ROOT`. Do not reinterpret that pinned-data-root input as the
+        // managed child's workspace root; the authoritative registry locator
+        // above supersedes it for this execution envelope. [ORB-11066]
+        child_env.retain(|(key, _)| key != "ORBIT_ROOT");
+    }
     child_env.extend(dispatch_env);
     // [ORB-10496] Record the provider child's PID the moment it exists. Emitted
     // through the same writer, so it is persisted (and therefore readable by
@@ -607,6 +642,10 @@ pub fn run_cli_backend(
             trace,
         }),
     })
+}
+
+pub(super) fn resolved_activity_fs_profile_name(fs_profile: Option<&str>) -> &str {
+    fs_profile.unwrap_or(UNRESTRICTED_FS_PROFILE)
 }
 
 /// Append the Orbit-owned write-denial attribution to a step message that was

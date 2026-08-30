@@ -3,8 +3,8 @@ summary: "Policy & Sandboxing — Design"
 type: design
 title: "Policy & Sandboxing — Design"
 owner: claude
-last_updated: 2026-08-15
-last_validated: 2026-08-15
+last_updated: 2026-08-30
+last_validated: 2026-08-30
 status: Draft
 feature: policy-sandbox
 doc_role: design
@@ -89,7 +89,7 @@ What remains:
 - Historical audit/import fixtures that name retired `fs.*` tools. Those strings stay parseable; a removed tool name is not a deserialization error.
 - `ctx.fs_profile` / `ctx.policy_engine`, which the CLI sandbox compiler still uses to compile OS write confinement.
 
-**Scope.** Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
+**Scope.** Agent dispatch spawns Claude Code, Codex CLI, Gemini, or another harness via `cli_runner.rs`, emits `tool_allowlist.harness_delegated`, and trusts that harness for tool allowlists — the engine-driven loop that enforced allowlists in-process was retired in [ORB-10801]. For task-backed dispatch, [ORB-11069] composes the effective allowlist as the deduplicated union of the activity baseline and exact `task.required_tools` before launch. Those requirements are normalized and fixed when the task is created; existing-task updates cannot change that authority. This composition changes only allowlist membership: caller role, registered host capability, tool-specific policy, filesystem policy, subprocess allowlists, and external authentication still run and may deny the tool independently. On macOS, executors declaring `sandbox: macos-sandbox-exec` also get the OS-level wrapper in §7, so `fsProfile:` can still narrow CLI filesystem writes.
 
 On Linux, shipped agent executors declare `linux-bwrap`. The wrapper enforces writes from the resolved `modify` policy but deliberately records reads as `read_delegated`; this is not general read-allowlist parity.
 
@@ -143,9 +143,9 @@ The compiled macOS profile denies by default, allows broad reads required by age
 - Claude `$HOME/.claude.json` sibling files (`.claude.json`, `.claude.json.lock`, atomic-write `.claude.json.tmp.<pid>.<ms_ts>`) when `CLAUDE_CONFIG_DIR` is unset, since these live at the home root rather than under `$HOME/.claude/` ([T20260508-13])
 - positive `modify` roots from the resolved profile
 - Codex side-write roots from runtime provider config, appended after policy denies so workflow state remains writable under the outer sandbox
-- narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/frictions/**`, workspace audit/logs, and workspace semantic DB sidecars
+- narrow child Orbit runtime roots appended by the v2 host after policy denies: global logs, global audit, global `orbit.db*`, global tasks, workspace `.orbit/tasks/**`, workspace `.orbit/frictions/**`, workspace audit/logs, and workspace semantic DB sidecars
 
-The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact writes under `.orbit/tasks/**`, friction reporting under `.orbit/frictions/**`, and startup/runtime audit, log, semantic-index, and global database writes. Generic agent-callable state writes were removed in [ORB-10738]; graph write roots and every unlisted or future store remain outside this inventory.
+The child Orbit runtime roots are deliberately narrower than the workspace `.orbit` tree. They cover stores used by currently activity-exposed Orbit write tools: task/review/artifact writes under `.orbit/tasks/**`, friction reporting under `.orbit/frictions/**`, and startup/runtime audit (workspace and global `{root}/state/audit/**`), log, semantic-index, and global database writes. Nested `orbit.*` writes initialize the global audit store before the tool action, so omitting `{global}/state/audit/**` surfaces as `file-write-create ~/.orbit/state/audit` under `sandbox-exec` ([ORB-11055]). The managed CLI runner supplies that global root through `ORBIT_REGISTRY_ROOT`, which is trusted only together with managed-run provenance and never participates in workspace root resolution. Nested tool calls receive the logical workspace as `ORBIT_WORKSPACE` on the same envelope so they do not infer durable ownership from the linked-worktree cwd ([ORB-11117]). It deliberately does not reuse `ORBIT_ROOT`: that remains the operator's explicit pinned-data-root contract, while a managed linked-worktree child continues to resolve shared/local workspace roots through git and the registered checkout. Consequently global registry bootstrap cannot create workspace-only `state/job-runs`, diagnostics, scoreboard, worktrees, or knowledge directories ([ORB-11066]). Generic agent-callable state writes were removed in [ORB-10738]; graph write roots and every unlisted or future store remain outside this inventory.
 
 `agent_implement` also exposes `orbit.adr.add` and `orbit.adr.update` ([ORB-10596]). On Linux, only the active managed worktree's `.orbit/adrs/proposed` and `.orbit/adrs/.locks` directories are bind-mounted writable after the enclosing worktree `.orbit/**` read-only mount; Accepted/Superseded ADRs and learning, task, state, and unknown local stores remain read-only. Allocation still uses the workspace-shared semantic database and `.id_alloc.lock`, so simultaneous worktrees serialize ID selection while each Proposed body lands under `<job-worktree>/.orbit/adrs/proposed/<id>/`. The allocator records that worktree-relative body path, allowing an orchestrator runtime to resolve and search it as a federated artifact while the worktree is live. macOS already re-allows the active job worktree as a whole after the policy deny, so this change adds no macOS SBPL allowance and changes no policy YAML.
 

@@ -1,8 +1,8 @@
 schema_version: 2
 contract: orbit-mcp-federated
 feature_status: Draft
-last_updated: 2026-08-24
-last_validated: 2026-08-24
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 
 source_of_truth:
   design: docs/design/federated-mcp/2_design.md
@@ -15,6 +15,9 @@ source_of_truth:
 
 launch:
   destinations_file: ~/.orbit/mcp-destinations.toml
+  local_membership: implicit; the accepting machine is always included and needs no destination row
+  missing_or_empty_destinations_file: valid local-only federated server
+  explicit_local_row: collapse to one in-process route for that machine_id; do not duplicate selectors
   argv: orbit mcp serve --mode federated
   registration:
     command: orbit mcp init --federated
@@ -26,7 +29,7 @@ launch:
 
 federated_namespace_exception:
   v1_invariant: one direct byte-transparent SSH stdio hop; no Orbit process relays onward
-  exception: the federated mux inspects MCP calls and relays them to the destination encoded in the host-qualified selector
+  exception: the federated mux inspects MCP calls and delivers them to the destination encoded in the host-qualified selector (in-process when that destination is the accepting machine; otherwise over SSH)
   scope: orbit mcp serve --mode federated only
   unchanged_v1_paths:
     - orbit mcp serve
@@ -77,7 +80,9 @@ validation:
   registration_argv: crates/orbit-cli/src/command/mcp/setup/providers/tests/simple_json.rs
   config_and_selector: crates/orbit-mcp/src/federated/tests/config.rs
   aggregate_list: crates/orbit-mcp/src/federated/tests/host.rs
+  local_membership: crates/orbit-mcp/src/federated/tests/local.rs
   fail_closed_routes: crates/orbit-mcp/src/federated/tests/route.rs
+  federated_serve: crates/orbit-cli/tests/mcp_roundtrip.rs
   capability_classes: crates/orbit-mcp/src/federated/tests/capability.rs
 
 task_references:

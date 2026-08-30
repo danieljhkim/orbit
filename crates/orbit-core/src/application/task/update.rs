@@ -191,6 +191,13 @@ impl OrbitRuntime {
                 let effective_plan = params.plan.as_deref().unwrap_or(task.plan.as_str());
                 ensure_task_has_execution_plan(id, effective_plan)?;
             }
+            if target_status == TaskStatus::Done && task.status != TaskStatus::Done {
+                let mut preview = task.clone();
+                if let Some(relations) = &params.relations {
+                    preview.relations = relations.clone();
+                }
+                self.ensure_resolves_are_workspace_local(&preview)?;
+            }
         }
 
         if task.status == TaskStatus::InProgress && params.status == Some(TaskStatus::Review) {

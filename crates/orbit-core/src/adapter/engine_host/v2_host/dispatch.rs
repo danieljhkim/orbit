@@ -20,7 +20,8 @@ use crate::runtime::task::locks::{
 };
 
 use super::{
-    backlog_exclusion, pipeline_actions, scan_unresolved, task_pilot, triage, workspace_auto,
+    backlog_exclusion, ci_failure_tasks, pipeline_actions, scan_unresolved, task_pilot, triage,
+    workspace_auto,
 };
 
 /// Whether `action` is dispatchable by this runtime — the capability probe
@@ -184,6 +185,18 @@ pub(crate) fn run_deterministic(
             Ok(serde_json::json!({
                 "slept_seconds": started_at.elapsed().as_secs_f64(),
             }))
+        }
+        // Turn one host-collected CI evidence snapshot into ordinary backlog
+        // bug tasks [ORB-11107]. All GitHub access already happened in the
+        // engine-private `collect_ci_evidence` step; this action only reads
+        // that JSON and writes tasks.
+        CoreDeterministicAction::FileCiFailureTasks => {
+            ci_failure_tasks::file_ci_failure_tasks(runtime, input).map_err(|error| {
+                DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: error.to_string(),
+                }
+            })
         }
         // Fire every due, enabled auto-task definition and mint a task from
         // its template [ORB-10149]. Reads definitions from this workspace's
@@ -364,10 +377,12 @@ pub(crate) fn run_deterministic(
         CoreDeterministicAction::InvokeDetached => {
             pipeline_actions::invoke_detached(runtime, action, input, tool_context)
         }
-        // Fail a workflow if one or more child pipeline wait results did not
-        // reach `succeeded`.
+        // Fail a workflow if child wait results did not reach `succeeded`, or
+        // apply the explicit workspace-sequencer recording policy.
         CoreDeterministicAction::PipelineSuccessGuard => {
-            pipeline_actions::pipeline_success_guard(action, input)
+            let output = pipeline_actions::pipeline_success_guard(action, input)?;
+            pipeline_actions::record_pipeline_results_audit(runtime, action, input, &output)?;
+            Ok(output)
         }
         // Post-loop gate signal: the admission window never opened in
         // time. Emits a `gate.starvation` audit event with task_ids and

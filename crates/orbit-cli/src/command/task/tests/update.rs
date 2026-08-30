@@ -82,3 +82,20 @@ fn task_update_complexity_uses_add_spellings() {
         assert_eq!(args.complexity.expect("complexity").to_string(), complexity);
     }
 }
+
+#[test]
+fn task_update_rejects_required_tools() {
+    let result = Cli::try_parse_from([
+        "orbit",
+        "task",
+        "update",
+        "ORB-00001",
+        "--required-tools",
+        "proc.spawn,orbit.task.show",
+    ]);
+    let Err(error) = result else {
+        panic!("required tools are creation-only");
+    };
+
+    assert!(error.to_string().contains("--required-tools"), "{error}");
+}

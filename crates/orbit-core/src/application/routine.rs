@@ -35,6 +35,10 @@ pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/routines/auto_task_scheduler.yaml"),
     ),
     (
+        "ci_failure_sweep",
+        include_str!("../../assets/routines/ci_failure_sweep.yaml"),
+    ),
+    (
         "task_triage",
         include_str!("../../assets/routines/task_triage.yaml"),
     ),
@@ -150,6 +154,7 @@ mod tests {
 
         for (stem, target) in [
             ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
+            ("ci_failure_sweep", "ci_failure_sweep_pipeline"),
             ("task_triage", "task_triage_pipeline"),
             ("task_pilot", "task_pilot_pipeline"),
             ("ship_sweep", "workspace_ship_pipeline"),
@@ -207,6 +212,22 @@ mod tests {
         assert!(!gc.enabled);
         assert_eq!(gc.policy.overlap, OverlapPolicy::Forbid);
         assert_eq!(gc.trigger.cron, "35 * * * *");
+
+        // The CI-failure sweep is hourly and must not stack with any other
+        // shipped default: two schedules on the same minute would have the
+        // seeded routines contend for the same host on every fire.
+        let sweep = std::fs::read_to_string(routines_dir.join("ci_failure_sweep.yaml"))
+            .expect("read CI-failure sweep routine");
+        let sweep = parse_routine_yaml(&sweep).expect("CI-failure sweep routine parses");
+        assert!(!sweep.enabled);
+        assert_eq!(sweep.trigger.cron, "5 * * * *");
+        assert_ne!(sweep.trigger.cron, triage.trigger.cron);
+        assert_eq!(
+            sweep.trigger.missed_run,
+            orbit_types::workflow::MissedRunPolicy::Skip
+        );
+        assert_eq!(sweep.policy.overlap, OverlapPolicy::Forbid);
+        parse_cron(&sweep.trigger.cron).expect("CI-failure sweep cron parses");
     }
 
     #[test]

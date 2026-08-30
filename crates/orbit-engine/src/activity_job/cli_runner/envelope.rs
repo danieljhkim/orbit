@@ -11,6 +11,8 @@ pub(super) fn cli_agent_envelope_json(
     run_id: &str,
     input: &Value,
     task_ctx: Option<&Value>,
+    requested_tools: &[String],
+    effective_tools: &[String],
 ) -> Result<Vec<u8>, DispatchError> {
     let mut envelope = serde_json::Map::new();
     envelope.insert("schemaVersion".to_string(), Value::from(1));
@@ -26,8 +28,14 @@ pub(super) fn cli_agent_envelope_json(
     envelope.insert("run_id".to_string(), Value::String(run_id.to_string()));
     envelope.insert(
         "tools".to_string(),
-        serde_json::to_value(&spec.tools)
+        serde_json::to_value(effective_tools)
             .map_err(|err| DispatchError::CliInvocationFailed(format!("serialize tools: {err}")))?,
+    );
+    envelope.insert(
+        "required_tools".to_string(),
+        serde_json::to_value(requested_tools).map_err(|err| {
+            DispatchError::CliInvocationFailed(format!("serialize required tools: {err}"))
+        })?,
     );
     envelope.insert(
         "model".to_string(),
@@ -147,4 +155,47 @@ pub(in crate::activity_job) fn task_id_from_input(input: &Value) -> Option<&str>
                 .and_then(|items| items.iter().find_map(Value::as_str))
                 .and_then(non_empty)
         })
+}
+
+pub(in crate::activity_job) fn task_ids_from_input(input: &Value) -> Vec<String> {
+    if let Some(task_id) = input
+        .get("task_id")
+        .and_then(Value::as_str)
+        .filter(|task_id| !task_id.is_empty())
+    {
+        return vec![task_id.to_string()];
+    }
+    if let Some(task_id) = input
+        .get("task")
+        .and_then(|task| task.get("id"))
+        .and_then(Value::as_str)
+        .filter(|task_id| !task_id.is_empty())
+    {
+        return vec![task_id.to_string()];
+    }
+
+    let values = input
+        .get("task_ids")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty())
+        .map(Vec::as_slice)
+        .or_else(|| {
+            input
+                .get("candidates")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+        })
+        .unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    values
+        .iter()
+        .filter_map(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("task_id").and_then(Value::as_str))
+        })
+        .filter(|task_id| !task_id.is_empty())
+        .filter(|task_id| seen.insert((*task_id).to_string()))
+        .map(str::to_string)
+        .collect()
 }

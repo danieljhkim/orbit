@@ -183,7 +183,11 @@ impl FederatedMcpHost {
         // reaches the destination, so its failure is the destination's answer
         // (`RemoteTool`) or a post-dispatch ambiguity (`OutcomeUnknown`) —
         // never a delivery miss the caller should retry [ORB-11023].
-        session.call_tool(name, destination_arguments(input, parsed.workspace_id()))
+        session.call_tool(
+            name,
+            destination_arguments(input, parsed.workspace_id()),
+            session_context,
+        )
     }
 }
 
@@ -226,9 +230,10 @@ fn federated_workspace_list_definition() -> McpToolDefinition {
     McpToolDefinition::new(
         ToolSchema {
             name: FEDERATED_WORKSPACE_LIST_TOOL.to_string(),
-            description: "List every configured destination's workspaces as live descriptors, \
-                          including destinations that are unreachable right now. Copy a row's \
-                          `selector` to address that workspace; do not parse or construct it."
+            description: "List the accepting machine's workspaces together with every configured \
+                          remote destination's workspaces as live descriptors, including remotes \
+                          that are unreachable right now. Copy a row's `selector` to address that \
+                          workspace; do not parse or construct it."
                 .to_string(),
             parameters: Vec::new(),
             builtin: true,
@@ -248,7 +253,9 @@ fn confirm_pinned_identity(
     }
     Err(OrbitError::UnreachableDestination(format!(
         "'{}' is configured as machine '{}' but answered as '{}'",
-        destination.ssh, destination.machine_id, snapshot.machine_id
+        destination.host_display(),
+        destination.machine_id,
+        snapshot.machine_id
     )))
 }
 

@@ -12,7 +12,6 @@ use super::activity_v2::{ActivityV2, ActivityV2Spec, AgentLoopSpec};
 /// set grows deliberately and every reviewer sees the full scope.
 pub const V2_TOOL_WILDCARD_ROOTS: &[&str] = &[
     "orbit.friction.",
-    "orbit.session_log.",
     "orbit.task.",
     "orbit.state.",
     "orbit.semantic.",

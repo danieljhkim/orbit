@@ -30,6 +30,20 @@ pub(crate) fn managed_run_context_from_env() -> bool {
     managed_run_context_run_id_from_env().is_some()
 }
 
+/// Logical workspace selector carried by a managed child (`ORBIT_WORKSPACE`).
+///
+/// Honored only together with the managed-run trust boundary (marker + run
+/// id). A standalone process that happens to inherit the variable must not
+/// treat it as a workspace binding, and an empty value is no binding.
+pub fn managed_workspace_selector_from_env() -> Option<String> {
+    if !managed_run_context_from_env() {
+        return None;
+    }
+    std::env::var("ORBIT_WORKSPACE")
+        .ok()
+        .and_then(|value| non_empty(&value).map(ToOwned::to_owned))
+}
+
 /// Extract the singular task id from run/activity input shapes that are meant
 /// to identify exactly one task.
 pub(crate) fn singular_task_id_from_input(input: &Value) -> Option<&str> {

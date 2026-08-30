@@ -158,6 +158,7 @@ fn task_with_type(task_type: TaskType, title: &str) -> Task {
         description: String::new(),
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
+        required_tools: Vec::new(),
         plan: String::new(),
         execution_summary: String::new(),
         context_files: Vec::new(),

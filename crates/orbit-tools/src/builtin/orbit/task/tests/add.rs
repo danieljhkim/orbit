@@ -161,6 +161,7 @@ fn schema_exposes_only_trimmed_create_task_fields() {
             "workspace",
             "acceptance_criteria",
             "tags",
+            "required_tools",
             "context_files",
             "priority",
             "complexity",

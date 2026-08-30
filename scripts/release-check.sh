@@ -13,6 +13,9 @@ NPM_PKG="@orbit-tools/cli"
 CARGO_TOML="Cargo.toml"
 NPM_PACKAGE_JSON="npm/package.json"
 MCP_SERVER_JSON="server.json"
+CLAUDE_PLUGIN_MANIFEST="plugin/.claude-plugin/plugin.json"
+CODEX_PLUGIN_MANIFEST="plugin/.codex-plugin/plugin.json"
+AGENT_PLUGIN_MANIFEST="plugin/plugin.json"
 
 require_bin() {
   local bin="$1"
@@ -24,12 +27,17 @@ require_bin() {
 
 require_bin jq
 
-for file in "$CARGO_TOML" "$NPM_PACKAGE_JSON" "$MCP_SERVER_JSON"; do
+for file in "$CARGO_TOML" "$NPM_PACKAGE_JSON" "$MCP_SERVER_JSON" \
+  "$CLAUDE_PLUGIN_MANIFEST" "$CODEX_PLUGIN_MANIFEST" "$AGENT_PLUGIN_MANIFEST"; do
   if [[ ! -f "$file" ]]; then
     echo "release-check: $file not found (run from repo root)" >&2
     exit 2
   fi
 done
+
+"$repo_root/scripts/sync-plugin-skills.sh" --check >/dev/null
+"$repo_root/scripts/validate-codex-plugin.sh" "$repo_root" >/dev/null
+"$repo_root/scripts/validate-agent-plugin.sh" "$repo_root" >/dev/null
 
 cargo_package_version="$(
   awk '
@@ -50,6 +58,9 @@ server_name="$(jq -r .name "$MCP_SERVER_JSON")"
 server_version="$(jq -r .version "$MCP_SERVER_JSON")"
 server_package="$(jq -r '.packages[0].identifier // empty' "$MCP_SERVER_JSON")"
 server_package_version="$(jq -r '.packages[0].version // empty' "$MCP_SERVER_JSON")"
+claude_plugin_version="$(jq -r .version "$CLAUDE_PLUGIN_MANIFEST")"
+codex_plugin_version="$(jq -r .version "$CODEX_PLUGIN_MANIFEST")"
+agent_plugin_version="$(jq -r .version "$AGENT_PLUGIN_MANIFEST")"
 
 if [[ -z "$cargo_package_version" ]]; then
   echo "release-check: $CARGO_TOML has no [workspace.package] version" >&2
@@ -108,6 +119,9 @@ fi
 printf '%-32s %s\n' "$CARGO_TOML [workspace.package]" "$cargo_package_version"
 printf '%-32s %s\n' "$NPM_PACKAGE_JSON" "$npm_package_version"
 printf '%-32s %s\n' "$MCP_SERVER_JSON" "$server_version"
+printf '%-32s %s\n' "$CLAUDE_PLUGIN_MANIFEST" "$claude_plugin_version"
+printf '%-32s %s\n' "$CODEX_PLUGIN_MANIFEST" "$codex_plugin_version"
+printf '%-32s %s\n' "$AGENT_PLUGIN_MANIFEST" "$agent_plugin_version"
 printf '%-32s %s\n' "npm view $NPM_PKG" "${npm_registry_version:-<skipped>}"
 printf '%-32s %s\n' "gh release list -L 1" "${gh_tag_version:-<skipped>}"
 
@@ -122,6 +136,9 @@ compare_version() {
 }
 
 compare_version "$NPM_PACKAGE_JSON" "$npm_package_version"
+compare_version "$CLAUDE_PLUGIN_MANIFEST" "$claude_plugin_version"
+compare_version "$CODEX_PLUGIN_MANIFEST" "$codex_plugin_version"
+compare_version "$AGENT_PLUGIN_MANIFEST" "$agent_plugin_version"
 compare_version "npm view $NPM_PKG" "$npm_registry_version"
 compare_version "latest gh release tag" "$gh_tag_version"
 

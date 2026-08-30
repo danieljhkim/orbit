@@ -4,7 +4,8 @@ use orbit_common::security::redaction::redact_all;
 use orbit_store::contracts::TaskCreateParams as StoreTaskCreateParams;
 use orbit_types::record::OrbitEvent;
 use orbit_types::task::{
-    Task, TaskStatus, TaskType, normalize_task_dependencies, normalize_task_tags,
+    Task, TaskStatus, TaskType, normalize_required_tools, normalize_task_dependencies,
+    normalize_task_tags,
 };
 
 use super::TaskRecordUpdateParams;
@@ -16,6 +17,17 @@ use super::paths::{
     context_files_pruned_history_entry, context_workspace_root, normalize_context_files_for_write,
     normalize_workspace_path,
 };
+
+const AUTO_TASK_TITLE_PREFIX: &str = "[auto-task] ";
+
+/// Task-finding provenance in canonical precedence order. When several tags
+/// are present, the first mapping wins regardless of caller-provided tag order.
+const TASK_PROVENANCE_TITLE_PREFIXES: &[(&str, &str)] = &[
+    ("qa-sweep", "[qa-sweep] "),
+    ("security-review", "[security-review] "),
+    ("code-review", "[code-review] "),
+    ("friction-curation", "[friction-curation] "),
+];
 
 impl OrbitRuntime {
     pub fn add_task(&self, params: TaskAddParams) -> Result<Task, OrbitError> {
@@ -40,6 +52,9 @@ impl OrbitRuntime {
             *criterion = redact_all(criterion);
         }
         params.comment = params.comment.map(|comment| redact_all(&comment));
+
+        let normalized_tags = normalize_task_tags(params.tags.clone());
+        params.title = title_with_provenance_prefix(&params.title, &normalized_tags);
 
         let (canonical_agent, canonical_model) =
             self.try_canonical_agent_model_identity(agent.as_deref(), model.as_deref())?;
@@ -90,7 +105,8 @@ impl OrbitRuntime {
                 acceptance_criteria: params.acceptance_criteria.clone(),
                 dependencies: dependencies.clone(),
                 relations: params.relations.clone(),
-                tags: normalize_task_tags(params.tags.clone()),
+                tags: normalized_tags.clone(),
+                required_tools: normalize_required_tools(params.required_tools.clone()),
                 plan: params.plan.clone(),
                 execution_summary: String::new(),
                 context_files: kept_context_files.clone(),
@@ -134,6 +150,29 @@ impl OrbitRuntime {
         };
 
         Ok(task)
+    }
+}
+
+/// Apply visible provenance at the shared task-creation boundary used by CLI,
+/// MCP, dashboard, scheduler, and internal callers. Auto-task provenance wins
+/// so scheduler-minted parent tasks keep their established title convention;
+/// finding provenance otherwise follows the fixed table above.
+fn title_with_provenance_prefix(title: &str, tags: &[String]) -> String {
+    let prefix = if tags.iter().any(|tag| tag.starts_with("auto-task:")) {
+        Some(AUTO_TASK_TITLE_PREFIX)
+    } else {
+        TASK_PROVENANCE_TITLE_PREFIXES
+            .iter()
+            .find_map(|(tag, prefix)| {
+                tags.iter()
+                    .any(|candidate| candidate == tag)
+                    .then_some(*prefix)
+            })
+    };
+
+    match prefix {
+        Some(prefix) if !title.starts_with(prefix) => format!("{prefix}{title}"),
+        _ => title.to_string(),
     }
 }
 

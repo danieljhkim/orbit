@@ -8,11 +8,12 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 use orbit_common::OrbitError;
-use orbit_types::tool::mcp_advertised_tool_name;
+use orbit_types::tool::{ToolSessionContext, mcp_advertised_tool_name};
 use orbit_types::workspace::Workspace;
 use serde_json::{Value, json};
 
@@ -81,7 +82,12 @@ pub trait DestinationProbe: Send + Sync {
 pub trait RoutedSession: Send {
     fn snapshot(&mut self) -> Result<DestinationSnapshot, OrbitError>;
     fn advertised_tools(&mut self) -> Result<Vec<String>, OrbitError>;
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError>;
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError>;
 }
 
 /// The production probe: one short-lived SSH-hosted MCP session per call.
@@ -119,6 +125,108 @@ impl DestinationProbe for SshDestinationProbe {
             self.start_session(destination)?,
             self.delivery_timeout,
         )))
+    }
+}
+
+/// In-process probe for the accepting machine: list and route through the same
+/// local [`crate::McpHost`] the v1 MCP surface uses, so local selectors never
+/// spawn SSH.
+pub struct InProcessDestinationProbe {
+    inner: Arc<dyn crate::McpHost>,
+    session_context: ToolSessionContext,
+}
+
+impl InProcessDestinationProbe {
+    pub fn new(inner: Arc<dyn crate::McpHost>, session_context: ToolSessionContext) -> Self {
+        Self {
+            inner,
+            session_context,
+        }
+    }
+}
+
+impl DestinationProbe for InProcessDestinationProbe {
+    fn probe(&self, destination: &Destination) -> Result<DestinationSnapshot, OrbitError> {
+        let content = self.inner.call_tool(
+            crate::FEDERATED_DESTINATION_WORKSPACE_LIST_TOOL,
+            json!({}),
+            self.session_context.clone(),
+        )?;
+        snapshot_from_discovery_content(destination, &content)
+    }
+
+    fn open_route(&self, destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError> {
+        let snapshot = self.probe(destination)?;
+        Ok(Box::new(InProcessRoutedSession {
+            inner: Arc::clone(&self.inner),
+            session_context: self.session_context.clone(),
+            snapshot,
+        }))
+    }
+}
+
+struct InProcessRoutedSession {
+    inner: Arc<dyn crate::McpHost>,
+    /// Trusted server-owned fields captured before initialize. Per-call audit
+    /// evidence is overlaid at dispatch and never written back here.
+    session_context: ToolSessionContext,
+    snapshot: DestinationSnapshot,
+}
+
+impl RoutedSession for InProcessRoutedSession {
+    fn snapshot(&mut self) -> Result<DestinationSnapshot, OrbitError> {
+        Ok(self.snapshot.clone())
+    }
+
+    fn advertised_tools(&mut self) -> Result<Vec<String>, OrbitError> {
+        Ok(self
+            .inner
+            .list_mcp_tool_definitions()?
+            .into_iter()
+            .map(|definition| mcp_advertised_tool_name(&definition.schema.name))
+            .collect())
+    }
+
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        call_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
+        let mut destination_context = self.session_context.clone();
+        destination_context.trace_id = call_context.trace_id;
+        destination_context.self_reported_actor = call_context.self_reported_actor;
+        self.inner.call_tool(name, arguments, destination_context)
+    }
+}
+
+/// Dispatch local destinations to an in-process probe and remotes to SSH.
+pub struct CompositeDestinationProbe {
+    local: Arc<dyn DestinationProbe>,
+    remote: Arc<dyn DestinationProbe>,
+}
+
+impl CompositeDestinationProbe {
+    pub fn new(local: Arc<dyn DestinationProbe>, remote: Arc<dyn DestinationProbe>) -> Self {
+        Self { local, remote }
+    }
+
+    fn probe_for(&self, destination: &Destination) -> &dyn DestinationProbe {
+        if destination.is_local() {
+            &*self.local
+        } else {
+            &*self.remote
+        }
+    }
+}
+
+impl DestinationProbe for CompositeDestinationProbe {
+    fn probe(&self, destination: &Destination) -> Result<DestinationSnapshot, OrbitError> {
+        self.probe_for(destination).probe(destination)
+    }
+
+    fn open_route(&self, destination: &Destination) -> Result<Box<dyn RoutedSession>, OrbitError> {
+        self.probe_for(destination).open_route(destination)
     }
 }
 
@@ -174,7 +282,12 @@ impl RoutedSession for SshRoutedSession {
         Ok(tools)
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, OrbitError> {
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        _session_context: ToolSessionContext,
+    ) -> Result<Value, OrbitError> {
         // Classification is finished, so the tool's own budget starts here:
         // the SSH setup, handshake, discovery, and `tools/list` round trips
         // that chose this destination must not shorten it.
@@ -193,10 +306,16 @@ fn spawn_destination_session(
     destination: &Destination,
     caller_machine_id: &str,
 ) -> Result<Child, OrbitError> {
+    let ssh = destination.ssh_target().ok_or_else(|| {
+        OrbitError::InvalidInput(format!(
+            "local destination '{}' cannot be opened over SSH",
+            destination.machine_id
+        ))
+    })?;
     Command::new("ssh")
         .arg("-T")
         .arg("--")
-        .arg(&destination.ssh)
+        .arg(ssh)
         .arg(crate::remote::remote_serve_command(caller_machine_id))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

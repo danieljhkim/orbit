@@ -3,12 +3,14 @@ summary: "Task Artifacts — Vision"
 type: design
 title: "Task Artifacts — Vision"
 owner: codex
-last_updated: 2026-08-15
+last_updated: 2026-08-29
 last_validated: 2026-08-16
 status: Draft
 feature: task-artifacts
 doc_role: vision
-tags: ["task-artifacts"]
+tags: ["task-artifacts", "task-publication"]
+related_features: [task-artifacts, task-publication, remote-access, federated-mcp]
+related_artifacts: [ORB-11068]
 ---
 
 # Task Artifacts — Vision
@@ -87,7 +89,18 @@ The retired decision artifact store used the same envelope-plus-Markdown pattern
 
 ### 2.3 Orbit task sync
 
-[docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) documents a git-orphan-branch registry around the current task layout. It preserves `T<YYYYMMDD>-<N>` and status directories because it was designed as an incremental sync layer. The task-artifacts reset intentionally reopens those decisions. (Task sync is now archived — superseded by [remote-access](../remote-access/1_overview.md).)
+[docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) documents
+the retired shared-writer Git registry. Live visibility and mutation now route to
+the owning host through [remote-access](../remote-access/1_overview.md) and
+[federated-mcp](../federated-mcp/1_overview.md), so the multi-writer registry
+remains superseded.
+
+The draft [task-publication](../task-publication/1_overview.md) design uses a
+dedicated private Git repository for a narrower purpose: one declared owner
+publishes immutable task-bundle snapshots for remote durability, read-only
+inspection, and explicit recovery. It does not revive shared allocation,
+online-only mutation, operation-aware merging, or replicated execution state.
+[ORB-11068] records that distinction.
 
 ### 2.4 Issue trackers
 
@@ -133,6 +146,7 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 
 - [docs/design/CONVENTIONS.md](../CONVENTIONS.md) - design folder layout and ADR rules.
 - [docs/design/_archive/task-sync/](../_archive/task-sync/1_overview.md) - archived (superseded) git-sync proposal over the existing task layout; see [remote-access](../remote-access/1_overview.md).
+- [docs/design/task-publication/](../task-publication/1_overview.md) - draft one-way publication proposal using a dedicated private repository while preserving one task authority.
 - [.orbit/adrs/](../../../.orbit/adrs/) - internal precedent for envelope plus Markdown body and monotonic artifact IDs.
 - [docs/design/orbit-search/](../orbit-search/) - per-field indexing of task text.
 - [docs/POSITIONING.md](../../POSITIONING.md) - product doctrine that currently treats task IDs as local search keys.
@@ -149,6 +163,6 @@ Orbit tasks should feel local and inspectable without forcing every user into a 
 
 ## Task References
 
-None.
+- [ORB-11068] — separated authority-owned task publication from the retired multi-writer sync proposal.
 
-Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
+> Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

@@ -11,6 +11,12 @@ A task is a durable unit of work stored in workspace-local Orbit state. It carri
 
 Use tasks for work an agent can execute and a human can review. Do not use a task as a scratch note when no observable outcome exists.
 
+A task may also declare `required_tools` as exact canonical registered tool
+names. Orbit normalizes, sorts, and deduplicates the list at creation and
+defaults older tasks to an empty list. The list is immutable authority:
+existing-task update APIs and commands reject `required_tools`, regardless of
+lifecycle status.
+
 ## Lifecycle
 
 The common path is:
@@ -42,6 +48,8 @@ Transitions are permissive by default — any move is allowed unless it violates
 1. **Done is terminal.** No transitions out of `done`.
 2. **Archived requires `orbit task archive`.** A bare `--status archived` update is rejected.
 3. **`in-progress → review` requires an `execution_summary`.**
+4. **Required tools freeze at execution admission.** They may be edited only
+   before the task enters `in-progress`.
 
 Friction reports use their own `orbit friction` surface and are not task
 statuses.

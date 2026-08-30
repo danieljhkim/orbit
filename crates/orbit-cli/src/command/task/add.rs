@@ -28,6 +28,14 @@ pub struct TaskAddArgs {
     /// Task tags. Repeat or comma-separate for multiple tags.
     #[arg(long = "tag", action = ArgAction::Append, value_delimiter = ',')]
     pub tags: Vec<String>,
+    /// Exact canonical tool names the task adds to its agent activity baseline.
+    #[arg(
+        long = "required-tools",
+        alias = "required-tool",
+        action = ArgAction::Append,
+        value_delimiter = ','
+    )]
+    pub required_tools: Vec<String>,
     /// Optional task plan payload. Leave blank for the executing agent or planning activity to author later.
     #[arg(long, default_value = "")]
     pub plan: String,
@@ -88,6 +96,7 @@ impl Execute for TaskAddArgs {
                 dependencies: self.dependencies,
                 relations: Vec::new(),
                 tags: self.tags,
+                required_tools: self.required_tools,
                 plan: self.plan,
                 comment: None,
                 context_files: self.context,

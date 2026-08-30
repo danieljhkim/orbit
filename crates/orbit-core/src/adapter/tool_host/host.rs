@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use chrono::Utc;
 use orbit_common::fs::selector::canonical_selector;
@@ -31,8 +33,9 @@ use orbit_tools::{
 use orbit_types::identity::{is_valid_friction_id, normalize_optional_attribution_label};
 use orbit_types::record::FrictionStatus;
 use orbit_types::task::{
-    Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_task_dependencies,
-    normalize_task_tags, resolve_task_dependencies, task_dependencies_ready, task_matches_tags,
+    Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_required_tools,
+    normalize_task_dependencies, normalize_task_tags, resolve_task_dependencies,
+    resolve_task_relations, task_dependencies_ready, task_matches_tags,
     task_show_record_field_json, unknown_task_show_field_message, validate_task_dependencies,
 };
 use orbit_types::tool::ToolSessionContext;
@@ -77,6 +80,18 @@ struct HubCoordinationState {
     workspace_id: String,
     legacy_friction_root: Option<PathBuf>,
     tasks: WorkspaceTaskBackends,
+    #[cfg(test)]
+    update_hooks: CheckoutlessUpdateHooks,
+}
+
+#[cfg(test)]
+pub(super) type CheckoutlessUpdateHook = Arc<dyn Fn(&Task, &Value) + Send + Sync>;
+
+#[cfg(test)]
+#[derive(Default)]
+struct CheckoutlessUpdateHooks {
+    after_pre_state_read: Mutex<Option<CheckoutlessUpdateHook>>,
+    after_locked_state_read: Mutex<Option<CheckoutlessUpdateHook>>,
 }
 
 impl HubCoordinationExecutor {
@@ -164,8 +179,41 @@ impl HubCoordinationExecutor {
                 workspace_id: workspace_id.into(),
                 legacy_friction_root,
                 tasks,
+                #[cfg(test)]
+                update_hooks: CheckoutlessUpdateHooks::default(),
             }),
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_after_pre_state_read_hook(&self, hook: CheckoutlessUpdateHook) {
+        *self
+            .inner
+            .update_hooks
+            .after_pre_state_read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_after_locked_state_read_hook(&self, hook: CheckoutlessUpdateHook) {
+        *self
+            .inner
+            .update_hooks
+            .after_locked_state_read
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
+    }
+
+    #[cfg(test)]
+    fn update_hook(hook: &Mutex<Option<CheckoutlessUpdateHook>>, task: &Task, input: &Value) {
+        let hook = hook
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook(task, input);
+        }
     }
 
     pub fn execute_tool(
@@ -276,6 +324,13 @@ impl HubCoordinationExecutor {
             tags: normalize_task_tags(
                 optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default(),
             ),
+            required_tools: normalize_required_tools(
+                optional_csv_or_string_list_alias(
+                    &input,
+                    &["required_tools", "requiredTools", "required-tool"],
+                )?
+                .unwrap_or_default(),
+            ),
             plan: String::new(),
             execution_summary: String::new(),
             context_files,
@@ -309,9 +364,62 @@ impl HubCoordinationExecutor {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
+        if ["required_tools", "requiredTools", "required-tool"]
+            .iter()
+            .any(|field| input.get(*field).is_some())
+        {
+            return Err(OrbitError::InvalidInput(
+                "orbit.task.update does not accept `required_tools`; task tool requirements are immutable after creation"
+                    .to_string(),
+            ));
+        }
         let id = required_string(&input, &["id"], "id")?;
-        let current = self.task(&id)?;
         let actor = Self::actor(agent.as_deref(), model.as_deref());
+
+        // The pre-lock snapshot exists only as a deterministic regression seam:
+        // production decisions always use the fresh snapshot read below while
+        // holding the authoritative task lock.
+        #[cfg(test)]
+        {
+            let hook = self
+                .inner
+                .update_hooks
+                .after_pre_state_read
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(hook) = hook {
+                let pre_state = self.task(&id)?;
+                hook(&pre_state, &input);
+            }
+        }
+
+        let mut outcome = None;
+        self.inner.tasks.task.with_task_write_lock(&id, &mut || {
+            let current = self.task(&id)?;
+            #[cfg(test)]
+            Self::update_hook(
+                &self.inner.update_hooks.after_locked_state_read,
+                &current,
+                &input,
+            );
+            let updated = self.update_task_from_snapshot(&id, input.clone(), &actor, &current)?;
+            outcome = Some((current, updated));
+            Ok(())
+        })?;
+        let (current, updated) = outcome.ok_or_else(|| {
+            OrbitError::Execution(format!("task write lock did not execute update for '{id}'"))
+        })?;
+        self.finish_task_update(&id, &current, &updated)
+    }
+
+    fn update_task_from_snapshot(
+        &self,
+        id: &str,
+        input: Value,
+        actor: &str,
+        current: &Task,
+    ) -> Result<Task, OrbitError> {
         let status = optional_string(&input, "status")?
             .map(|value| super::input::parse_task_status("status", &value))
             .transpose()?;
@@ -389,7 +497,7 @@ impl HubCoordinationExecutor {
         if let Some(dependencies) = dependencies.as_ref() {
             validate_task_dependencies(
                 &self.inner.tasks.task.list_tasks()?,
-                Some(&id),
+                Some(id),
                 dependencies,
             )?;
         }
@@ -407,6 +515,20 @@ impl HubCoordinationExecutor {
                 .transpose()?;
         let artifacts = super::input::parse_artifacts(&input)?;
         let relations = super::input::parse_relations(&input)?;
+        if status == Some(TaskStatus::Done)
+            && current.status != TaskStatus::Done
+            && let Ok(frictions) = self.friction_store()
+        {
+            let mut preview = current.clone();
+            if let Some(relations) = &relations {
+                preview.relations = relations.clone();
+            }
+            crate::application::task::ensure_resolves_targets_are_workspace_local(
+                frictions.as_ref(),
+                &self.inner.workspace_id,
+                &preview,
+            )?;
+        }
         let comment = optional_string(&input, "comment")?;
         let task_type = optional_string_alias(&input, &["type", "task_type", "taskType"])?
             .map(|value| super::input::parse_task_type("type", &value))
@@ -440,9 +562,9 @@ impl HubCoordinationExecutor {
             )));
         }
         self.inner.tasks.document.update_task_document(
-            &id,
+            id,
             TaskDocumentUpdateParams {
-                actor: actor.clone(),
+                actor: actor.to_string(),
                 title: optional_string(&input, "title")?.map(|value| redact_all(&value)),
                 description,
                 acceptance_criteria: optional_string_list_alias(
@@ -463,11 +585,11 @@ impl HubCoordinationExecutor {
                     .map(|value| redact_all(&value)),
                 context_files,
                 planned_by: explicit_planned_by
-                    .or_else(|| input.get("plan").is_some().then(|| Some(actor.clone()))),
+                    .or_else(|| input.get("plan").is_some().then(|| Some(actor.to_string()))),
                 implemented_by: explicit_implemented_by.or_else(|| {
                     status
                         .is_some_and(|value| matches!(value, TaskStatus::Review | TaskStatus::Done))
-                        .then(|| Some(actor.clone()))
+                        .then(|| Some(actor.to_string()))
                 }),
                 priority: None,
                 complexity: None,
@@ -483,9 +605,9 @@ impl HubCoordinationExecutor {
         )?;
         if !artifacts.is_empty() {
             self.inner.tasks.artifact.upsert_task_artifacts(
-                &id,
+                id,
                 TaskArtifactUpdateParams {
-                    actor: actor.clone(),
+                    actor: actor.to_string(),
                     upsert_artifacts: artifacts,
                 },
             )?;
@@ -494,15 +616,15 @@ impl HubCoordinationExecutor {
             let append_comments = comment
                 .map(|message| TaskComment {
                     at: Utc::now(),
-                    by: actor.clone(),
+                    by: actor.to_string(),
                     message: redact_all(message.trim()),
                 })
                 .into_iter()
                 .collect();
             self.inner.tasks.history.update_task_history(
-                &id,
+                id,
                 TaskHistoryUpdateParams {
-                    actor,
+                    actor: actor.to_string(),
                     status,
                     status_event: status.map(|_| "updated".to_string()),
                     status_note: None,
@@ -511,7 +633,15 @@ impl HubCoordinationExecutor {
                 },
             )?;
         }
-        let updated = self.task(&id)?;
+        self.task(id)
+    }
+
+    fn finish_task_update(
+        &self,
+        id: &str,
+        current: &Task,
+        updated: &Task,
+    ) -> Result<Value, OrbitError> {
         if updated.status == TaskStatus::Done
             && current.status != TaskStatus::Done
             && let Ok(frictions) = self.friction_store()
@@ -519,7 +649,7 @@ impl HubCoordinationExecutor {
             for relation in &updated.relations {
                 if relation.relation_type == orbit_types::task::TaskRelationType::Resolves
                     && is_valid_friction_id(&relation.target)
-                    && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
+                    && let Err(error) = frictions.resolve_by_task(&relation.target, id, Utc::now())
                 {
                     tracing::warn!(
                         task_id = id,
@@ -530,7 +660,7 @@ impl HubCoordinationExecutor {
                 }
             }
         }
-        self.task_json(&updated)
+        self.task_json(updated)
     }
 
     fn transition(
@@ -541,49 +671,69 @@ impl HubCoordinationExecutor {
         start: bool,
     ) -> Result<Value, OrbitError> {
         let id = required_string(&input, &["id"], "id")?;
-        let task = self.task(&id)?;
-        let target = if start {
-            if !matches!(
-                task.status,
-                TaskStatus::Proposed
-                    | TaskStatus::Backlog
-                    | TaskStatus::Someday
-                    | TaskStatus::Blocked
-            ) {
-                return Err(OrbitError::InvalidInput(format!(
-                    "task '{id}' is in status '{}'; start requires proposed, backlog, someday, or blocked",
-                    task.status
-                )));
-            }
-            if task.plan.trim().is_empty() {
-                return Err(OrbitError::InvalidInput(format!(
-                    "task '{id}' requires a non-empty plan before entering in-progress"
-                )));
-            }
-            TaskStatus::InProgress
-        } else {
-            match task.status {
-                TaskStatus::Proposed => TaskStatus::Backlog,
-                TaskStatus::Review => TaskStatus::Done,
-                other => {
-                    return Err(OrbitError::InvalidInput(format!(
-                        "task '{id}' is in status '{other}'; approve requires proposed or review"
-                    )));
+        let actor = Self::actor(agent.as_deref(), model.as_deref());
+        let comment = optional_string(&input, "note")?.or(optional_string(&input, "comment")?);
+        let crew = optional_string(&input, "crew")?;
+        let mut outcome = None;
+        self.inner
+            .tasks
+            .task
+            .with_task_write_lock(&id, &mut || {
+                let current = self.task(&id)?;
+                let target = if start {
+                    if !matches!(
+                        current.status,
+                        TaskStatus::Proposed
+                            | TaskStatus::Backlog
+                            | TaskStatus::Someday
+                            | TaskStatus::Blocked
+                    ) {
+                        return Err(OrbitError::InvalidInput(format!(
+                            "task '{id}' is in status '{}'; start requires proposed, backlog, someday, or blocked",
+                            current.status
+                        )));
+                    }
+                    if current.plan.trim().is_empty() {
+                        return Err(OrbitError::InvalidInput(format!(
+                            "task '{id}' requires a non-empty plan before entering in-progress"
+                        )));
+                    }
+                    TaskStatus::InProgress
+                } else {
+                    match current.status {
+                        TaskStatus::Proposed => TaskStatus::Backlog,
+                        TaskStatus::Review => TaskStatus::Done,
+                        other => {
+                            return Err(OrbitError::InvalidInput(format!(
+                                "task '{id}' is in status '{other}'; approve requires proposed or review"
+                            )));
+                        }
+                    }
+                };
+                let mut update = Map::new();
+                update.insert("id".to_string(), Value::String(id.clone()));
+                update.insert("status".to_string(), Value::String(target.to_string()));
+                if let Some(comment) = &comment {
+                    update.insert("comment".to_string(), Value::String(comment.clone()));
                 }
-            }
-        };
-        let mut update = Map::new();
-        update.insert("id".to_string(), Value::String(id));
-        update.insert("status".to_string(), Value::String(target.to_string()));
-        if let Some(note) = optional_string(&input, "note")? {
-            update.insert("comment".to_string(), Value::String(note));
-        } else if let Some(comment) = optional_string(&input, "comment")? {
-            update.insert("comment".to_string(), Value::String(comment));
-        }
-        if let Some(crew) = optional_string(&input, "crew")? {
-            update.insert("crew".to_string(), Value::String(crew));
-        }
-        self.update_task(Value::Object(update), agent, model)
+                if let Some(crew) = &crew {
+                    update.insert("crew".to_string(), Value::String(crew.clone()));
+                }
+                let updated = self.update_task_from_snapshot(
+                    &id,
+                    Value::Object(update),
+                    &actor,
+                    &current,
+                )?;
+                outcome = Some((current, updated));
+                Ok(())
+            })?;
+        let (current, updated) = outcome.ok_or_else(|| {
+            OrbitError::Execution(format!(
+                "task write lock did not execute transition for '{id}'"
+            ))
+        })?;
+        self.finish_task_update(&id, &current, &updated)
     }
 
     fn show_task(&self, input: Value) -> Result<Value, OrbitError> {
@@ -644,6 +794,7 @@ impl HubCoordinationExecutor {
                         .map(|entry| entry.label())
                         .collect::<Vec<_>>()
                 )),
+                "relations" => Ok(json!(resolve_task_relations(&task, &status))),
                 "tags" => Ok(json!(task.tags)),
                 "context_files" => Ok(json!(task.context_files)),
                 "crew" => Ok(json!(task.crew)),
@@ -1020,6 +1171,41 @@ mod checkoutless_hub_tests {
     }
 
     #[test]
+    fn task_required_tools_update_is_rejected_without_checkout() {
+        let (_root, executor, context) = executor();
+        let created = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_checkoutless",
+                    "title": "Immutable checkoutless authority",
+                    "description": "Required tools are fixed at issuance",
+                    "complexity": "low",
+                    "required_tools": ["proc.spawn"],
+                    "model": "codex"
+                }),
+                context,
+            )
+            .expect("add checkoutless task");
+        let id = created["id"].as_str().expect("task id");
+
+        let error = OrbitToolHost::execute(
+            &executor,
+            OrbitBuiltinAction::TaskUpdate,
+            json!({"id": id, "required_tools": ["orbit.task.show"]}),
+            Some("codex".to_string()),
+            Some("codex".to_string()),
+            None,
+        )
+        .expect_err("checkoutless update cannot replace required tools");
+        assert!(error.to_string().contains("immutable"), "{error}");
+        assert_eq!(
+            executor.task(id).expect("read task").required_tools,
+            ["proc.spawn"]
+        );
+    }
+
+    #[test]
     fn task_orchestrator_add_update_and_clear_round_trip_without_checkout() {
         let (_root, executor, context) = executor();
         let created = executor
@@ -1069,7 +1255,7 @@ mod checkoutless_hub_tests {
     }
 
     #[test]
-    fn task_show_projects_status_and_mixed_fields_without_checkout() {
+    fn task_show_projects_public_dto_fields_without_checkout() {
         let (_root, executor, context) = executor();
         let created = executor
             .execute_tool(
@@ -1079,6 +1265,7 @@ mod checkoutless_hub_tests {
                     "title": "Hub status projection",
                     "description": "Exercise fields:[status] on the hub.",
                     "complexity": "low",
+                    "relations": [{"type": "related_to", "target": "DK-00042"}],
                     "model": "codex"
                 }),
                 context.clone(),
@@ -1096,18 +1283,33 @@ mod checkoutless_hub_tests {
                 .expect("fields:[status] must succeed"),
             json!("proposed")
         );
+        executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "job_run_id": "jrun-hub", "model": "codex"}),
+                context.clone(),
+            )
+            .expect("attach checkoutless job run");
         assert_eq!(
             executor
                 .execute_tool(
                     "orbit.task.show",
-                    json!({"id": id, "fields": ["status", "title", "plan"]}),
+                    json!({
+                        "id": id,
+                        "fields": ["status", "relations", "external_refs", "job_run_id"],
+                    }),
                     context,
                 )
                 .expect("mixed projection must succeed"),
             json!({
                 "status": "proposed",
-                "title": "Hub status projection",
-                "plan": "",
+                "relations": [{
+                    "type": "related_to",
+                    "target": "DK-00042",
+                    "verification": "not verifiable here",
+                }],
+                "external_refs": [],
+                "job_run_id": "jrun-hub",
             })
         );
     }

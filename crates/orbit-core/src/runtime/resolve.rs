@@ -5,9 +5,31 @@ use orbit_common::OrbitError;
 use serde::Deserialize;
 
 use crate::paths;
+use crate::runtime::run_input::managed_run_context_from_env;
 
-/// Returns the global orbit root at `~/.orbit/`.
+/// Registry locator emitted to children of an Orbit-managed run.
+///
+/// Unlike `ORBIT_ROOT`, this selects only the host-global registry and never
+/// changes workspace root discovery or bootstrap ownership.
+const ORBIT_REGISTRY_ROOT_ENV: &str = "ORBIT_REGISTRY_ROOT";
+
+/// Returns the global Orbit root.
+///
+/// Direct commands use `~/.orbit/`. A trusted managed child may instead carry
+/// the dispatching host's registry locator; this never selects its workspace.
 pub fn resolve_global_root() -> Result<PathBuf, OrbitError> {
+    if managed_run_context_from_env()
+        && let Ok(value) = std::env::var(ORBIT_REGISTRY_ROOT_ENV)
+        && !value.trim().is_empty()
+    {
+        let root = PathBuf::from(value);
+        if !root.is_absolute() {
+            return Err(OrbitError::InvalidInput(format!(
+                "{ORBIT_REGISTRY_ROOT_ENV} must be an absolute path inside an Orbit-managed run"
+            )));
+        }
+        return Ok(root);
+    }
     orbit_common::fs::path::global_orbit_dir()
 }
 

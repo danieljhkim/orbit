@@ -6,6 +6,7 @@ use orbit_common::OrbitError;
 use orbit_core::OrbitRuntime;
 use orbit_core::runtime::{
     OrbitRuntimeRoots, ResolvedOrbitRoots, WorkspaceRootHint, WorkspaceRuntimeBinding,
+    managed_workspace_selector_from_env,
 };
 use orbit_store::maintenance::task_registry::{TaskRegistryStore, task_registry_path};
 use orbit_types::workspace::{
@@ -100,14 +101,19 @@ impl RegisteredRuntimeFactory {
     ///
     /// `--workspace` is the workspace selector (name, `ws_*` id, or absolute
     /// checkout path). `--root` stays a data-directory override and is never
-    /// overloaded as a selector. Omitting `--workspace` keeps the cwd walk.
+    /// overloaded as a selector. Omitting `--workspace` uses the trusted
+    /// managed `ORBIT_WORKSPACE` envelope when present, otherwise the cwd
+    /// walk. An unknown or mismatched selector fails closed and does not
+    /// fall back to cwd.
     pub fn initialize_with_overrides(
         root_override: Option<&Path>,
         workspace_selector: Option<&str>,
     ) -> Result<OrbitRuntime, OrbitError> {
         let selector = workspace_selector
             .map(str::trim)
-            .filter(|value| !value.is_empty());
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(managed_workspace_selector_from_env);
         let Some(selector) = selector else {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let roots = Self::resolve_roots_for_cwd(&cwd, root_override)?;
@@ -132,7 +138,7 @@ impl RegisteredRuntimeFactory {
         };
 
         let global_root = global_root_for(root_override)?;
-        let selected = Self::resolve_workspace_selector(&global_root, selector)?;
+        let selected = Self::resolve_workspace_selector(&global_root, &selector)?;
         Self::open_registered_checkout(&global_root, &selected.workspace, &selected.checkout)
     }
 
@@ -254,12 +260,13 @@ impl RegisteredRuntimeFactory {
 }
 
 /// The host data directory a registry lookup reads: the `--root` override when
-/// one was passed, and `~/.orbit` otherwise. Never derived from cwd, so a
-/// registry-first command works from any directory.
+/// one was passed, the trusted managed registry locator for a managed child,
+/// and `~/.orbit` otherwise. Never derived from cwd, so a registry-first
+/// command works from any directory.
 pub(crate) fn global_root_for(root_override: Option<&Path>) -> Result<PathBuf, OrbitError> {
     match root_override {
         Some(root) => Ok(root.to_path_buf()),
-        None => workspace_registry::global_orbit_dir(),
+        None => orbit_core::runtime::resolve_global_root(),
     }
 }
 

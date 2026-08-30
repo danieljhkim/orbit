@@ -171,6 +171,51 @@ fn seed_ten_unknown_lifecycle_rows(runtime: &OrbitRuntime) {
     }
 }
 
+fn seed_named_diagnostic(
+    runtime: &OrbitRuntime,
+    execution_id: &str,
+    tool_name: &str,
+    job_run_id: &str,
+    task_id: &str,
+) {
+    runtime
+        .record_audit_event(&AuditEventInsertParams {
+            execution_id: execution_id.to_string(),
+            command: "tool".to_string(),
+            subcommand: Some("run".to_string()),
+            tool_name: Some(tool_name.to_string()),
+            target_type: Some("job_run".to_string()),
+            target_id: Some(job_run_id.to_string()),
+            role: "admin".to_string(),
+            status: AuditEventStatus::Failure,
+            exit_code: 1,
+            duration_ms: 0,
+            working_directory: "/tmp/fixture".to_string(),
+            arguments_json: None,
+            stdout_truncated: None,
+            stderr_truncated: None,
+            error_message: Some("pipeline worker lifecycle diagnostic".to_string()),
+            host: None,
+            pid: std::process::id(),
+            session_id: None,
+            workspace_id: None,
+            caller_machine_id: None,
+            caller_host_id: None,
+            process_machine_id: None,
+            process_host_id: None,
+            transport: None,
+            effective_capabilities: Default::default(),
+            origin_session_id: None,
+            mcp_call_id: None,
+            lease_id: None,
+            task_id: Some(task_id.to_string()),
+            job_run_id: Some(job_run_id.to_string()),
+            activity_id: Some("worker-observer".to_string()),
+            step_index: None,
+        })
+        .expect("seed named diagnostic");
+}
+
 async fn request(runtime: OrbitRuntime, uri: &str) -> axum::response::Response {
     router()
         .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
@@ -472,6 +517,63 @@ async fn ten_unknown_lifecycle_rows_group_as_four_cascades_and_one_start() {
             );
             assert!(event["run_id"].as_str().is_some(), "run id is present");
             assert!(event["task_id"].as_str().is_some(), "task id is present");
+        }
+    }
+}
+
+/// ORB-11118: seven duplicate-worker incidents emit fourteen raw diagnostic
+/// rows. They remain fully expandable with run/task/tool evidence while their
+/// class-specific denominator stays separate from callable reliability.
+#[tokio::test]
+async fn named_worker_diagnostics_report_seven_incidents_and_fourteen_exact_rows() {
+    let runtime = OrbitRuntime::in_memory().expect("runtime");
+    for index in 0..7 {
+        let run_id = format!("jrun-diagnostic-{index}");
+        let task_id = format!("REC-diagnostic-{index}");
+        let tool = if index % 2 == 0 {
+            "pipeline.worker.exit"
+        } else {
+            "pipeline.run.terminal_conflict"
+        };
+        for duplicate in 0..2 {
+            seed_named_diagnostic(
+                &runtime,
+                &format!("exec-diagnostic-{index}-{duplicate}"),
+                tool,
+                &run_id,
+                &task_id,
+            );
+        }
+    }
+
+    let body =
+        body_json(request(runtime, "/audit/incidents?since=24h&class=diagnostic").await).await;
+
+    assert_eq!(body["incident_count"], 7);
+    assert_eq!(body["raw_failed_events"], 14);
+    assert_eq!(body["matching_incident_count"], 7);
+    assert_eq!(body["matching_raw_event_count"], 14);
+    assert_eq!(body["matching_affected_run_count"], 7);
+    assert_eq!(body["failure_categories"]["diagnostic"]["incidents"], 7);
+    assert_eq!(body["failure_categories"]["diagnostic"]["raw_events"], 14);
+    assert_eq!(body["failure_categories"]["diagnostic"]["affected_runs"], 7);
+    assert_eq!(body["lifecycle_diagnostic_events"], 14);
+    assert_eq!(body["lifecycle_diagnostic_incidents"], 7);
+    assert_eq!(body["lifecycle_diagnostic_affected_run_count"], 7);
+
+    let incidents = body["incidents"].as_array().expect("incidents");
+    assert_eq!(incidents.len(), 7);
+    for incident in incidents {
+        assert_eq!(incident["class"], "diagnostic");
+        assert_eq!(incident["event_count"], 2);
+        let events = incident["events"].as_array().expect("exact evidence");
+        assert_eq!(events.len(), 2);
+        for event in events {
+            assert!(event["id"].as_i64().is_some());
+            assert!(event["run_id"].as_str().is_some());
+            assert!(event["task_id"].as_str().is_some());
+            assert!(event["tool"].as_str().is_some());
+            assert!(event["execution_id"].as_str().is_some());
         }
     }
 }

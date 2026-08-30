@@ -354,107 +354,6 @@
     "name": "orbit_search"
   },
   {
-    "description": "Append a workspace session-log entry (status, note, or check_later). Bodies are immutable; check_later rows wake the drain scan until resolved.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "body": {
-          "description": "Markdown body. Required, non-empty.",
-          "type": "string"
-        },
-        "kind": {
-          "description": "Entry kind: status, note, or check_later.",
-          "type": "string"
-        },
-        "related_run_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Optional job-run ids this note refers to."
-        },
-        "related_task_ids": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "description": "Optional task ids this note refers to."
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional in this session, which is already bound to a workspace — by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at initialize. Pass it to address a different registered workspace; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "body"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_session_log_append"
-  },
-  {
-    "description": "List workspace session-log entries. Filter by kind, unresolved check_later rows, or entries at/after `since` (RFC3339).",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "kind": {
-          "description": "Optional kind filter: status, note, or check_later.",
-          "type": "string"
-        },
-        "since": {
-          "description": "Optional RFC3339 lower bound on entry timestamps.",
-          "type": "string"
-        },
-        "unresolved_only": {
-          "description": "When true, return only unresolved check_later entries.",
-          "type": "boolean"
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional in this session, which is already bound to a workspace — by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at initialize. Pass it to address a different registered workspace; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "orbit_session_log_list"
-  },
-  {
-    "description": "Mark a check_later session-log entry resolved. Other kinds cannot be resolved; bodies are never edited.",
-    "inputSchema": {
-      "additionalProperties": true,
-      "properties": {
-        "id": {
-          "description": "Session-log id (SL-NNNN).",
-          "type": "string"
-        },
-        "workspace": {
-          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional in this session, which is already bound to a workspace — by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at initialize. Pass it to address a different registered workspace; never inferred from the server process cwd.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
-    "name": "orbit_session_log_resolve"
-  },
-  {
     "description": "Create an Orbit task and return the created task JSON",
     "inputSchema": {
       "additionalProperties": true,
@@ -525,6 +424,20 @@
         "relations": {
           "description": "Optional typed task relations as an array of {type, target} objects",
           "type": "array"
+        },
+        "required_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Optional exact canonical tool names the task adds to its agent activity baseline, as a string or array of strings"
         },
         "tags": {
           "anyOf": [
@@ -756,7 +669,7 @@
               "type": "string"
             }
           ],
-          "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, title, type, status, priority, complexity, created_at, updated_at, description, acceptance_criteria, dependencies, resolved_dependencies, tags, plan, execution_summary, context_files, crew, orchestrator, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution."
+          "description": "Optional field projection as a string or array of strings. When set, returns only the requested field(s) as JSON. Valid values: id, parent_id, title, description, acceptance_criteria, dependencies, resolved_dependencies, tags, required_tools, plan, execution_summary, context_files, created_by, planned_by, implemented_by, status, priority, complexity, type, pr_status, external_refs, relations, source_task_id, job_run_id, crew, orchestrator, created_at, updated_at, comments, history, artifacts. `crew` is execution selection; `orchestrator` is separate orchestration attribution."
         },
         "id": {
           "description": "Globally unique task ID. Resolved through the host task registry by default; a workspace argument is not required.",

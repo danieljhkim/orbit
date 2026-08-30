@@ -4124,6 +4124,7 @@
       .incident-class-chip.unexpected { border-left-color: var(--state-failed); }
       .incident-class-chip.expected { border-left-color: var(--fg-dim); }
       .incident-class-chip.denied { border-left-color: var(--state-warn, var(--accent)); }
+      .incident-class-chip.diagnostic { border-left-color: var(--accent); }
       .incident-truncation-note { margin: 0; color: var(--state-warn, var(--fg-dim)); font: 11px/1.5 var(--font-sans); }
       .incident-lifecycle-note {
         color: var(--fg-dim); font: 11px/1.5 var(--font-sans); overflow-wrap: anywhere;
@@ -4134,6 +4135,7 @@
       .incident-row.unexpected { border-left: 2px solid var(--state-failed); }
       .incident-row.expected { border-left: 2px solid var(--fg-dim); }
       .incident-row.denied { border-left: 2px solid var(--state-warn, var(--accent)); }
+      .incident-row.diagnostic { border-left: 2px solid var(--accent); }
       .incident-head {
         display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: 100%;
         padding: 0; border: 0; background: none; color: var(--fg); text-align: left; cursor: pointer;
@@ -4143,6 +4145,7 @@
       .incident-class.unexpected { color: var(--state-failed); }
       .incident-class.expected { color: var(--fg-dim); }
       .incident-class.denied { color: var(--state-warn, var(--accent)); }
+      .incident-class.diagnostic { color: var(--accent); }
       .incident-surface { font: 12px var(--font-mono); overflow-wrap: anywhere; }
       .incident-actor { color: var(--fg-dim); font: 11px var(--font-sans); }
       .incident-count { margin-left: auto; color: var(--fg); font: 11px var(--font-mono); white-space: nowrap; }
@@ -4183,9 +4186,10 @@
          scannable without clipping between 480 and 720px. */
       @media (max-width: 720px) {
         .incident-summary { padding: 10px; }
-        .incident-summary-denominator, .incident-lifecycle-note, .lifecycle-failure-counts {
+        .incident-summary-denominator, .incident-class-chip, .incident-lifecycle-note, .lifecycle-failure-counts {
           font-size: 11px; overflow-wrap: anywhere;
         }
+        .incident-class-chip { white-space: normal; }
         .tool-health-grid { grid-template-columns: minmax(0, 1fr); }
         .health-card .card-header { flex-wrap: wrap; align-items: flex-start; }
         .health-card .tool-name { white-space: normal; overflow-wrap: anywhere; }

@@ -26,8 +26,8 @@ CLI behavior, state layout, or recovery semantics change.
 | [Recover a Corrupted Database](./runbooks/database-recovery.md) | Recover a corrupted Orbit SQLite database from backup, salvage, or regeneration. |
 | [Check Orbit Health](./runbooks/health-checks.md) | Check Orbit workspace, database, dashboard, log-sink, job-run, and routine-clock health. |
 | [Inspect and Retain Logs](./runbooks/logging.md) | Locate, filter, rotate, and retain Orbit process and routine-sweep logs. |
-| [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across Cargo, GitHub artifacts, Homebrew, and npm. |
-| [Inventory and Protect Orbit State](./runbooks/state-and-backup.md) | Locate Orbit state and perform WAL-safe backups, restores, and task migrations. |
+| [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across agent plugins, Cargo, GitHub artifacts, Homebrew, and npm. |
+| [Inventory and Protect Orbit State](./runbooks/state-and-backup.md) | Locate Orbit state and perform WAL-safe backups, explicit task publication, restores, and task migrations. |
 | [Recover Stuck Job Runs](./runbooks/stuck-job-runs.md) | Diagnose, cancel, resume, or replay pending and running Orbit job runs. |
 | [Upgrade Orbit Safely](./runbooks/upgrades.md) | Review, apply, and verify Orbit workspace-layout and store-schema migrations safely. |
 
@@ -52,7 +52,7 @@ a conservative title/status fallback.
 | [Auditability](./design/auditability/1_overview.md) | Auditability is Orbit's answer to the operator question that matters after an agent touches a real repository: what happened, why, and who is accountable? | Draft | codex |
 | [Auto-tasks](./design/auto-tasks/1_overview.md) | Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code. | Accepted | claude |
 | [Executors](./design/executors/4_decisions.md) | Decision log for executor registration and the (now retired) External Executor Protocol. | Draft | claude |
-| [Federated MCP](./design/federated-mcp/1_overview.md) | Mux that presents one MCP namespace over operator-configured destinations, keyed by machine_id, without becoming a fleet registry. | Draft | grok |
+| [Federated MCP](./design/federated-mcp/1_overview.md) | Mux that presents one MCP namespace over the accepting machine plus operator-configured SSH remotes, keyed by machine_id, without becoming a fleet registry. | Draft | grok |
 | [Host Registry](./design/host-registry/1_overview.md) | The live host-registry feature is a machine-local identity and workspace catalog. | Accepted | codex |
 | [Orbit MCP](./design/mcp-bridge/1_overview.md) | One authoritative Orbit MCP server, reached by local stdio, a byte-transparent direct SSH stdio proxy, or a loopback-default TCP listener. | Draft | codex |
 | [MCP Session Context](./design/mcp-session-context/1_overview.md) | ToolSessionContext is Orbit's transport-to-Core invocation envelope. | Accepted | codex |
@@ -68,6 +68,7 @@ a conservative title/status fallback.
 | [Routines](./design/routines/1_overview.md) | Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state. | Accepted | claude |
 | [Task Artifacts](./design/task-artifacts/1_overview.md) | Tasks are Orbit's durable intent records: they explain what an agent or human is trying to change, how the work should be validated, what context is relevant, who acted on the work, and how the work connects to other Orbit artifacts. | Draft | codex |
 | [Task Migration](./design/task-migration/1_overview.md) | Move orbit tasks between machines with export/import (tar.zst) and disjoint id ranges, without hand-written SQL. | Draft | claude |
+| [Task Publication](./design/task-publication/1_overview.md) | Explicitly publish authority-owned task snapshots to a dedicated Git repository for labelled inspection and deliberate recovery. | Accepted | codex |
 | [Terminal Interface](./design/terminal-interface/1_overview.md) | House style for orbit-cli terminal output — machine-readable first, borderless single-line tables, semantic color resolved at the sink. | Accepted | claude |
 | [User Interface](./design/user-interface/1_overview.md) | Orbit UI covers the dashboard and HTTP API owned by `orbit-web`; `orbit-cli` is the thin `orbit web serve` / `connect` command adapter. | Draft | gemini |
 | [Worktree Artifacts](./design/worktree-artifacts/1_overview.md) | Historically, worktree artifacts let decision and learning body files travel with the branch that created them while preserving one shared ID authority for the repository. | Accepted | codex |

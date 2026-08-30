@@ -101,6 +101,13 @@ pub struct TaskEnvelopeV2 {
     pub relations: Vec<TaskRelation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Exact canonical tool names added to the selected agent activity.
+    #[serde(
+        default,
+        deserialize_with = "crate::task::deserialize_required_tools",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub required_tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

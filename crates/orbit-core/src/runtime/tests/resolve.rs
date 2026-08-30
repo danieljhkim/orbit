@@ -1,33 +1,28 @@
 //! Sibling tests for `resolve.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
-use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::sync::Mutex;
 
 use tempfile::{tempdir, tempdir_in};
 
-use orbit_common::OrbitError;
+use orbit_common::{OrbitError, test_env};
 
 use super::super::resolve::{
     ResolvedOrbitRoots, WorkspaceRootHint, resolve_bootstrap_roots, resolve_initialize_roots,
     resolve_initialize_roots_with_hint, try_resolve_initialized_roots,
 };
 
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
 #[test]
 fn caller_supplied_workspace_hint_keeps_registry_out_of_core_resolution() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    // `ORBIT_ROOT` outranks the caller hint, and a managed agent run exports
-    // one, so this case only tests hint precedence with the env root cleared.
-    let _root = EnvVarGuard::remove("ORBIT_ROOT");
     let home = tempdir().expect("home tempdir");
     let cwd = tempdir().expect("cwd tempdir");
     let hinted = tempdir().expect("hinted tempdir");
     let hinted_orbit = hinted.path().join(".orbit");
     seed_initialized_workspace_root(&hinted_orbit);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    // `ORBIT_ROOT` outranks the caller hint, and a managed agent run exports
+    // one, so this case only tests hint precedence with the env root cleared.
+    let _env = test_env::scoped([("ORBIT_ROOT", None), ("HOME", Some(home_var.as_str()))]);
 
     let roots = resolve_initialize_roots_with_hint(
         cwd.path(),
@@ -107,7 +102,6 @@ fn bootstrap_root_allows_uninitialized_path_without_creating_it() {
 
 #[test]
 fn explicit_root_precedes_env_and_worktree_resolution() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let main_repo = tempdir().expect("main repo tempdir");
     let worktree = tempdir().expect("worktree tempdir");
     let explicit_repo = tempdir().expect("explicit repo tempdir");
@@ -116,7 +110,8 @@ fn explicit_root_precedes_env_and_worktree_resolution() {
     seed_initialized_workspace_root(&main_repo.path().join(".orbit"));
     seed_initialized_workspace_root(&explicit_repo.path().join(".orbit"));
     seed_initialized_workspace_root(&env_repo.path().join(".orbit"));
-    let _env = EnvVarGuard::set("ORBIT_ROOT", env_repo.path().as_os_str().to_os_string());
+    let env_var = env_repo.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("ORBIT_ROOT", Some(env_var.as_str()))]);
 
     let resolved = resolve_initialize_roots(worktree.path(), Some(explicit_repo.path()))
         .expect("resolve explicit root");
@@ -126,14 +121,14 @@ fn explicit_root_precedes_env_and_worktree_resolution() {
 
 #[test]
 fn env_root_precedes_worktree_resolution() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let main_repo = tempdir().expect("main repo tempdir");
     let worktree = tempdir().expect("worktree tempdir");
     let env_repo = tempdir().expect("env repo tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
     seed_initialized_workspace_root(&main_repo.path().join(".orbit"));
     seed_initialized_workspace_root(&env_repo.path().join(".orbit"));
-    let _env = EnvVarGuard::set("ORBIT_ROOT", env_repo.path().as_os_str().to_os_string());
+    let env_var = env_repo.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("ORBIT_ROOT", Some(env_var.as_str()))]);
 
     let resolved = resolve_initialize_roots(worktree.path(), None).expect("resolve env root");
 
@@ -142,8 +137,7 @@ fn env_root_precedes_worktree_resolution() {
 
 #[test]
 fn worktree_main_orbit_precedes_worktree_local_orbit() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let main_repo = tempdir().expect("main repo tempdir");
     let worktree = tempdir().expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
@@ -159,8 +153,7 @@ fn worktree_main_orbit_precedes_worktree_local_orbit() {
 
 #[test]
 fn worktree_without_orbit_uses_main_repo_legacy_orbit_path() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let main_repo = tempdir().expect("main repo tempdir");
     let worktree = tempdir().expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
@@ -178,8 +171,7 @@ fn worktree_without_orbit_uses_main_repo_legacy_orbit_path() {
 
 #[test]
 fn non_worktree_walk_up_behavior_is_preserved() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let repo = tempdir().expect("repo tempdir");
     let nested = repo.path().join("a").join("b");
     fs::create_dir_all(&nested).expect("create nested dir");
@@ -193,12 +185,11 @@ fn non_worktree_walk_up_behavior_is_preserved() {
 
 #[test]
 fn bootstrap_rejects_home_when_cwd_is_home_with_global_orbit_and_no_git() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let global_orbit = home.path().join(".orbit");
     seed_initialized_workspace_root(&global_orbit);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
-    let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("HOME", Some(home_var.as_str())), ("ORBIT_ROOT", None)]);
 
     let err = resolve_bootstrap_roots(home.path(), None)
         .expect_err("bootstrap should refuse to adopt the global root as a workspace");
@@ -211,13 +202,12 @@ fn bootstrap_rejects_home_when_cwd_is_home_with_global_orbit_and_no_git() {
 
 #[test]
 fn bootstrap_rejects_home_when_home_itself_is_a_git_repo() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     fs::create_dir_all(home.path().join(".git")).expect("seed home as git repo");
     let global_orbit = home.path().join(".orbit");
     seed_initialized_workspace_root(&global_orbit);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
-    let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("HOME", Some(home_var.as_str())), ("ORBIT_ROOT", None)]);
 
     let err = resolve_bootstrap_roots(home.path(), None)
         .expect_err("bootstrap should refuse $HOME/.orbit via git_repo_root + cwd_fallback");
@@ -230,14 +220,13 @@ fn bootstrap_rejects_home_when_home_itself_is_a_git_repo() {
 
 #[test]
 fn bootstrap_ignores_home_global_orbit_when_repo_has_no_workspace_orbit() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
     let home = tempdir().expect("home tempdir");
     let repo = home.path().join("work").join("repo");
     fs::create_dir_all(repo.join(".git")).expect("create repo git dir");
     let global_orbit = home.path().join(".orbit");
     seed_initialized_workspace_root(&global_orbit);
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
-    let _orbit_root = EnvVarGuard::remove("ORBIT_ROOT");
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("HOME", Some(home_var.as_str())), ("ORBIT_ROOT", None)]);
 
     let resolved = resolve_bootstrap_roots(&repo, None).expect("resolve bootstrap root");
 
@@ -247,10 +236,9 @@ fn bootstrap_ignores_home_global_orbit_when_repo_has_no_workspace_orbit() {
 
 #[test]
 fn try_resolve_returns_none_outside_orbit_workspace() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
     let home = tempdir().expect("home tempdir");
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("ORBIT_ROOT", None), ("HOME", Some(home_var.as_str()))]);
     let nowhere = tempdir_in(home.path()).expect("nowhere tempdir");
 
     let resolved = try_resolve_initialized_roots(nowhere.path(), None)
@@ -262,8 +250,7 @@ fn try_resolve_returns_none_outside_orbit_workspace() {
 
 #[test]
 fn try_resolve_finds_initialized_workspace_via_walk_up() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let repo = tempdir().expect("repo tempdir");
     let nested = repo.path().join("a").join("b");
     fs::create_dir_all(&nested).expect("create nested dir");
@@ -278,10 +265,9 @@ fn try_resolve_finds_initialized_workspace_via_walk_up() {
 
 #[test]
 fn try_resolve_finds_main_worktree_orbit_for_linked_worktree() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
     let home = tempdir().expect("home tempdir");
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("ORBIT_ROOT", None), ("HOME", Some(home_var.as_str()))]);
     let main_repo = tempdir_in(home.path()).expect("main repo tempdir");
     let worktree = tempdir_in(home.path()).expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
@@ -296,10 +282,9 @@ fn try_resolve_finds_main_worktree_orbit_for_linked_worktree() {
 
 #[test]
 fn try_resolve_returns_none_when_main_worktree_orbit_is_uninitialized() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
     let home = tempdir().expect("home tempdir");
-    let _home = EnvVarGuard::set("HOME", home.path().as_os_str().to_os_string());
+    let home_var = home.path().to_string_lossy().into_owned();
+    let _env = test_env::scoped([("ORBIT_ROOT", None), ("HOME", Some(home_var.as_str()))]);
     let main_repo = tempdir_in(home.path()).expect("main repo tempdir");
     let worktree = tempdir_in(home.path()).expect("worktree tempdir");
     seed_fake_git_worktree(main_repo.path(), worktree.path());
@@ -316,8 +301,7 @@ fn try_resolve_returns_none_when_main_worktree_orbit_is_uninitialized() {
 
 #[test]
 fn try_resolve_honors_initialized_root_override() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let repo = tempdir().expect("repo tempdir");
     let orbit_root = repo.path().join(".orbit");
     seed_initialized_workspace_root(&orbit_root);
@@ -331,8 +315,7 @@ fn try_resolve_honors_initialized_root_override() {
 
 #[test]
 fn try_resolve_rejects_uninitialized_root_override() {
-    let _guard = ENV_LOCK.lock().expect("lock env");
-    let _env = EnvVarGuard::remove("ORBIT_ROOT");
+    let _env = test_env::unset(["ORBIT_ROOT"]);
     let parent = tempdir().expect("parent tempdir");
     let bogus = parent.path().join("not-an-orbit-root");
     fs::create_dir_all(&bogus).expect("create bogus dir");
@@ -383,40 +366,4 @@ fn seed_fake_git_worktree(main_repo: &Path, worktree: &Path) {
         format!("gitdir: {}\n", worktree_git_dir.display()),
     )
     .expect("write worktree gitfile");
-}
-
-struct EnvVarGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvVarGuard {
-    fn set(key: &'static str, value: OsString) -> Self {
-        let previous = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, previous }
-    }
-
-    fn remove(key: &'static str) -> Self {
-        let previous = std::env::var_os(key);
-        unsafe {
-            std::env::remove_var(key);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => unsafe {
-                std::env::set_var(self.key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(self.key);
-            },
-        }
-    }
 }

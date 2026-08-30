@@ -23,7 +23,7 @@ fn shipped_defaults_all_parse_and_are_disabled() {
         .map(|(name, _)| *name)
         .collect();
     for required in [
-        "code-review-sweep",
+        "code-review",
         "friction-curation",
         "qa-sweep",
         "security-review",
@@ -203,7 +203,13 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
 
     assert_eq!(definition.name, "qa-sweep");
     assert!(!definition.enabled);
-    assert!(matches!(definition.schedule, AutoTaskSchedule::Cron { .. }));
+    assert_eq!(
+        definition.schedule,
+        AutoTaskSchedule::Cron {
+            cron: "50 * * * *".to_string()
+        },
+        "qa-sweep must keep its documented hourly schedule"
+    );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
     // [ORB-10877] Same portable system-lane rule as friction-curation above.
     assert_eq!(definition.template.crew.as_deref(), Some("system"));
@@ -214,6 +220,14 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     assert_eq!(
         definition.template.status,
         orbit_types::task::TaskStatus::Backlog
+    );
+    assert_eq!(
+        definition.template.task_type,
+        orbit_types::task::TaskType::Chore
+    );
+    assert_eq!(
+        definition.template.priority,
+        orbit_types::task::TaskPriority::Medium
     );
     assert!(definition.template.tags.iter().any(|tag| tag == "qa-sweep"));
     assert!(
@@ -228,10 +242,13 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
     for required in [
         "validate them hands-on",
         "exercise the affected",
+        "documented setup",
+        "writable temporary",
+        "configured task or issue surface",
         "skip duplicates",
         "failing test",
         "standard validation command",
-        "must be filed as an orbit task",
+        "must be filed as a durable issue",
         "environment-specific",
         "test-harness",
         "portability",
@@ -248,6 +265,36 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
             "template should retain '{required}'"
         );
     }
+    let yaml_lower = yaml.to_lowercase();
+    for orbit_specific in [
+        "orbit init",
+        "workspace init",
+        "--root",
+        "~/.orbit",
+        "orbit mcp",
+        "orbit tool run",
+        "filed as an orbit task",
+        "filed as orbit tasks",
+        "tag it `qa-sweep`",
+    ] {
+        assert!(
+            !yaml_lower.contains(orbit_specific),
+            "qa-sweep instructions must stay product-agnostic; found '{orbit_specific}'"
+        );
+    }
+    assert!(
+        definition
+            .template
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| {
+                let criterion = criterion.to_lowercase();
+                criterion.contains("configured task or issue surface")
+                    && criterion.contains("evidence")
+                    && criterion.contains("reproduction")
+            }),
+        "qa-sweep acceptance criteria must require durable reporting on the workspace issue surface"
+    );
     assert!(
         definition
             .template
@@ -259,6 +306,7 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
                     && criterion.contains("validation command")
                     && criterion.contains("validation impact")
                     && criterion.contains("production impact")
+                    && !criterion.contains("orbit task")
             }),
         "qa-sweep acceptance criteria must require filing breaking tests"
     );
@@ -268,21 +316,28 @@ fn qa_sweep_default_preserves_hands_on_validation_contract() {
 /// than in scheduler state, so the template must keep saying so, and it must
 /// stay generic across workspaces.
 #[test]
-fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
+fn code_review_default_is_portable_cursor_driven_and_inert() {
     let (_, yaml) = DEFAULT_AUTO_TASK_FILES
         .iter()
-        .find(|(name, _)| *name == "code-review-sweep")
-        .expect("code-review-sweep default");
-    let definition = parse_auto_task_yaml(yaml).expect("parse code-review-sweep");
+        .find(|(name, _)| *name == "code-review")
+        .expect("code-review default");
+    let definition = parse_auto_task_yaml(yaml).expect("parse code-review");
+    let repository_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".orbit/auto_tasks/code-review.yaml");
+    let repository_yaml = std::fs::read_to_string(&repository_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", repository_path.display()));
+    let repository_definition =
+        parse_auto_task_yaml(&repository_yaml).expect("parse repository code-review");
 
-    assert_eq!(definition.name, "code-review-sweep");
+    assert_eq!(definition.name, "code-review");
     assert!(!definition.enabled, "definition must ship disabled");
     assert_eq!(
         definition.schedule,
         AutoTaskSchedule::Cron {
             cron: "40 */6 * * *".to_string()
         },
-        "code-review-sweep must use a documented six-hourly schedule"
+        "code-review must use a documented six-hourly schedule"
     );
     assert!(matches!(definition.dedupe, DedupePolicy::SkipIfOpen));
     assert_eq!(definition.template.crew.as_deref(), Some("system"));
@@ -294,7 +349,7 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
         definition.template.status,
         orbit_types::task::TaskStatus::Backlog
     );
-    for required_tag in ["code-review-sweep", "no-diff-expected"] {
+    for required_tag in ["code-review", "no-diff-expected"] {
         assert!(
             definition
                 .template
@@ -307,6 +362,14 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
     assert!(
         !yaml.contains("/home/") && !yaml.contains("/Users/"),
         "default must not contain a machine-specific path"
+    );
+    assert_eq!(
+        repository_definition.template.description, definition.template.description,
+        "repository and embedded code-review instructions must stay synchronized"
+    );
+    assert_eq!(
+        repository_definition.template.acceptance_criteria, definition.template.acceptance_criteria,
+        "repository and embedded code-review criteria must stay synchronized"
     );
     // The template ships to every workspace, so it must not name this
     // repository's branches or files.
@@ -330,6 +393,11 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
         "orbit tool run orbit.task.list",
         "orbit tool run orbit.task.show",
         "orbit tool run orbit.search",
+        "code-review-sweep",
+        "both tag filters use and semantics",
+        "lexicographically smaller task id",
+        "never use a `code-review`-only finding",
+        "only that case seeds the cursor",
     ] {
         assert!(
             body.contains(required),
@@ -339,6 +407,15 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
     assert!(!body.contains("orbit task add"));
     assert!(!body.contains("orbit task list"));
     assert!(!body.contains("orbit task show"));
+    for sweep_query in [
+        r#""tag":["code-review","no-diff-expected"],"limit":1"#,
+        r#""tag":["code-review-sweep","no-diff-expected"],"limit":1"#,
+    ] {
+        assert!(
+            definition.template.description.contains(sweep_query),
+            "code-review must retain deterministic sweep query {sweep_query}"
+        );
+    }
     assert!(
         definition
             .template
@@ -350,7 +427,7 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
                     && criterion.contains("last-reviewed commit")
                     && criterion.contains("execution summary")
             }),
-        "code-review-sweep must require recording the window cursor"
+        "code-review must require recording the window cursor"
     );
     assert!(
         definition
@@ -363,8 +440,67 @@ fn code_review_sweep_default_is_portable_cursor_driven_and_inert() {
                     && criterion.contains("non-duplicate")
                     && criterion.contains("file:line")
             }),
-        "code-review-sweep must require verified, evidenced, non-duplicate findings"
+        "code-review must require verified, evidenced, non-duplicate findings"
     );
+}
+
+#[test]
+fn code_review_cursor_fixture_ignores_newer_finding_and_current_sweep() {
+    struct ReviewTask<'a> {
+        id: &'a str,
+        created_order: u8,
+        completed_order: Option<u8>,
+        task_type: &'a str,
+        tags: &'a [&'a str],
+        cursor: Option<&'a str>,
+    }
+
+    let tasks = [
+        ReviewTask {
+            id: "legacy-sweep",
+            created_order: 1,
+            completed_order: Some(1),
+            task_type: "chore",
+            tags: &["code-review-sweep", "no-diff-expected"],
+            cursor: Some("legacy-sweep-cursor"),
+        },
+        ReviewTask {
+            id: "newer-finding",
+            created_order: 2,
+            completed_order: Some(2),
+            task_type: "bug",
+            tags: &["code-review"],
+            cursor: None,
+        },
+        ReviewTask {
+            id: "current-sweep",
+            created_order: 3,
+            completed_order: None,
+            task_type: "chore",
+            tags: &["code-review", "no-diff-expected"],
+            cursor: None,
+        },
+    ];
+
+    let selected = tasks
+        .iter()
+        .filter(|task| {
+            let current_sweep =
+                task.tags.contains(&"code-review") && task.tags.contains(&"no-diff-expected");
+            let legacy_sweep =
+                task.tags.contains(&"code-review-sweep") && task.tags.contains(&"no-diff-expected");
+            task.completed_order.is_some()
+                && task.task_type == "chore"
+                && (current_sweep || legacy_sweep)
+        })
+        .max_by(|left, right| {
+            left.created_order
+                .cmp(&right.created_order)
+                .then_with(|| right.id.cmp(left.id))
+        })
+        .and_then(|task| task.cursor);
+
+    assert_eq!(selected, Some("legacy-sweep-cursor"));
 }
 
 #[test]

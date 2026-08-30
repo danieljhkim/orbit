@@ -342,6 +342,58 @@ impl TaskRegistryStore {
         Ok(binding)
     }
 
+    /// Record the portable source-repository identity when an existing
+    /// workspace first enables a workflow that requires it.
+    ///
+    /// Ordinary task-runtime bootstrap deliberately does not infer remote
+    /// identity. Explicit publication binding supplies the registry-validated
+    /// value instead. Once recorded, a different value is a pairing conflict,
+    /// never an implicit source move.
+    pub fn record_workspace_repo_fingerprint(
+        &self,
+        workspace_id: &str,
+        repo_fingerprint: &str,
+    ) -> Result<WorkspaceBinding, OrbitError> {
+        let workspace_id = validate_workspace_id(workspace_id)?;
+        if repo_fingerprint.trim() != repo_fingerprint || repo_fingerprint.is_empty() {
+            return Err(OrbitError::InvalidInput(
+                "workspace repository fingerprint must be non-empty and trimmed".to_string(),
+            ));
+        }
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|error| OrbitError::Store(format!("mutex poisoned: {error}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        let existing = workspace_by_id(&tx, &workspace_id)?
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Workspace, workspace_id.clone()))?;
+        match existing.repo_fingerprint.as_deref() {
+            Some(current) if current == repo_fingerprint => {}
+            Some(_) => {
+                return Err(OrbitError::InvalidInput(format!(
+                    "workspace '{workspace_id}' is registered with a different source-repository fingerprint"
+                )));
+            }
+            None => {
+                tx.execute(
+                    "UPDATE workspace_bindings
+                     SET repo_fingerprint = ?2, updated_at = ?3
+                     WHERE workspace_id = ?1",
+                    params![workspace_id, repo_fingerprint, now_string()],
+                )
+                .map_err(|error| OrbitError::Store(error.to_string()))?;
+            }
+        }
+        let binding = workspace_by_id(&tx, &workspace_id)?.ok_or_else(|| {
+            OrbitError::Store("failed to read fingerprinted workspace binding".to_string())
+        })?;
+        tx.commit()
+            .map_err(|error| OrbitError::Store(error.to_string()))?;
+        Ok(binding)
+    }
+
     /// Allocate a monotonic local task ID.
     ///
     /// Allocation commits independently from bundle registration. A crash between
@@ -1310,6 +1362,39 @@ impl TaskRegistryStore {
         let previous = read_allocator_next_number(&tx)?;
         if target > previous {
             set_allocator_next_number(&tx, target)?;
+        }
+        tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
+    }
+
+    /// Restore an allocator value after a larger workflow failed after its
+    /// final allocator advance. This is deliberately crate-private and guarded
+    /// by the exact value the workflow observed after advancing, so it cannot
+    /// rewind over a concurrent allocation.
+    pub(crate) fn restore_allocator_after_failed_restore(
+        &self,
+        expected_current: u32,
+        previous: u32,
+    ) -> Result<(), OrbitError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| OrbitError::Store(format!("mutex poisoned: {e}")))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let current = read_allocator_next_number(&tx)?;
+        if current != expected_current {
+            return Err(OrbitError::Store(format!(
+                "cannot roll back failed publication restore allocator: expected {expected_current}, found {current}"
+            )));
+        }
+        if previous > current {
+            return Err(OrbitError::Store(format!(
+                "invalid publication restore allocator rollback from {current} to {previous}"
+            )));
+        }
+        if previous != current {
+            set_allocator_next_number(&tx, previous)?;
         }
         tx.commit().map_err(|e| OrbitError::Store(e.to_string()))
     }

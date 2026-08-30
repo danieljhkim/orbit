@@ -104,7 +104,12 @@ spec:
     9. Run the friction checkpoint. File `orbit.friction.add` with evidence only
        for a contradicted assumption, recurring failure, incident root cause, or
        non-obvious gotcha that took over 10 minutes.
-    10. Workflow admission already set `in-progress`: do not call
+    10. Before handoff, remove any package-manager caches, local dependency
+        repositories, or generated build artifacts that this implementation run
+        created inside the worktree; leave pre-existing worktree contents and
+        legitimate task outputs untouched. Then run `git status --short` and
+        confirm every remaining entry is an intended task-scoped change.
+    11. Workflow admission already set `in-progress`: do not call
         `orbit.task.start`, and do not move the task to `review` (the pipeline
         owns that transition). Before returning, REQUIRED: persist a meaningful
         `execution_summary` with `orbit.task.update`; downstream delivery reads

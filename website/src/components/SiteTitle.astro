@@ -1,0 +1,25 @@
+---
+import Default from '@astrojs/starlight/components/SiteTitle.astro';
+
+const links = [
+  { href: '/getting-started/', label: 'Getting started' },
+  { href: '/concepts/', label: 'Concepts' },
+  { href: '/how-to/', label: 'How-to guides' },
+  { href: '/reference/', label: 'Reference' },
+  { href: '/architecture/', label: 'Architecture' },
+];
+
+const pathname = Astro.url.pathname;
+---
+
+<Default />
+
+<nav class="orbit-topnav print:hidden" aria-label="Documentation sections">
+  {
+    links.map(({ href, label }) => (
+      <a href={href} aria-current={pathname.startsWith(href) ? 'true' : undefined}>
+        {label}
+      </a>
+    ))
+  }
+</nav>

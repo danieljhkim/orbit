@@ -33,8 +33,16 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/classify_workspace_auto_tasks.yaml"),
     ),
     (
+        "collect_ci_evidence",
+        include_str!("../../assets/activities/collect_ci_evidence.yaml"),
+    ),
+    (
         "drain_window",
         include_str!("../../assets/activities/drain_window.yaml"),
+    ),
+    (
+        "file_ci_failure_tasks",
+        include_str!("../../assets/activities/file_ci_failure_tasks.yaml"),
     ),
     (
         "epic_orchestrator",
@@ -340,6 +348,34 @@ backend = "cli"
     }
 
     #[test]
+    fn agent_implement_tools_remain_the_implementation_baseline() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+            panic!("expected agent_loop activity");
+        };
+        assert_eq!(
+            spec.tools,
+            [
+                "orbit.task.*",
+                "orbit.friction.*",
+                "orbit.search",
+                "proc.spawn"
+            ]
+        );
+        assert!(
+            spec.tools
+                .iter()
+                .all(|tool| !tool.starts_with("github.") && !tool.contains("ceiling")),
+            "agent_implement must not widen to GitHub reads or grow a task ceiling: {:?}",
+            spec.tools
+        );
+    }
+
+    #[test]
     fn agent_implement_context_loading_reads_files_and_lists_directories() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
@@ -620,7 +656,7 @@ backend = "cli"
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(tool_allowed("orbit.task.add", &spec.tools));
                 assert!(tool_allowed("orbit.task.update", &spec.tools));
-                assert!(tool_allowed("orbit.session_log.append", &spec.tools));
+                assert!(!tool_allowed("orbit.session_log.append", &spec.tools));
                 assert!(tool_allowed("orbit.search", &spec.tools));
                 assert!(tool_allowed("proc.spawn", &spec.tools));
                 for denied in [
@@ -650,6 +686,7 @@ backend = "cli"
                 assert!(instruction.contains("execution_summary"));
                 assert!(instruction.contains("move the epic to `review`"));
                 assert!(!instruction.contains("session resume"));
+                assert!(!instruction.contains("orbit.session_log"));
                 assert!(!instruction.contains("shrink the scan set"));
                 assert_eq!(
                     spec.proc_allowed_programs.as_deref(),

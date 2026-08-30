@@ -126,7 +126,12 @@ ci-fast:
 	./scripts/check-changelog-style.sh
 	./scripts/check-error-translation.sh
 	./scripts/check-orphan-modules.sh
+	./scripts/check-crate-agent-guides.sh
 	./scripts/check-embedded-asset-portability.py
+	./scripts/sync-plugin-skills.sh --check
+	./scripts/test-validate-codex-plugin.sh
+	./scripts/test-validate-agent-plugin.sh
+	./scripts/smoke-plugin-install.sh
 
 # Compile-time pre-handoff gate for agents. Keep this invocation aligned with
 # the default workspace clippy pass in scripts/ci-guardrails.sh.
@@ -137,7 +142,7 @@ ci-lint:
 stability:
 	./scripts/check-stability.sh
 
-# Verify Cargo/npm/release version invariant before cutting a release
+# Verify Cargo/npm/plugin/release version invariant before cutting a release
 release-check:
 	./scripts/release-check.sh
 

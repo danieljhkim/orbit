@@ -255,3 +255,99 @@ fn ungoverned_operations_have_no_registry_entry_to_enforce() {
         );
     }
 }
+
+/// [ORB-11052] A remote-originated MCP session carries the destination's own
+/// statement about the caller, and a refusal has to be actionable from the
+/// calling machine — which cannot reach the file it names.
+fn remote_session(
+    caller_machine_id: &str,
+    granted: BTreeSet<McpCapability>,
+    effective: BTreeSet<McpCapability>,
+) -> ToolSessionContext {
+    ToolSessionContext {
+        effective_capabilities: effective,
+        remote_caller_grant: Some(orbit_types::tool::RemoteCallerGrant {
+            caller_machine_id: caller_machine_id.to_string(),
+            granted_capabilities: granted,
+            source: "~/.orbit/mcp-callers.toml".to_string(),
+            ..orbit_types::tool::RemoteCallerGrant::default()
+        }),
+        ..ToolSessionContext::default()
+    }
+}
+
+#[test]
+fn a_callers_file_grant_is_distinguishable_from_a_local_session_stamp() {
+    let granted = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&remote_session(
+        "hm_alpha",
+        BTreeSet::from([McpCapability::Agent]),
+        BTreeSet::from([McpCapability::Agent]),
+    )));
+    let stamped = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&ToolSessionContext {
+        effective_capabilities: BTreeSet::from([McpCapability::Agent]),
+        ..ToolSessionContext::default()
+    }));
+
+    assert_eq!(granted.provenance(), CallerProvenance::RemoteGrant);
+    assert_eq!(stamped.provenance(), CallerProvenance::Session);
+    assert_eq!(granted.grants(), stamped.grants());
+}
+
+#[test]
+fn a_capped_remote_caller_is_told_which_file_capped_it() {
+    let caller = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&remote_session(
+        "hm_alpha",
+        BTreeSet::from([McpCapability::Agent]),
+        BTreeSet::from([McpCapability::Agent]),
+    )));
+
+    let denial = authorize(operation("orbit.command.exec"), &caller)
+        .expect_err("an agent-capped caller must not reach command execution");
+    let message = denial.to_string();
+
+    assert!(message.contains("hm_alpha"), "{message}");
+    assert!(message.contains("~/.orbit/mcp-callers.toml"), "{message}");
+    assert!(message.contains("operator"), "{message}");
+    assert!(
+        !message.contains(OPERATOR_OVERRIDE_ENV),
+        "the override is inert here and advising it would send the caller in a circle: {message}"
+    );
+}
+
+#[test]
+fn a_denied_caller_holds_nothing_and_still_reads_as_a_remote_grant() {
+    let caller = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&remote_session(
+        "hm_beta",
+        BTreeSet::new(),
+        BTreeSet::new(),
+    )));
+
+    assert!(caller.grants().is_empty());
+    assert_eq!(
+        caller.provenance(),
+        CallerProvenance::RemoteGrant,
+        "a deny row must not fall through to the destination's ambient signals"
+    );
+}
+
+#[test]
+fn the_grant_survives_to_the_denial_so_audit_can_record_both_sets() {
+    let caller = CallerCapabilities::resolve(&CallerEnvelope::mcp_session(&remote_session(
+        "hm_alpha",
+        BTreeSet::from([McpCapability::Agent]),
+        BTreeSet::from([McpCapability::Agent]),
+    )));
+
+    let denial = authorize(operation("orbit.workflow.ship"), &caller).expect_err("denied");
+
+    let grant = denial
+        .remote_caller_grant
+        .expect("the denial carries the grant it refused against");
+    assert_eq!(grant.granted_capabilities, *caller.grants());
+    assert_eq!(
+        caller
+            .remote_caller_grant()
+            .map(|g| g.caller_machine_id.as_str()),
+        Some("hm_alpha")
+    );
+}

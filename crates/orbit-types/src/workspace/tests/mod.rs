@@ -1,1 +1,2 @@
+mod publication;
 mod workspace;

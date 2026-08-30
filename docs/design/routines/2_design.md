@@ -1,8 +1,8 @@
 ---
 title: Routines — Design
 owner: claude
-last_updated: 2026-08-23
-last_validated: 2026-08-23
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 status: Accepted
 feature: routines
 doc_role: design
@@ -11,7 +11,7 @@ summary: Proposed contract for routine definitions, sweep dispatch, host-local s
 tags: [routines, scheduler]
 paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800, ORB-10986]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800, ORB-10986, ORB-11082]
 ---
 
 # Routines — Design
@@ -32,7 +32,8 @@ routine definition. Its durable configuration is `~/.orbit/clock.toml`, defaults
 `orbit routine clock status` reports configured cadence, native-manager enabled state,
 and whether an enabled Linux timer is active with a finite next trigger. An enabled timer
 without that scheduling state is `unhealthy`, has no effective cadence, and reports
-`orbit routine clock enable`, which restarts the timer and verifies the resulting deadline.
+`orbit routine clock enable`, which rewrites a stale installed systemd timer if needed,
+restarts the timer, and verifies the resulting deadline.
 `orbit routine clock pause` disables only launchd/systemd
 scheduled invocations (surviving logout/reboot through the native per-user manager);
 it preserves routine cursors, fire history, and per-routine pauses, and a deliberate
@@ -115,8 +116,8 @@ as absent; it never degrades into "fire with defaults".
 ### Seeded defaults and ownership
 
 `orbit workspace init` seeds `auto_task_scheduler.yaml`, `task_triage.yaml`,
-`task_pilot.yaml`, `ship_sweep.yaml`, and `worktree_gc.yaml` with a workspace-unique
-name, the resolved host pin, and
+`task_pilot.yaml`, `ship_sweep.yaml`, `worktree_gc.yaml`, and `ci_failure_sweep.yaml`
+with a workspace-unique name, the resolved host pin, and
 `enabled: false`. The definition's versioned `enabled` field is the opt-in: changing it
 to `true` deliberately grants that scheduled capability in the workspace.
 
@@ -135,6 +136,14 @@ unchanged content against the same host is a genuine no-op rather than a rewrite
 routine an operator has edited is never deleted: it is preserved under
 `.retired-managed/routines/`. `orbit doctor` reports routine artifacts as faulty,
 deprecated, or stale, and `orbit doctor --fix-stale-artifacts` performs the retirement.
+
+The seeded `ci_failure_sweep` targets `job:ci_failure_sweep_pipeline` hourly at
+`5 * * * *` — deliberately clear of the other defaults' minutes — with `missed_run: skip`
+and `overlap: forbid`. Its two deterministic steps run every GitHub query on the host and
+then file each current, non-stale failure cluster as an ordinary backlog bug task carrying
+that evidence inline, deduped against still-open tasks by failure key. The routine is a
+scheduling surface only: an operator-triggered run of the job behaves identically to a
+scheduled fire.
 
 The seeded `ship_sweep` targets `job:workspace_ship_pipeline` with `missed_run: skip` and
 `overlap: forbid`. The wrapper resolves the source runtime's ship mode and configured base
@@ -277,8 +286,10 @@ renders and installs the platform unit:
   `OnUnitActiveSec=<cadence>` plus a oneshot service. Every timer activation (fresh install,
   late reinstall, cadence change, or re-enable) therefore arms a finite first sweep relative
   to that activation; successful service activations schedule subsequent sweeps at the
-  configured cadence. `AccuracySec=5s` bounds manager coalescing after each deadline
-  [ORB-10986]. These monotonic
+  configured cadence. `orbit routine clock enable` compares the installed timer with the
+  embedded template, rewrites a stale definition (for example pre-fix `OnStartupSec`), and
+  daemon-reloads before restart [ORB-11082]. `AccuracySec=5s` bounds manager coalescing
+  after each deadline [ORB-10986]. These monotonic
   triggers deliberately do not replay timer events missed while the manager or host was
   down. The first sweep after restart evaluates each routine's cursor, so `catch_up_once`
   collapses missed cron slots to one fire and `skip` waits for the next natural slot.

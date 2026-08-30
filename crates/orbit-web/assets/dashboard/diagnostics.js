@@ -165,7 +165,7 @@ function eventCountLabel(value) {
   return `${count} event${count === 1 ? "" : "s"}`;
 }
 
-const INCIDENT_CLASS_ORDER = ["unexpected", "expected", "denied"];
+const INCIDENT_CLASS_ORDER = ["unexpected", "expected", "denied", "diagnostic"];
 
 function incidentSummaryNode(payload) {
   const incidents = asCount(payload.incident_count);
@@ -173,15 +173,21 @@ function incidentSummaryNode(payload) {
   const total = asCount(payload.total_events);
   const runs = asCount(payload.affected_run_count);
   const window = payload.window || getWindow();
-  const lifecycleEvents = asCount(payload.job_run_lifecycle_events);
-  const lifecycleIncidents = asCount(payload.job_run_lifecycle_incidents);
-  const lifecycleLabel = payload.job_run_lifecycle_label || "job-run lifecycle";
+  const categories = payload.failure_categories || {};
+  const unexpected = categories.unexpected || {};
+  const unexpectedIncidents = asCount(unexpected.incidents);
+  const unexpectedEvents = asCount(unexpected.raw_events);
+  const unexpectedRuns = asCount(unexpected.affected_runs);
+  const lifecycleEvents = asCount(payload.lifecycle_diagnostic_events);
+  const lifecycleIncidents = asCount(payload.lifecycle_diagnostic_incidents);
+  const lifecycleRuns = asCount(payload.lifecycle_diagnostic_affected_run_count);
+  const lifecycleLabel = payload.lifecycle_diagnostic_label || "lifecycle diagnostics";
 
   const head = el("div", { class: "incident-summary-head" }, [
-    el("strong", { class: "incident-summary-headline", text: `${incidents} incidents` }),
+    el("strong", { class: "incident-summary-headline", text: `${unexpectedIncidents} unexpected incidents` }),
     el("span", {
       class: "incident-summary-denominator",
-      text: `${failed} failed events · ${incidents} grouped incidents · ${runs} affected runs of ${total} audited events`,
+      text: `${unexpectedEvents} unexpected raw events · ${unexpectedRuns} affected runs; ${incidents} incidents / ${failed} failed events / ${runs} affected runs across ${total} audited events`,
     }),
     el("span", { class: "incident-summary-window", text: `window ${window}` }),
   ]);
@@ -193,11 +199,13 @@ function incidentSummaryNode(payload) {
   for (const key of INCIDENT_CLASS_ORDER) {
     const count = asCount(byClass[key]);
     const events = asCount(eventsByClass[key]);
+    const category = categories[key] || {};
+    const categoryRuns = asCount(category.affected_runs);
     if (count === 0 && events === 0) continue;
     chips.appendChild(el("span", {
       class: `incident-class-chip ${key}`,
-      title: `${labels[key] || key}: ${count} incidents from ${events} raw events (window ${window})`,
-      text: `${labels[key] || key} ${count}/${events}`,
+      title: `${labels[key] || key}: ${count} incidents from ${events} raw events affecting ${categoryRuns} runs (window ${window})`,
+      text: `${labels[key] || key}: ${count} incidents · ${events} raw · ${categoryRuns} runs`,
     }));
   }
 
@@ -206,8 +214,8 @@ function incidentSummaryNode(payload) {
   if (lifecycleEvents > 0 || lifecycleIncidents > 0) {
     children.push(el("div", {
       class: "incident-lifecycle-note",
-      title: `${lifecycleLabel} rows have no tool identity and are excluded from tool denominators and rates`,
-      text: `${lifecycleLabel}: ${lifecycleEvents} failed events · ${lifecycleIncidents} incidents (excluded from tool rates)`,
+      title: `${lifecycleLabel} are failure-only event surfaces and are excluded from callable-tool denominators and rates`,
+      text: `${lifecycleLabel}: ${lifecycleIncidents} incidents · ${lifecycleEvents} raw events · ${lifecycleRuns} affected runs (excluded from tool rates)`,
     }));
   }
   if (payload.truncated) {
@@ -223,7 +231,7 @@ function incidentEvidenceTable(events, ctx) {
   const table = el("table", { class: "incident-evidence" });
   const thead = el("thead");
   const headRow = el("tr");
-  for (const label of ["event", "time", "status", "actor", "surface", "tool", "run", "task", "message"]) {
+  for (const label of ["event", "execution", "time", "status", "actor", "surface", "tool", "run", "task", "message"]) {
     headRow.appendChild(el("th", { text: label }));
   }
   thead.appendChild(headRow);
@@ -232,6 +240,7 @@ function incidentEvidenceTable(events, ctx) {
   for (const event of events) {
     const tr = el("tr");
     tr.appendChild(el("td", { class: "mono", text: event.id == null ? "-" : `#${event.id}` }));
+    tr.appendChild(el("td", { class: "mono", text: event.execution_id || "-" }));
     tr.appendChild(el("td", { text: ctx.fmtAbsTime ? ctx.fmtAbsTime(event.ts) : (event.ts || "-") }));
     tr.appendChild(el("td", { text: event.status || "-" }));
     tr.appendChild(el("td", { text: event.actor || "-" }));
@@ -397,7 +406,7 @@ function renderDiagnostics(ctx = {}) {
     // Both counts in the header: grouped incidents, and the raw failed events
     // they were derived from. Neither is inferable from the other.
     $("diag-count").textContent =
-      `${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events / ${asCount(payload.affected_run_count)} affected runs`;
+      `${asCount(payload.failure_categories && payload.failure_categories.unexpected && payload.failure_categories.unexpected.incidents)} unexpected / ${asCount(payload.incident_count)} all incidents / ${asCount(payload.raw_failed_events)} failed events`;
     renderIncidents(payload, ctx);
     renderDiagnosticsSideCard(last, ctx);
     return;

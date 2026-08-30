@@ -26,8 +26,11 @@ orbit mcp init --grok
 
 ## Register the federated mux
 
-Federated MCP presents one namespace over the SSH destinations in the
-machine-global `~/.orbit/mcp-destinations.toml`:
+Federated MCP presents one namespace over this machine's workspaces plus any
+SSH remotes in the machine-global `~/.orbit/mcp-destinations.toml`. Local
+workspaces need no destination row; a missing or empty file still serves a
+useful local-only federated session. Additional remotes are declared as SSH
+destinations:
 
 ```toml
 [[destinations]]

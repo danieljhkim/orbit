@@ -28,6 +28,7 @@ fn params(name: &str) -> AutoTaskAddParams {
             acceptance_criteria: vec!["Chore is observable.".to_string()],
             task_type: orbit_types::task::TaskType::Chore,
             tags: vec![],
+            required_tools: Vec::new(),
             priority: orbit_types::task::TaskPriority::Medium,
             crew: None,
             status: orbit_types::task::TaskStatus::Backlog,

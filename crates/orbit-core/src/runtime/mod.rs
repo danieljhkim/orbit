@@ -60,6 +60,7 @@ pub use resolve::{
 // `pub` for the runtime-less `orbit migrate --dry-run` inspection that moved
 // to `orbit-cmd` [ORB-10016].
 pub use resolve::{is_global_orbit_root, resolve_global_root, try_resolve_initialized_roots};
+pub use run_input::managed_workspace_selector_from_env;
 pub(crate) use task::{failed_run_error_context, is_workflow_failure_state};
 
 #[derive(Clone)]
@@ -97,6 +98,11 @@ pub struct OrbitRuntimeRoots {
 /// higher feature crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceRuntimeBinding {
+    /// Logical catalog ID (`ws_*`). Nested managed CLI/MCP calls use this
+    /// selector instead of rediscovering ownership from a linked-worktree cwd.
+    pub logical_workspace_id: String,
+    /// Checkout identity from `.orbit/config.yaml`, which the task registry
+    /// partitions by (L-0098: it may differ from `logical_workspace_id`).
     pub workspace_id: String,
     pub repo_root: PathBuf,
     pub ship_mode: ShipMode,
@@ -108,6 +114,7 @@ pub fn workspace_runtime_binding(
     checkout: &WorkspaceCheckout,
 ) -> Result<WorkspaceRuntimeBinding, OrbitError> {
     Ok(WorkspaceRuntimeBinding {
+        logical_workspace_id: workspace.id.clone(),
         workspace_id: workspace_id_for_orbit_dir(&checkout.orbit_dir)?,
         repo_root: checkout.repo_root.clone(),
         ship_mode: resolved_ship_mode(workspace),
@@ -150,6 +157,7 @@ impl OrbitRuntime {
         // Supply a checkout binding so task APIs still have a partition;
         // without it the data-dir skip would refuse to mint parent(tempdir).
         let binding = WorkspaceRuntimeBinding {
+            logical_workspace_id: "ws_memory".to_string(),
             workspace_id: "ws_memory".to_string(),
             repo_root: data_root.to_path_buf(),
             ship_mode: ShipMode::Local,

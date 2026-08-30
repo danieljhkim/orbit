@@ -1,0 +1,75 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: collect_ci_evidence
+spec:
+  type: deterministic
+  description: >
+    Run the GitHub capability preflight and every CI discovery query on the
+    host, outside any agent sandbox, and emit one bounded, redacted evidence
+    snapshot. Derives the workspace's integration head, the repository's
+    release head as GitHub itself reports it, and every open pull-request head
+    rather than assuming branch names; separates the event-reported SHA, the
+    ref's current head, and the commit the runner actually checked out; and
+    reports every bound it hit in `truncation` rather than silently returning
+    less. When no GitHub client is available or authenticated the snapshot
+    carries `collected: false` and gathers nothing further, so a caller can
+    never mistake it for a clean CI result.
+  input_schema_json:
+    type: object
+    properties:
+      workspace_path:
+        type: string
+      integration_branch:
+        type: string
+        description: >
+          The branch this workspace ships onto. Defaults to `base_branch`, then
+          to the repository's GitHub default branch.
+      base_branch:
+        type: string
+      runs_per_ref:
+        type: number
+      max_pull_requests:
+        type: number
+      max_investigated_runs:
+        type: number
+      log_max_bytes:
+        type: number
+      max_checkout_log_reads:
+        type: number
+  output_schema_json:
+    type: object
+    required: [phase, ci_evidence]
+    properties:
+      phase:
+        type: string
+      ci_evidence:
+        type: object
+        required: [schema_version, collected, capability]
+        properties:
+          schema_version:
+            type: number
+          collected:
+            type: boolean
+          outcome_hint:
+            type: string
+          capability:
+            type: object
+          repository:
+            type: object
+          heads:
+            type: array
+          current_failures:
+            type: array
+          stale_or_superseded:
+            type: array
+          in_flight:
+            type: array
+          query_errors:
+            type: array
+          truncation:
+            type: object
+          collected_at:
+            type: string
+  action: collect_ci_evidence
+  config: {}

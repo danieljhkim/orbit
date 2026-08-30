@@ -52,6 +52,7 @@ fn task(id: &str, title: &str, description: &str, plan: &str) -> Task {
         description: description.to_string(),
         acceptance_criteria: Vec::new(),
         tags: Vec::new(),
+        required_tools: Vec::new(),
         plan: plan.to_string(),
         execution_summary: String::new(),
         context_files: Vec::new(),

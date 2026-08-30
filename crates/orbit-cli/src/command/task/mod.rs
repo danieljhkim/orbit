@@ -8,11 +8,13 @@ mod lifecycle;
 mod lint;
 mod list;
 pub(crate) mod output;
+mod publication;
 mod reindex;
 pub(crate) mod show;
 mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};
+pub use publication::TaskPublicationSubcommand;
 
 fn mutation_identity(model: Option<String>) -> (Option<String>, Option<String>) {
     if model.is_some() {
