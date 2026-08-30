@@ -311,6 +311,16 @@ impl HubCoordinationExecutor {
         self.task_json(&task)
     }
 
+    /// Apply a checkoutless task update, holding the task's write lock across
+    /// the whole read-modify-write.
+    ///
+    /// ORB-11092: this path used to read the snapshot, check `required_tools`
+    /// freeze against it, and persist later without `with_task_write_lock`. A
+    /// concurrent `orbit.task.start` could append `in-progress` after that
+    /// stale snapshot and still lose to the later write, mutating execution
+    /// authority after admission. The lock is re-entrant per thread, so start
+    /// (which calls this method) and the store's per-write locking still hold
+    /// underneath.
     fn update_task(
         &self,
         input: Value,
@@ -318,7 +328,57 @@ impl HubCoordinationExecutor {
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
         let id = required_string(&input, &["id"], "id")?;
-        let current = self.task(&id)?;
+        // The lock hook takes `FnMut` because it is a trait object, but the
+        // body must run exactly once and consumes its inputs; `take()` makes
+        // both facts explicit rather than forcing the params to be cloneable.
+        let mut inputs = Some((input, agent, model));
+        let mut outcome: Option<(Value, TaskStatus, Task)> = None;
+        self.inner.tasks.task.with_task_write_lock(&id, &mut || {
+            let (input, agent, model) = inputs.take().ok_or_else(|| {
+                OrbitError::Execution(
+                    "checkoutless task update body was invoked more than once".to_string(),
+                )
+            })?;
+            outcome = Some(self.update_task_locked(&id, input, agent, model)?);
+            Ok(())
+        })?;
+        let (json, prior_status, updated) = outcome.ok_or_else(|| {
+            OrbitError::Execution(
+                "checkoutless task update body did not run under the task lock".to_string(),
+            )
+        })?;
+
+        // Cascading friction resolution touches *other* records, so it stays
+        // outside this task's lock.
+        if updated.status == TaskStatus::Done
+            && prior_status != TaskStatus::Done
+            && let Ok(frictions) = self.friction_store()
+        {
+            for relation in &updated.relations {
+                if relation.relation_type == orbit_types::task::TaskRelationType::Resolves
+                    && is_valid_friction_id(&relation.target)
+                    && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
+                {
+                    tracing::warn!(
+                        task_id = id,
+                        friction_id = relation.target,
+                        error = %error,
+                        "checkoutless task completion could not apply friction side effect"
+                    );
+                }
+            }
+        }
+        Ok(json)
+    }
+
+    fn update_task_locked(
+        &self,
+        id: &str,
+        input: Value,
+        agent: Option<String>,
+        model: Option<String>,
+    ) -> Result<(Value, TaskStatus, Task), OrbitError> {
+        let current = self.task(id)?;
         let actor = Self::actor(agent.as_deref(), model.as_deref());
         let status = optional_string(&input, "status")?
             .map(|value| super::input::parse_task_status("status", &value))
@@ -398,7 +458,7 @@ impl HubCoordinationExecutor {
         if let Some(dependencies) = dependencies.as_ref() {
             validate_task_dependencies(
                 &self.inner.tasks.task.list_tasks()?,
-                Some(&id),
+                Some(id),
                 dependencies,
             )?;
         }
@@ -470,7 +530,7 @@ impl HubCoordinationExecutor {
                     .inner
                     .tasks
                     .history
-                    .get_task_history(&id)?
+                    .get_task_history(id)?
                     .unwrap_or_default()
                     .iter()
                     .any(|entry| entry.to_status == Some(TaskStatus::InProgress));
@@ -489,7 +549,7 @@ impl HubCoordinationExecutor {
             )));
         }
         self.inner.tasks.document.update_task_document(
-            &id,
+            id,
             TaskDocumentUpdateParams {
                 actor: actor.clone(),
                 title: optional_string(&input, "title")?.map(|value| redact_all(&value)),
@@ -533,7 +593,7 @@ impl HubCoordinationExecutor {
         )?;
         if !artifacts.is_empty() {
             self.inner.tasks.artifact.upsert_task_artifacts(
-                &id,
+                id,
                 TaskArtifactUpdateParams {
                     actor: actor.clone(),
                     upsert_artifacts: artifacts,
@@ -550,7 +610,7 @@ impl HubCoordinationExecutor {
                 .into_iter()
                 .collect();
             self.inner.tasks.history.update_task_history(
-                &id,
+                id,
                 TaskHistoryUpdateParams {
                     actor,
                     status,
@@ -561,26 +621,9 @@ impl HubCoordinationExecutor {
                 },
             )?;
         }
-        let updated = self.task(&id)?;
-        if updated.status == TaskStatus::Done
-            && current.status != TaskStatus::Done
-            && let Ok(frictions) = self.friction_store()
-        {
-            for relation in &updated.relations {
-                if relation.relation_type == orbit_types::task::TaskRelationType::Resolves
-                    && is_valid_friction_id(&relation.target)
-                    && let Err(error) = frictions.resolve_by_task(&relation.target, &id, Utc::now())
-                {
-                    tracing::warn!(
-                        task_id = id,
-                        friction_id = relation.target,
-                        error = %error,
-                        "checkoutless task completion could not apply friction side effect"
-                    );
-                }
-            }
-        }
-        self.task_json(&updated)
+        let updated = self.task(id)?;
+        let json = self.task_json(&updated)?;
+        Ok((json, current.status, updated))
     }
 
     fn transition(
@@ -591,7 +634,33 @@ impl HubCoordinationExecutor {
         start: bool,
     ) -> Result<Value, OrbitError> {
         let id = required_string(&input, &["id"], "id")?;
-        let task = self.task(&id)?;
+        let mut inputs = Some((input, agent, model, start));
+        let mut result = None;
+        self.inner.tasks.task.with_task_write_lock(&id, &mut || {
+            let (input, agent, model, start) = inputs.take().ok_or_else(|| {
+                OrbitError::Execution(
+                    "checkoutless task transition body was invoked more than once".to_string(),
+                )
+            })?;
+            result = Some(self.transition_locked(&id, input, agent, model, start)?);
+            Ok(())
+        })?;
+        result.ok_or_else(|| {
+            OrbitError::Execution(
+                "checkoutless task transition body did not run under the task lock".to_string(),
+            )
+        })
+    }
+
+    fn transition_locked(
+        &self,
+        id: &str,
+        input: Value,
+        agent: Option<String>,
+        model: Option<String>,
+        start: bool,
+    ) -> Result<Value, OrbitError> {
+        let task = self.task(id)?;
         let target = if start {
             if !matches!(
                 task.status,
@@ -623,7 +692,7 @@ impl HubCoordinationExecutor {
             }
         };
         let mut update = Map::new();
-        update.insert("id".to_string(), Value::String(id));
+        update.insert("id".to_string(), Value::String(id.to_string()));
         update.insert("status".to_string(), Value::String(target.to_string()));
         if let Some(note) = optional_string(&input, "note")? {
             update.insert("comment".to_string(), Value::String(note));
