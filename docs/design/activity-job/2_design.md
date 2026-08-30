@@ -306,6 +306,8 @@ provider harness.
 dispatch. Before provider construction or launch, orbit-core loads every task
 selected by the agent activity and computes `effective_tools =
 deduplicate(activity.tools union selected_tasks.required_tools)`. Required
+tools are immutable creation-time task authority; task update paths cannot
+alter the stored list. Required
 names are exact canonical registered tools;
 wildcards, malformed or unknown names, disabled tools, and registered tools not
 on the agent-facing surface fail with `RequiredToolAdmission` naming the task

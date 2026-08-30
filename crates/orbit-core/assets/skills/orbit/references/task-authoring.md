@@ -88,8 +88,9 @@ job fills them from real inspection. → [orchestration.md](orchestration.md)
   `update` silently drops it), `tags` (reuse existing before inventing new).
 - `required_tools: ["<exact.canonical.tool>", ...]` — tools the task must add to
   any agent activity's baseline. Use only exact, active, agent-facing registered
-  names; wildcards and prefixes are rejected at dispatch. The list is sorted and
-  deduplicated on write, and cannot change once the task enters `in-progress`.
+  names; wildcards and prefixes are rejected at dispatch. The list is normalized,
+  sorted, and deduplicated at creation. It is immutable afterward, and every
+  existing-task update surface rejects `required_tools`.
   Inclusion grants only activity allowlist membership: caller role, host
   capability, tool policy, filesystem/subprocess policy, and external
   authentication can still deny execution. The shipped `ci-failure-remediation`

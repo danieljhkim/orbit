@@ -18,7 +18,8 @@ Supported activity types:
 
 For a task-backed `agent_loop`, the activity's `tools` are a baseline. Orbit
 adds the task's exact `required_tools` and deduplicates the union before provider
-launch. A task with no requirements receives the baseline unchanged. Unknown,
+launch. The list is immutable after task creation. A task with no requirements
+receives the baseline unchanged. Unknown,
 inactive, malformed, wildcard, and non-agent-facing requirements fail admission
 before launch. If one agent activity selects multiple tasks, their requirements
 are all included in the same union. The effective list is included in the CLI envelope,

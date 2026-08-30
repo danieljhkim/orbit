@@ -139,6 +139,31 @@ fn schema_exposes_complexity() {
 }
 
 #[test]
+fn schema_omits_and_handler_rejects_required_tools() {
+    let schema = OrbitTaskUpdateTool.schema();
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .all(|parameter| parameter.name != "required_tools")
+    );
+
+    for field in ["required_tools", "requiredTools", "required-tool"] {
+        let error = OrbitTaskUpdateTool
+            .execute(
+                &update_tool_context(Arc::new(FakeTaskHost::seeded(None))),
+                json!({
+                    "id": "ORB-00001",
+                    "model": "codex",
+                    field: ["proc.spawn"],
+                }),
+            )
+            .expect_err("task required tools are creation-only");
+        assert!(error.to_string().contains("immutable"), "{error}");
+    }
+}
+
+#[test]
 fn schema_and_handler_exclude_inline_artifacts() {
     let schema = OrbitTaskUpdateTool.schema();
     assert!(

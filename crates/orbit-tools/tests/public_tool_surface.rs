@@ -420,6 +420,13 @@ fn task_update_dependency_params_remain_in_agent_tool_schema() {
     let schema = registry
         .get_schema("orbit.task.update")
         .expect("orbit.task.update schema");
+    assert!(
+        schema
+            .parameters
+            .iter()
+            .all(|param| param.name != "required_tools"),
+        "required_tools is creation-only"
+    );
     let dependency_param = schema
         .parameters
         .iter()

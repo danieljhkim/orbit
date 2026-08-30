@@ -317,6 +317,15 @@ impl HubCoordinationExecutor {
         agent: Option<String>,
         model: Option<String>,
     ) -> Result<Value, OrbitError> {
+        if ["required_tools", "requiredTools", "required-tool"]
+            .iter()
+            .any(|field| input.get(*field).is_some())
+        {
+            return Err(OrbitError::InvalidInput(
+                "orbit.task.update does not accept `required_tools`; task tool requirements are immutable after creation"
+                    .to_string(),
+            ));
+        }
         let id = required_string(&input, &["id"], "id")?;
         let current = self.task(&id)?;
         let actor = Self::actor(agent.as_deref(), model.as_deref());
@@ -330,7 +339,6 @@ impl HubCoordinationExecutor {
             "dependencies",
             "relations",
             "tags",
-            "required_tools",
             "plan",
             "execution_summary",
             "type",
@@ -454,32 +462,6 @@ impl HubCoordinationExecutor {
         let explicit_planned_by = raw_clearable(&input, "planned_by")?;
         let explicit_implemented_by = raw_clearable(&input, "implemented_by")?;
         let orchestrator = raw_clearable(&input, "orchestrator")?;
-        let required_tools = optional_csv_or_string_list_alias(
-            &input,
-            &["required_tools", "requiredTools", "required-tool"],
-        )?
-        .map(normalize_required_tools);
-        if required_tools
-            .as_ref()
-            .is_some_and(|tools| tools != &current.required_tools)
-        {
-            let entering_in_progress =
-                status == Some(TaskStatus::InProgress) && current.status != TaskStatus::InProgress;
-            let reached_in_progress = current.status == TaskStatus::InProgress
-                || self
-                    .inner
-                    .tasks
-                    .history
-                    .get_task_history(&id)?
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|entry| entry.to_status == Some(TaskStatus::InProgress));
-            if entering_in_progress || reached_in_progress {
-                return Err(OrbitError::InvalidInput(format!(
-                    "task {id} required_tools are frozen once the task enters in-progress"
-                )));
-            }
-        }
         if orchestrator.is_some()
             && !matches!(current.status, TaskStatus::Proposed | TaskStatus::Backlog)
         {
@@ -507,7 +489,6 @@ impl HubCoordinationExecutor {
                 relations,
                 tags: optional_csv_or_string_list_alias(&input, &["tags", "tag"])?
                     .map(normalize_task_tags),
-                required_tools,
                 plan,
                 execution_summary: optional_raw_string(&input, "execution_summary")?
                     .map(|value| redact_all(&value)),
@@ -1066,6 +1047,41 @@ mod checkoutless_hub_tests {
         assert!(
             !root.path().join(".orbit").exists(),
             "no fabricated checkout"
+        );
+    }
+
+    #[test]
+    fn task_required_tools_update_is_rejected_without_checkout() {
+        let (_root, executor, context) = executor();
+        let created = executor
+            .execute_tool(
+                "orbit.task.add",
+                json!({
+                    "workspace": "ws_checkoutless",
+                    "title": "Immutable checkoutless authority",
+                    "description": "Required tools are fixed at issuance",
+                    "complexity": "low",
+                    "required_tools": ["proc.spawn"],
+                    "model": "codex"
+                }),
+                context,
+            )
+            .expect("add checkoutless task");
+        let id = created["id"].as_str().expect("task id");
+
+        let error = OrbitToolHost::execute(
+            &executor,
+            OrbitBuiltinAction::TaskUpdate,
+            json!({"id": id, "required_tools": ["orbit.task.show"]}),
+            Some("codex".to_string()),
+            Some("codex".to_string()),
+            None,
+        )
+        .expect_err("checkoutless update cannot replace required tools");
+        assert!(error.to_string().contains("immutable"), "{error}");
+        assert_eq!(
+            executor.task(id).expect("read task").required_tools,
+            ["proc.spawn"]
         );
     }
 

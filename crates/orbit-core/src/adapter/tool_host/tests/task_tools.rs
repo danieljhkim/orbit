@@ -493,7 +493,7 @@ fn task_add_and_show_tools_roundtrip_crew() {
 }
 
 #[test]
-fn task_tools_roundtrip_required_tools_and_freeze_them_at_in_progress() {
+fn task_tools_roundtrip_required_tools_and_reject_updates() {
     let (_root, runtime, _repo_root) = test_runtime();
     let agent = Some("codex".to_string());
     let model = Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string());
@@ -543,18 +543,6 @@ fn task_tools_roundtrip_required_tools_and_freeze_them_at_in_progress() {
         json!(["github.auth.status", "github.run.list"])
     );
 
-    runtime
-        .execute_tool_command(
-            "orbit.task.update",
-            json!({
-                "id": task_id,
-                "plan": "Execute with the admitted tool surface.",
-                "status": "in-progress",
-            }),
-            agent.clone(),
-            model.clone(),
-        )
-        .expect("start task");
     let error = runtime
         .execute_tool_command(
             "orbit.task.update",
@@ -562,9 +550,8 @@ fn task_tools_roundtrip_required_tools_and_freeze_them_at_in_progress() {
             agent,
             model,
         )
-        .expect_err("active task requirements are frozen");
-    assert!(error.to_string().contains(task_id), "{error}");
-    assert!(error.to_string().contains("frozen"), "{error}");
+        .expect_err("task requirements are creation-only");
+    assert!(error.to_string().contains("immutable"), "{error}");
 }
 
 /// ORB-10968: crew configuration is host-local, so a stored crew this host has
