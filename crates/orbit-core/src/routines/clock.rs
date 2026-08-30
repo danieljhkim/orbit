@@ -366,11 +366,11 @@ fn install_systemd(
     runner: &dyn ClockCommandRunner,
     home: &Path,
 ) -> Result<ClockInstallReport, OrbitError> {
-    let unit_dir = home.join(".config/systemd/user");
+    let unit_dir = systemd_user_unit_dir(home);
     fs::create_dir_all(&unit_dir).map_err(|error| OrbitError::Io(error.to_string()))?;
 
-    let service_path = unit_dir.join(format!("{SYSTEMD_UNIT}.service"));
-    let timer_path = unit_dir.join(format!("{SYSTEMD_UNIT}.timer"));
+    let service_path = systemd_service_path(home);
+    let timer_path = systemd_timer_path(home);
     atomic_write_text(&service_path, &render_systemd_service(orbit_bin)).map_err(|error| {
         OrbitError::Io(format!(
             "failed to write '{}': {error}",
@@ -385,10 +385,7 @@ fn install_systemd(
         ))
     })?;
 
-    let reload = ManagerCommand {
-        program: "systemctl",
-        args: vec!["--user".into(), "daemon-reload".into()],
-    };
+    let reload = systemd_daemon_reload_command();
     let enable = systemd_enable_command();
     let restart = systemd_restart_command();
     let reloaded = runner.run(&reload).unwrap_or(false);
@@ -432,6 +429,25 @@ pub(super) fn render_systemd_timer(settings: ClockSettings) -> String {
     SYSTEMD_TIMER_TEMPLATE.replace("{{CADENCE_SECONDS}}", &settings.cadence_seconds.to_string())
 }
 
+fn systemd_user_unit_dir(home: &Path) -> PathBuf {
+    home.join(".config/systemd/user")
+}
+
+fn systemd_service_path(home: &Path) -> PathBuf {
+    systemd_user_unit_dir(home).join(format!("{SYSTEMD_UNIT}.service"))
+}
+
+fn systemd_timer_path(home: &Path) -> PathBuf {
+    systemd_user_unit_dir(home).join(format!("{SYSTEMD_UNIT}.timer"))
+}
+
+fn systemd_daemon_reload_command() -> ManagerCommand {
+    ManagerCommand {
+        program: "systemctl",
+        args: vec!["--user".into(), "daemon-reload".into()],
+    }
+}
+
 fn systemd_enable_command() -> ManagerCommand {
     ManagerCommand {
         program: "systemctl",
@@ -452,6 +468,32 @@ fn systemd_restart_command() -> ManagerCommand {
             format!("{SYSTEMD_UNIT}.timer"),
         ],
     }
+}
+
+/// Rewrite an already-installed timer when it differs from the embedded
+/// template. A missing unit is left to `systemctl enable`.
+fn migrate_stale_systemd_timer(home: &Path, settings: ClockSettings) -> Result<(), OrbitError> {
+    let timer_path = systemd_timer_path(home);
+    if !timer_path.exists() {
+        return Ok(());
+    }
+    let installed = fs::read_to_string(&timer_path).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to read '{}': {error}",
+            timer_path.display()
+        ))
+    })?;
+    let expected = render_systemd_timer(settings);
+    if installed == expected {
+        return Ok(());
+    }
+    atomic_write_text(&timer_path, &expected).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to write '{}': {error}",
+            timer_path.display()
+        ))
+    })?;
+    Ok(())
 }
 
 fn manager_status_command(platform: ClockPlatform) -> ManagerCommand {
@@ -550,12 +592,18 @@ pub(super) fn set_clock_enabled_with(
         .run(&manager_status_command(platform))
         .unwrap_or(false);
     if platform == ClockPlatform::Systemd && enabled {
+        migrate_stale_systemd_timer(home, settings)?;
+        let reload = systemd_daemon_reload_command();
+        if !runner.run(&reload)? {
+            return Err(manager_command_error(&reload));
+        }
         let enable = systemd_enable_command();
         if !runner.run(&enable)? {
             return Err(manager_command_error(&enable));
         }
         // Starting an already-active elapsed timer is a no-op. Restarting
-        // makes `enable` a repair operation as well as a paused-clock resume.
+        // after daemon-reload makes `enable` repair a stale installed unit
+        // as well as resume a paused clock.
         let restart = systemd_restart_command();
         if !runner.run(&restart)? {
             return Err(manager_command_error(&restart));
@@ -619,7 +667,7 @@ pub(super) fn clock_status_with(
                     (
                         false,
                         Some(
-                            "systemd timer is enabled but is not active with a finite future trigger; recovery: `orbit routine clock enable` re-arms the timer and verifies the result"
+                            "systemd timer is enabled but is not active with a finite future trigger; recovery: `orbit routine clock enable` rewrites a stale installed timer if needed, re-arms it, and verifies the result"
                                 .to_string(),
                         ),
                     )
@@ -628,7 +676,7 @@ pub(super) fn clock_status_with(
             Err(_) if enabled => (
                 false,
                 Some(
-                    "systemd timer is enabled but its next trigger could not be verified; recovery: inspect `systemctl --user status orbit-sweep.timer`, then run `orbit routine clock enable` to re-arm and verify it"
+                    "systemd timer is enabled but its next trigger could not be verified; recovery: inspect `systemctl --user status orbit-sweep.timer`, then run `orbit routine clock enable` to rewrite a stale unit if needed, re-arm, and verify it"
                         .to_string(),
                 ),
             ),
@@ -700,7 +748,7 @@ fn manager_command_error(command: &ManagerCommand) -> OrbitError {
 
 fn systemd_unschedulable_error(action: &str) -> OrbitError {
     OrbitError::Execution(format!(
-        "systemd timer {action}, but the manager did not report it active with a finite future trigger; inspect `systemctl --user status {SYSTEMD_UNIT}.timer` and `journalctl --user -u {SYSTEMD_UNIT}.timer -u {SYSTEMD_UNIT}.service`; after correcting the reported failure, `orbit routine clock enable` re-arms the timer and verifies the result"
+        "systemd timer {action}, but the manager did not report it active with a finite future trigger; inspect `systemctl --user status {SYSTEMD_UNIT}.timer` and `journalctl --user -u {SYSTEMD_UNIT}.timer -u {SYSTEMD_UNIT}.service`"
     ))
 }
 

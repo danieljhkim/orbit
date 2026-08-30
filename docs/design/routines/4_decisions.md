@@ -1,8 +1,8 @@
 ---
 title: Routines — Decisions
 owner: claude
-last_updated: 2026-08-23
-last_validated: 2026-08-23
+last_updated: 2026-08-29
+last_validated: 2026-08-29
 status: Accepted
 feature: routines
 doc_role: decisions
@@ -11,7 +11,7 @@ summary: Decision log for the routines scheduler, including default seeding and 
 tags: [routines, scheduler]
 paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
-related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ORB-10986]
+related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ORB-10986, ORB-11082]
 ---
 
 # Routines — Decisions
@@ -162,7 +162,7 @@ Store the supported whole-minute cadence in host-local `~/.orbit/clock.toml` and
 
 ### Consequences
 - Clock status reports configured and effective cadence, and native-manager failures include recovery commands.
-- On Linux, enabled state and successful manager command exits are insufficient for health: installation and controls report success only when systemd exposes an active timer with a finite next trigger. An elapsed or unscheduled timer reports `orbit routine clock enable`, which restarts the timer even when already enabled and verifies the repaired state.
+- On Linux, enabled state and successful manager command exits are insufficient for health: installation and controls report success only when systemd exposes an active timer with a finite next trigger. An elapsed or unscheduled timer reports `orbit routine clock enable`, which rewrites a stale installed unit (for example a pre-fix `OnStartupSec` timer) when it differs from the embedded template, daemon-reloads, restarts the timer even when already enabled, and verifies the repaired state.
 - Linux uses monotonic timer-activation and service-activation triggers. `OnActiveSec` establishes the first deadline after every install, reinstall, cadence change, and re-enable; `OnUnitActiveSec` establishes recurrence after each sweep service activation. `AccuracySec=5s` bounds coalescing after either deadline. Missed timer ticks are not replayed, leaving catch-up versus skip behavior to each routine's persisted cursor and `missed_run` policy.
 - Cost: the host-local setting intentionally does not travel with a workspace, so operators configure each host separately.
 
@@ -182,5 +182,8 @@ Store the supported whole-minute cadence in host-local `~/.orbit/clock.toml` and
   (`GET /api/routines`), realizing the single-host half of the §7 cross-host-visibility
   vision. Read-only projection of `routine_statuses`; no new ADR (no new architectural
   constraint — mirrors the existing `orbit routine list --json` surface).
+- [ORB-11082] — Linux `orbit routine clock enable` rewrites a stale installed timer from
+  the embedded template and daemon-reloads before restart, so an `OnStartupSec` upgrade
+  leftover is recovered by the advertised command instead of looping on enable.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.
