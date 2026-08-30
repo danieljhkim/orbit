@@ -304,14 +304,17 @@ function isNamedTool(name) {
   return trimmed.length > 0 && trimmed !== "unknown";
 }
 
-function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
+function renderFailuresByToolCard(rateRows, failuresRows, onCardClick, window = "24h") {
   const failByTool = new Map();
   for (const f of failuresRows) {
     if (isNamedTool(f.tool)) failByTool.set(f.tool, f);
   }
 
   const container = el("div", { class: "audit-summary-container" });
-  container.appendChild(el("h3", { class: "summary-title", text: "Failures by Tool (24H)" }));
+  container.appendChild(el("h3", {
+    class: "summary-title",
+    text: `Unexpected Failures by Callable Tool (${String(window).toUpperCase()})`,
+  }));
   const grid = el("div", { class: "tool-health-grid" });
 
   for (const row of rateRows) {
@@ -324,22 +327,16 @@ function renderFailuresByToolCard(rateRows, failuresRows, onCardClick) {
     header.appendChild(el("span", { class: "tool-name", text: row.tool }));
     header.appendChild(el("span", {
       class: "status-badge",
-      text: `${(rate * 100).toFixed(1)}% Fail Rate`,
+      text: `${(rate * 100).toFixed(1)}% Unexpected Failure Rate`,
     }));
     card.appendChild(header);
 
     const body = el("div", { class: "card-body" });
     const breakdown = failByTool.get(row.tool);
-    const mcp = breakdown ? (breakdown.mcp || 0) : 0;
-    const cli = breakdown ? (breakdown.cli || 0) : 0;
     const failures = row.failures != null ? row.failures : (breakdown ? (breakdown.count || 0) : 0);
     const total = row.total || 0;
     const failureWord = failures === 1 ? "failure" : "failures";
-
-    let trendText = `${failures} ${failureWord} / ${total} total runs`;
-    if (mcp > 0 && cli > 0) {
-      trendText = `${failures} ${failureWord} (${mcp} MCP, ${cli} CLI) / ${total} total runs`;
-    }
+    const trendText = `${failures} unexpected ${failureWord} / ${total} comparable calls (successful + unexpected failed)`;
     body.appendChild(el("span", { class: "metric-trend", text: trendText }));
     card.appendChild(body);
 
@@ -412,30 +409,46 @@ function renderAuditSummary(data, ctx) {
       namedRates,
       namedFailures,
       filterByTool,
+      data.window || "24h",
     ));
-  } else if (namedFailures.length) {
-    container.appendChild(createCard("Failures by tool", renderTable(
-      namedFailures,
-      [{ key: "tool", label: "tool" }, { key: "count", label: "fails", num: true }, { key: "mcp", label: "mcp", num: true }, { key: "cli", label: "cli", num: true }],
-      filterByTool
-    )));
   }
 
-  const lifecycleFailures = Number(data.job_run_lifecycle_failures) || 0;
-  const lifecycleIncidents = Number(data.job_run_lifecycle_incidents) || 0;
+  const categoryOrder = ["unexpected", "expected", "denied", "diagnostic"];
+  const categories = data.failure_categories || {};
+  const categoryRows = categoryOrder.map((key) => ({
+    key,
+    label: (categories[key] && categories[key].label) || key,
+    incidents: Number(categories[key] && categories[key].incidents) || 0,
+    raw_events: Number(categories[key] && categories[key].raw_events) || 0,
+    affected_runs: Number(categories[key] && categories[key].affected_runs) || 0,
+  }));
+  if (categoryRows.some((row) => row.incidents || row.raw_events)) {
+    container.appendChild(createCard(
+      `Failure categories · window ${data.window || "24h"}`,
+      renderTable(categoryRows, [
+        { key: "label", label: "classification" },
+        { key: "incidents", label: "incidents", num: true },
+        { key: "raw_events", label: "raw events", num: true },
+        { key: "affected_runs", label: "affected runs", num: true },
+      ]),
+    ));
+  }
+
+  const lifecycleFailures = Number(data.lifecycle_diagnostic_events) || 0;
+  const lifecycleIncidents = Number(data.lifecycle_diagnostic_incidents) || 0;
   if (lifecycleFailures > 0 || lifecycleIncidents > 0) {
-    const label = data.job_run_lifecycle_label || "job-run lifecycle";
+    const label = data.lifecycle_diagnostic_label || "lifecycle diagnostics";
     const window = data.window || "24h";
     const lifecycleCard = el("div", { class: "audit-summary-card lifecycle-failure-card" });
     lifecycleCard.appendChild(el("div", { class: "card-title", text: label }));
     const body = el("div", { class: "card-body" });
     body.appendChild(el("div", {
       class: "lifecycle-failure-counts",
-      text: `${lifecycleFailures} failed events · ${lifecycleIncidents} incidents · ${Number(data.affected_run_count) || 0} affected runs`,
+      text: `${lifecycleIncidents} incidents · ${lifecycleFailures} raw events · ${Number(data.lifecycle_diagnostic_affected_run_count) || 0} affected runs`,
     }));
     body.appendChild(el("div", {
       class: "metric-trend",
-      text: `Excluded from tool denominators and rates · window ${window}`,
+      text: `Failure-only diagnostic surfaces; excluded from callable-tool denominators and rates · window ${window}`,
     }));
     lifecycleCard.appendChild(body);
     container.appendChild(lifecycleCard);

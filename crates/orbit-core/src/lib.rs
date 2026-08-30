@@ -98,7 +98,8 @@ pub use orbit_types::workflow::{MissedRunPolicy, OverlapPolicy};
 // the dashboard's incident, audit-summary, and scoreboard surfaces.
 pub use orbit_store::{
     CASCADE_WINDOW_SECS, FailureClass, FailureIncident, FailureIncidentQuery,
-    FailureIncidentReport, IncidentEventRef, PropagationLink,
+    FailureIncidentReport, IncidentEventRef, JOB_RUN_LIFECYCLE_LABEL, LIFECYCLE_DIAGNOSTIC_LABEL,
+    PropagationLink, is_failure_only_diagnostic_surface,
 };
 // Routine fire records surfaced by the dashboard's routine-health JSON API.
 pub use orbit_store::{RoutineFireRecord, RoutineFireState};

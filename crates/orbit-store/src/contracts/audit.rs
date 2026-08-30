@@ -85,7 +85,9 @@ pub struct AuditTopToolCall {
 pub struct AuditToolAggregate {
     pub tool_name: String,
     pub total: i64,
+    pub successes: i64,
     pub failures: i64,
+    pub denials: i64,
     pub mcp_total: i64,
     pub cli_total: i64,
     pub mcp_failures: i64,

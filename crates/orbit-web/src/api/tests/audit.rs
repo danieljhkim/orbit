@@ -23,11 +23,31 @@ fn seed_audit_event(
     role: &str,
     error_message: Option<&str>,
 ) {
+    seed_audit_event_with_scope(
+        runtime,
+        execution_id,
+        tool_name,
+        status,
+        role,
+        error_message,
+        Some(("jrun", None)),
+    );
+}
+
+fn seed_audit_event_with_scope(
+    runtime: &OrbitRuntime,
+    execution_id: &str,
+    tool_name: &str,
+    status: AuditEventStatus,
+    role: &str,
+    error_message: Option<&str>,
+    scope: Option<(&str, Option<&str>)>,
+) {
     runtime
         .record_audit_event(&AuditEventInsertParams {
             execution_id: execution_id.to_string(),
-            command: "task".to_string(),
-            subcommand: Some("update".to_string()),
+            command: "tool".to_string(),
+            subcommand: Some("run".to_string()),
             tool_name: Some(tool_name.to_string()),
             target_type: Some("task".to_string()),
             target_id: Some("T00000000-000000".to_string()),
@@ -58,12 +78,42 @@ fn seed_audit_event(
             origin_session_id: Some("mcp-session".to_string()),
             mcp_call_id: Some("mcall".to_string()),
             lease_id: Some("lease".to_string()),
-            task_id: None,
-            job_run_id: Some("jrun".to_string()),
+            task_id: scope.and_then(|(_, task_id)| task_id).map(str::to_string),
+            job_run_id: scope.map(|(run_id, _)| run_id.to_string()),
             activity_id: None,
             step_index: None,
         })
         .expect("seed audit event");
+}
+
+fn seed_fourteen_named_diagnostic_rows(runtime: &OrbitRuntime) {
+    const RUN_IDS: [&str; 7] = [
+        "jrun-diagnostic-0",
+        "jrun-diagnostic-1",
+        "jrun-diagnostic-2",
+        "jrun-diagnostic-3",
+        "jrun-diagnostic-4",
+        "jrun-diagnostic-5",
+        "jrun-diagnostic-6",
+    ];
+    for (index, run_id) in RUN_IDS.into_iter().enumerate() {
+        let tool = if index % 2 == 0 {
+            "pipeline.worker.exit"
+        } else {
+            "pipeline.run.terminal_conflict"
+        };
+        for duplicate in 0..2 {
+            seed_audit_event_with_scope(
+                runtime,
+                &format!("exec-diagnostic-{index}-{duplicate}"),
+                tool,
+                AuditEventStatus::Failure,
+                "admin",
+                Some("pipeline worker lifecycle diagnostic"),
+                Some((run_id, Some(&format!("REC-diagnostic-{index}")))),
+            );
+        }
+    }
 }
 
 fn seed_lifecycle_audit_event(
@@ -494,4 +544,99 @@ async fn audit_summary_excludes_lifecycle_rows_from_tool_metrics() {
         rates.iter().all(|row| row["tool"] != "unknown"),
         "lifecycle rows must not form a tool rate denominator"
     );
+}
+
+/// ORB-11118: rates compare only successful calls with unexpected failed
+/// calls. Expected caller/input negatives, policy denials, and failure-only
+/// lifecycle diagnostics keep their own raw/incident/run denominators.
+#[tokio::test]
+async fn audit_summary_separates_reliability_from_negative_and_diagnostic_populations() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    seed_fourteen_named_diagnostic_rows(&runtime);
+
+    for index in 0..5 {
+        seed_audit_event_with_scope(
+            &runtime,
+            &format!("exec-search-ok-{index}"),
+            "orbit.search",
+            AuditEventStatus::Success,
+            "actor-one",
+            None,
+            None,
+        );
+    }
+    seed_audit_event_with_scope(
+        &runtime,
+        "exec-search-fail",
+        "orbit.search",
+        AuditEventStatus::Failure,
+        "actor-one",
+        Some("search backend unavailable"),
+        None,
+    );
+    for (execution_id, tool, message) in [
+        (
+            "exec-show-negative",
+            "orbit.task.show",
+            "not found: task REC-missing",
+        ),
+        (
+            "exec-update-negative",
+            "orbit.task.update",
+            "unsupported field projection: mystery",
+        ),
+    ] {
+        seed_audit_event_with_scope(
+            &runtime,
+            execution_id,
+            tool,
+            AuditEventStatus::Failure,
+            "actor-one",
+            Some(message),
+            None,
+        );
+    }
+    seed_audit_event_with_scope(
+        &runtime,
+        "exec-denied",
+        "orbit.task.update",
+        AuditEventStatus::Denied,
+        "actor-one",
+        Some("policy denied: write outside allowed scope"),
+        None,
+    );
+
+    let body = body_json(request_audit(runtime, "/audit/summary?since=24h").await).await;
+
+    assert_eq!(body["failure_categories"]["unexpected"]["raw_events"], 1);
+    assert_eq!(body["failure_categories"]["unexpected"]["incidents"], 1);
+    assert_eq!(body["failure_categories"]["expected"]["raw_events"], 2);
+    assert_eq!(body["failure_categories"]["denied"]["raw_events"], 1);
+    assert_eq!(body["failure_categories"]["diagnostic"]["raw_events"], 14);
+    assert_eq!(body["failure_categories"]["diagnostic"]["incidents"], 7);
+    assert_eq!(body["failure_categories"]["diagnostic"]["affected_runs"], 7);
+    assert_eq!(body["lifecycle_diagnostic_events"], 14);
+    assert_eq!(body["lifecycle_diagnostic_incidents"], 7);
+    assert_eq!(body["lifecycle_diagnostic_affected_run_count"], 7);
+
+    let rates = body["failure_rate_by_tool"].as_array().expect("rates");
+    assert_eq!(rates.len(), 1, "only one comparable callable surface");
+    assert_eq!(rates[0]["tool"], "orbit.search");
+    assert_eq!(rates[0]["failures"], 1);
+    assert_eq!(rates[0]["successes"], 5);
+    assert_eq!(rates[0]["total"], 6);
+    assert_eq!(rates[0]["rate"].as_f64(), Some(1.0 / 6.0));
+    assert!(rates.iter().all(|row| {
+        row["tool"] != "pipeline.worker.exit"
+            && row["tool"] != "pipeline.run.terminal_conflict"
+            && row["tool"] != "orbit.task.show"
+            && row["tool"] != "orbit.task.update"
+    }));
+
+    let unexpected = body["failures_by_tool"]
+        .as_array()
+        .expect("unexpected failures by tool");
+    assert_eq!(unexpected.len(), 1);
+    assert_eq!(unexpected[0]["tool"], "orbit.search");
+    assert_eq!(unexpected[0]["count"], 1);
 }

@@ -1480,12 +1480,12 @@ fn dashboard_failure_metrics_are_incident_aware_and_state_their_denominators() {
     // Both counts, both denominators, and the window are rendered — never one
     // number standing in for the other.
     assert!(
-        diagnostics.contains("${asCount(payload.incident_count)} incidents / ${asCount(payload.raw_failed_events)} failed events / ${asCount(payload.affected_run_count)} affected runs"),
-        "the panel count must show grouped incidents, raw failed events, and affected runs together"
+        diagnostics.contains("${asCount(payload.failure_categories && payload.failure_categories.unexpected && payload.failure_categories.unexpected.incidents)} unexpected / ${asCount(payload.incident_count)} all incidents / ${asCount(payload.raw_failed_events)} failed events"),
+        "the panel count must separate unexpected incidents from the all-incident and raw-event populations"
     );
     assert!(
-        diagnostics.contains("${failed} failed events · ${incidents} grouped incidents · ${runs} affected runs of ${total} audited events"),
-        "the incident count must state raw events, grouped incidents, and affected runs"
+        diagnostics.contains("${unexpectedEvents} unexpected raw events · ${unexpectedRuns} affected runs; ${incidents} incidents / ${failed} failed events / ${runs} affected runs across ${total} audited events"),
+        "the incident headline must state the unexpected and all-category denominators"
     );
     assert!(
         diagnostics.contains("`window ${window}`"),
@@ -1577,14 +1577,14 @@ fn dashboard_tool_metrics_exclude_unknown_and_label_lifecycle_failures() {
     assert!(
         audit.contains("function isNamedTool(")
             && audit.contains("trimmed !== \"unknown\"")
-            && audit.contains("job_run_lifecycle_failures")
-            && audit.contains("job-run lifecycle")
-            && audit.contains("Excluded from tool denominators and rates"),
-        "tool cards must drop `unknown` and name the job-run lifecycle category"
+            && audit.contains("lifecycle_diagnostic_events")
+            && audit.contains("lifecycle diagnostics")
+            && audit.contains("excluded from callable-tool denominators and rates"),
+        "tool cards must drop `unknown` and name the lifecycle-diagnostic category"
     );
     assert!(
-        audit.contains("${lifecycleFailures} failed events · ${lifecycleIncidents} incidents · ${Number(data.affected_run_count) || 0} affected runs"),
-        "the lifecycle card must distinguish raw events, incidents, and affected runs"
+        audit.contains("${lifecycleIncidents} incidents · ${lifecycleFailures} raw events · ${Number(data.lifecycle_diagnostic_affected_run_count) || 0} affected runs"),
+        "the lifecycle diagnostic card must distinguish incidents, raw events, and affected runs"
     );
     assert!(
         diagnostics.contains("incident.events")
@@ -1594,16 +1594,90 @@ fn dashboard_tool_metrics_exclude_unknown_and_label_lifecycle_failures() {
         "incident expansion must expose run/task/tool identifiers for every row"
     );
     assert!(
-        preview.contains("job-run lifecycle")
-            && preview.contains("10 failed events · 5 incidents · 8 affected runs")
+        preview.contains("lifecycle diagnostics")
+            && preview.contains("7 incidents · 14 raw events · 7 affected runs")
             && preview.contains("isNamedTool"),
-        "the failures-card preview must render the lifecycle category and three counts"
+        "the failures-card preview must render the diagnostic category and three counts"
     );
     assert!(
         css.contains(".lifecycle-failure-card")
             && css.contains(".lifecycle-failure-counts")
             && css.contains(".incident-lifecycle-note"),
         "lifecycle labels need their own presentation hooks"
+    );
+}
+
+/// ORB-11118: the reliability card has one honest comparison population, while
+/// expected negatives, denials, and failure-only diagnostics remain visible
+/// as separately labeled incident populations with exact evidence expansion.
+#[test]
+fn dashboard_reliability_separates_all_four_failure_populations() {
+    let audit = include_str!("../../assets/dashboard/audit.js");
+    let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
+    let preview = include_str!("../../assets/dashboard/_preview_failures_card.html");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    for needle in [
+        "Unexpected Failures by Callable Tool",
+        "Unexpected Failure Rate",
+        "comparable calls (successful + unexpected failed)",
+        "Failure categories · window",
+        "classification",
+        "raw events",
+        "affected runs",
+    ] {
+        assert!(
+            audit.contains(needle),
+            "audit summary must render `{needle}`"
+        );
+    }
+    assert!(
+        !audit.contains("} else if (namedFailures.length)"),
+        "failure-only populations must not fall back to a synthetic tool-rate card"
+    );
+    assert!(
+        diagnostics.contains(
+            r#"const INCIDENT_CLASS_ORDER = ["unexpected", "expected", "denied", "diagnostic"];"#
+        ) && diagnostics.contains(
+            "${labels[key] || key}: ${count} incidents · ${events} raw · ${categoryRuns} runs"
+        ) && diagnostics.contains("${unexpectedIncidents} unexpected incidents"),
+        "the incident view must visibly separate all four classes and headline only unexpected incidents"
+    );
+    for evidence in [
+        "event.id",
+        "event.tool || \"-\"",
+        "event.run_id || \"-\"",
+        "event.task_id || \"-\"",
+        "event.execution_id",
+    ] {
+        assert!(
+            diagnostics.contains(evidence),
+            "incident expansion must retain `{evidence}`"
+        );
+    }
+    assert!(
+        preview.contains("pipeline.worker.exit")
+            && preview.contains("pipeline.run.terminal_conflict")
+            && preview.contains("orbit.task.show")
+            && preview.contains("orbit.task.update")
+            && preview.contains("7 incidents · 14 raw events · 7 affected runs"),
+        "the deterministic preview must keep diagnostic and expected-negative fixtures outside rateRows but visible in evidence"
+    );
+    assert!(
+        css.contains(".incident-class-chip.diagnostic")
+            && css.contains(".incident-row.diagnostic")
+            && css.contains(".incident-class.diagnostic"),
+        "diagnostic rows need a distinct desktop presentation"
+    );
+    let responsive_at = css
+        .rfind("@media (max-width: 720px)")
+        .expect("720px responsive rules");
+    assert!(
+        css[responsive_at..].contains(".incident-class-chip")
+            && css[responsive_at..].contains("white-space: normal")
+            && css[responsive_at..]
+                .contains(".tool-health-grid { grid-template-columns: minmax(0, 1fr); }"),
+        "four category labels and rate cards must remain scannable at narrow viewport widths"
     );
 }
 
