@@ -71,11 +71,19 @@ use crate::driver::sqlite::task_registry::{
 };
 
 mod archive;
+mod publication;
 mod reindex;
 
 #[cfg(test)]
 mod tests;
 
+pub use publication::{
+    AttachmentPolicy, AttachmentPolicyKind, AttachmentScanFailure, AttachmentScanInput,
+    AttachmentScanOutcome, AttachmentSensitivityScanner, OmittedAttachment,
+    PUBLICATION_ENVELOPE_FILE_NAME, PUBLICATION_TASKS_DIR_NAME, PublicationEnvelope,
+    PublicationSnapshotMetadata, PublicationSnapshotOutcome, ScannerFailureBehavior,
+    TASK_PUBLICATION_FORMAT_VERSION, build_publication_snapshot,
+};
 pub use reindex::{ReindexOutcome, reindex_workspace};
 
 /// Archive container-format version. Bumped only when the archive *layout*
