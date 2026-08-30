@@ -1,7 +1,8 @@
 //! Task-migration and publication tooling: export a workspace's task bundles
 //! to a portable tar.zst archive, import them into another machine's registry,
-//! build validated publication snapshots, and inspect a publication repository
-//! as labelled read-only state.
+//! build validated publication snapshots, publish them to a dedicated
+//! publication repository, and inspect that repository as labelled read-only
+//! state.
 //!
 //! The engine lives in `orbit-store` because it needs the canonical bundle I/O
 //! primitives ([`read_bundle_at`]/[`write_bundle_at`]) and the private
@@ -72,8 +73,10 @@ use crate::driver::sqlite::task_registry::{
 };
 
 mod archive;
+mod git;
 mod inspect;
 mod publication;
+mod publish;
 mod reindex;
 
 #[cfg(test)]
@@ -90,6 +93,10 @@ pub use publication::{
     PUBLICATION_ENVELOPE_FILE_NAME, PUBLICATION_TASKS_DIR_NAME, PublicationEnvelope,
     PublicationSnapshotMetadata, PublicationSnapshotOutcome, ScannerFailureBehavior,
     TASK_PUBLICATION_FORMAT_VERSION, build_publication_snapshot,
+};
+pub use publish::{
+    PublicationCallerRole, PublicationLastSuccess, PublicationPublishOutcome,
+    PublicationPublishRequest, PublicationPublishStatus, publish_task_snapshot,
 };
 pub use reindex::{ReindexOutcome, reindex_workspace};
 

@@ -7,23 +7,26 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use orbit_common::OrbitError;
 use orbit_types::identity::{validate_machine_id, validate_registry_identifier};
 use orbit_types::task::{TASK_ARTIFACT_FILES_DIR_NAME, TASK_ARTIFACTS_DIR_NAME, TaskEnvelopeV2};
 use orbit_types::workspace::{
-    canonicalize_publication_branch, git_remotes_equivalent, redact_git_remote,
-    validate_git_commit_id, validate_source_repository_fingerprint,
+    canonicalize_publication_branch, redact_git_remote, validate_git_commit_id,
+    validate_source_repository_fingerprint,
 };
 
 use crate::driver::file::task_bundle::{TaskBundleV2, read_bundle_at};
 
+use super::git::{GitRunner, field_mismatch, remote_has_password, remotes_match, short_branch};
 use super::publication::{
     AttachmentPolicyKind, PUBLICATION_ENVELOPE_FILE_NAME, PUBLICATION_TASKS_DIR_NAME,
-    PublicationEnvelope, validate_jsonl_files,
+    PublicationEnvelope, assert_envelope_parent_lineage, validate_jsonl_files,
 };
+
+/// Error prefix and command label for every consumer-side failure.
+const INSPECT_LABEL: &str = "publication inspect";
 
 /// Caller-supplied pairing and fetch inputs. Identity is never inferred from
 /// repository contents.
@@ -98,7 +101,7 @@ pub fn inspect_publication(
     let fetched = fetch_publication(&request)?;
     let envelope = read_envelope(&fetched.tree_dir)?;
     assert_pairing(&request, &envelope, &fetched.branch)?;
-    assert_parent_lineage(&envelope, fetched.git_parent.as_deref())?;
+    assert_envelope_parent_lineage(&envelope, fetched.git_parent.as_deref(), INSPECT_LABEL)?;
     let tasks = read_validated_tasks(&fetched.tree_dir, &envelope)?;
     let label = PublicationInspectLabel {
         published_at: envelope.published_at,
@@ -271,23 +274,7 @@ fn fetch_publication(request: &ValidatedRequest) -> Result<FetchedSnapshot, Orbi
         &commit_id,
     ])?;
 
-    let parents = git(&[
-        "--git-dir",
-        git_dir_s,
-        "rev-list",
-        "--parents",
-        "-n",
-        "1",
-        &commit_id,
-    ])?;
-    let mut tokens = parents.split_whitespace();
-    let _ = tokens.next();
-    let git_parent = tokens.next().map(str::to_ascii_lowercase);
-    if tokens.next().is_some() {
-        return Err(inspect_error(
-            "publication history must be linear; inspected commit has multiple Git parents",
-        ));
-    }
+    let git_parent = GitRunner::new(INSPECT_LABEL).single_parent(git_dir_s, &commit_id)?;
 
     let freshness = if commit_id == branch_tip {
         PublicationFreshness::Current
@@ -320,39 +307,36 @@ fn assert_pairing(
     envelope: &PublicationEnvelope,
     fetched_branch: &str,
 ) -> Result<(), OrbitError> {
-    mismatch("workspace", &request.workspace_id, &envelope.workspace_id)?;
-    mismatch(
+    field_mismatch(
+        INSPECT_LABEL,
+        "workspace",
+        &request.workspace_id,
+        &envelope.workspace_id,
+    )?;
+    field_mismatch(
+        INSPECT_LABEL,
         "source repository fingerprint",
         &request.source_repository_fingerprint,
         &envelope.source_repository_fingerprint,
     )?;
-    mismatch(
+    field_mismatch(
+        INSPECT_LABEL,
         "publication id",
         &request.publication_id,
         &envelope.publication_id,
     )?;
-    mismatch(
+    field_mismatch(
+        INSPECT_LABEL,
         "authority",
         &request.authority_machine_id,
         &envelope.authority_machine_id,
     )?;
-    mismatch("branch", &request.publication_branch, fetched_branch)?;
-    Ok(())
-}
-
-fn assert_parent_lineage(
-    envelope: &PublicationEnvelope,
-    git_parent: Option<&str>,
-) -> Result<(), OrbitError> {
-    match (envelope.previous_publication.as_deref(), git_parent) {
-        (None, None) => Ok(()),
-        (Some(previous), Some(parent)) if previous.eq_ignore_ascii_case(parent) => Ok(()),
-        (previous, parent) => Err(inspect_error(format!(
-            "Git parent/previous-publication mismatch: envelope previous_publication is {}, Git parent is {}",
-            previous.unwrap_or("null"),
-            parent.unwrap_or("null")
-        ))),
-    }
+    field_mismatch(
+        INSPECT_LABEL,
+        "branch",
+        &request.publication_branch,
+        fetched_branch,
+    )
 }
 
 fn read_validated_tasks(
@@ -478,85 +462,16 @@ fn assert_cache_origin(git_dir: &Path, expected_remote: &str) -> Result<(), Orbi
     )))
 }
 
-fn remotes_match(expected: &str, observed: &str) -> bool {
-    if expected == observed {
-        return true;
-    }
-    let left = normalize_local_remote(expected);
-    let right = normalize_local_remote(observed);
-    if left == right {
-        return true;
-    }
-    git_remotes_equivalent(expected, observed).unwrap_or(false)
-}
-
-fn normalize_local_remote(remote: &str) -> String {
-    let trimmed = remote.trim();
-    let path = trimmed.strip_prefix("file://").unwrap_or(trimmed);
-    Path::new(path)
-        .canonicalize()
-        .map(|canonical| canonical.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.to_string())
-}
-
-fn mismatch(field: &str, expected: &str, observed: &str) -> Result<(), OrbitError> {
-    if expected == observed {
-        Ok(())
-    } else {
-        Err(inspect_error(format!(
-            "{field} mismatch: expected '{expected}', observed '{observed}'"
-        )))
-    }
-}
-
-fn short_branch(branch: &str) -> &str {
-    branch.strip_prefix("refs/heads/").unwrap_or(branch)
-}
-
-fn remote_has_password(remote: &str) -> bool {
-    let Some(rest) = remote.split_once("://").map(|(_, rest)| rest) else {
-        return false;
-    };
-    rest.split_once('@')
-        .is_some_and(|(userinfo, _)| userinfo.contains(':'))
-}
-
 fn git(args: &[&str]) -> Result<String, OrbitError> {
-    let output = Command::new("git")
-        .args(["-c", "core.hooksPath=/dev/null"])
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GCM_INTERACTIVE", "never")
-        .output()
-        .map_err(|error| {
-            OrbitError::Execution(format!(
-                "publication inspect failed to run `git {}`: {error}",
-                args.join(" ")
-            ))
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(inspect_error(format!(
-            "git {} failed: {}",
-            args.iter()
-                .filter(|arg| !Path::new(arg).is_absolute())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(" "),
-            stderr.trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    GitRunner::new(INSPECT_LABEL).run(args)
 }
 
 fn path_str(path: &Path) -> Result<&str, OrbitError> {
-    path.to_str()
-        .ok_or_else(|| inspect_error(format!("path '{}' is not valid UTF-8", path.display())))
+    super::git::path_str(path, INSPECT_LABEL)
 }
 
 fn inspect_error(message: impl Into<String>) -> OrbitError {
-    OrbitError::InvalidInput(format!("publication inspect: {}", message.into()))
+    OrbitError::InvalidInput(format!("{INSPECT_LABEL}: {}", message.into()))
 }
 
 fn identity_error(error: orbit_types::identity::IdentityError) -> OrbitError {

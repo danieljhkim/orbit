@@ -87,7 +87,8 @@ feature.
   technology each. `repository` owns live invariants that join drivers (task
   bundles + registry indexes + checkout projections, and friction SQLite +
   file taxonomy). `workflow` owns explicit import/export/reindex/repair,
-  read-only task-publication inspection, and layout-upgrade operations.
+  owner-only task-publication transport, read-only task-publication
+  inspection, and layout-upgrade operations.
   `compose` constructs concrete implementations and
   returns contract-facing stores. The crate retains the namespaced feature
   migration ledger and immutable historical bootstrap migrations. It depends
@@ -147,9 +148,9 @@ Live task writes are committed by the composite task repository: canonical
 bundle durability is the file-driver operation, allocation/binding/index rows
 are the registry-driver operation, and `.orbit/tasks` symlinks are disposable
 checkout projections. The drivers do not call each other. Task archive
-import/export/reindex, read-only task-publication inspection, friction Markdown
-import/SQLite export, legacy audit and job-run import, and workspace layout
-upgrades are explicit `workflow` modules.
+import/export/reindex, owner-only task-publication transport and its read-only
+inspection, friction Markdown import/SQLite export, legacy audit and job-run
+import, and workspace layout upgrades are explicit `workflow` modules.
 In particular, constructing a friction repository does not perform a hidden
 Markdown import; `compose::workspace_friction_store` invokes the idempotent,
 transactional workflow before opening the live repository.
