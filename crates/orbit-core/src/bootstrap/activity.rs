@@ -648,7 +648,7 @@ backend = "cli"
                 assert_eq!(spec.on_denial, OnDenial::Terminate);
                 assert!(tool_allowed("orbit.task.add", &spec.tools));
                 assert!(tool_allowed("orbit.task.update", &spec.tools));
-                assert!(tool_allowed("orbit.session_log.append", &spec.tools));
+                assert!(!tool_allowed("orbit.session_log.append", &spec.tools));
                 assert!(tool_allowed("orbit.search", &spec.tools));
                 assert!(tool_allowed("proc.spawn", &spec.tools));
                 for denied in [
@@ -678,6 +678,7 @@ backend = "cli"
                 assert!(instruction.contains("execution_summary"));
                 assert!(instruction.contains("move the epic to `review`"));
                 assert!(!instruction.contains("session resume"));
+                assert!(!instruction.contains("orbit.session_log"));
                 assert!(!instruction.contains("shrink the scan set"));
                 assert_eq!(
                     spec.proc_allowed_programs.as_deref(),

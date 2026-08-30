@@ -89,9 +89,10 @@ descendants' `context_files` — live since [ORB-10816] via `lock_context_files_
 leaves are then admitted by the ordinary overlap check. Deleting `decision: hold` so that check is
 the *only* gate is [ORB-10819]; until then `hold` still short-circuits it.
 
-**Session log.** Workspace-scoped append-only notebook (`orbit.session_log`), kinds `status`,
-`note`, `check_later`. Unresolved `check_later` rows are a scan wake reason. This is the memory
-between fires; conversation resume stays out of scope.
+**Session log.** Workspace-scoped append-only notebook, kinds `status`, `note`, `check_later`.
+Unresolved `check_later` rows are a scan wake reason. This is the memory between fires;
+conversation resume stays out of scope. The store is an internal Core capability; the
+`orbit.session_log.*` agent tools were withdrawn ([ORB-11097]).
 
 **External clock.** Cron / knowledgebase supervisor / front door. Not a seeded Orbit routine.
 
@@ -106,7 +107,7 @@ and explicit ship of the root is refused.
 | This split | this folder | [ORB-10776] | live |
 | Epic tag = supervisor delegation signal | [Epic tag is a supervisor delegation signal, not the job predicate](./4_decisions.md#epic-tag-is-a-supervisor-delegation-signal-not-the-job-predicate) | [ORB-10776] | live |
 | Clock and supervisor stay outside Orbit | [The supervisor clock is not an Orbit primitive](./4_decisions.md#the-supervisor-clock-is-not-an-orbit-primitive) | [ORB-10776] | live |
-| `orbit.session_log` (notes / check-later / status) | workspace session-log store + tools | [ORB-10784] | live |
+| Session log (notes / check-later / status) | workspace session-log store (internal; public tools withdrawn) | [ORB-10784], [ORB-11097] | live |
 | `scan_unresolved_work` + `epic_pipeline` v1 | catalog | [ORB-10779] | live |
 | Epic owns one worktree; children land sequentially | [An epic owns one worktree and one branch](./4_decisions.md#an-epic-owns-one-worktree-and-one-branch) | [ORB-10816] | live |
 | Epic reservation over the descendant context union | `lock_context_files_for_task` | [ORB-10816] | live |
@@ -122,7 +123,8 @@ and explicit ship of the root is refused.
 - **[ORB-10775]** — Epic: drain job in Orbit; supervisor clock stays external.
 - **[ORB-10776]** — Accept the v1 contract; epic-tag and external-clock decisions.
 - **[ORB-10779]** — Ship the scan, the orchestrator activity, and `epic_pipeline`.
-- **[ORB-10784]** — `orbit.session_log` (status / note / check_later).
+- **[ORB-10784]** — session-log store (status / note / check_later).
+- **[ORB-11097]** — withdrew `orbit.session_log.*` from the public agent tool surface.
 - **[ORB-10788]** — v1 sequencer job, leaf-ship exclusion, `orbit run auto`.
 - **[ORB-10815]** — Epic-owned worktree and continuous workspace drain (this revision).
 - **[ORB-10816]** — Epic worktree; sequential child drain; epic reservation.

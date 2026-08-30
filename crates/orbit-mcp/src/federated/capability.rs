@@ -59,10 +59,7 @@ pub fn mcp_tool_class(tool_name: &str) -> McpToolClass {
         "orbit_command_exec"
         | "orbit_workflow_run_list"
         | "orbit_workflow_run_show"
-        | "orbit_workflow_run_resume"
-        | "orbit_session_log_append"
-        | "orbit_session_log_list"
-        | "orbit_session_log_resolve" => McpToolClass::Execute,
+        | "orbit_workflow_run_resume" => McpToolClass::Execute,
         _ => McpToolClass::Unclassified,
     }
 }
