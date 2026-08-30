@@ -254,6 +254,7 @@ pub(super) fn map_runtime_error(e: orbit_core::OrbitError) -> Response {
         error @ orbit_core::OrbitError::ArtifactNotLocal { .. } => {
             artifact_conflict(error, "artifact_not_local")
         }
+        error @ orbit_core::OrbitError::FrictionNotLocal(_) => friction_not_local_conflict(error),
         error @ orbit_core::OrbitError::ShipRunInFlight { .. } => {
             ship_run_in_flight_conflict(error)
         }
@@ -315,6 +316,22 @@ fn workspace_claim_held_conflict(error: orbit_core::OrbitError) -> Response {
         "expires_at": claim.map(|claim| claim.expires_at.as_str()),
     });
     (StatusCode::CONFLICT, Json(body)).into_response()
+}
+
+fn friction_not_local_conflict(error: orbit_core::OrbitError) -> Response {
+    let details = error.friction_not_local_details();
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": error.to_string(),
+            "code": "friction_not_local",
+            "friction_id": details.map(|details| details.friction_id.as_str()),
+            "task_id": details.map(|details| details.task_id.as_str()),
+            "workspace_id": details.map(|details| details.workspace_id.as_str()),
+            "found_in": details.map(|details| details.found_in.as_slice()),
+        })),
+    )
+        .into_response()
 }
 
 fn artifact_conflict(error: orbit_core::OrbitError, code: &'static str) -> Response {

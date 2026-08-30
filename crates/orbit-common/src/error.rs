@@ -77,6 +77,20 @@ pub struct DependencyNotDelivered {
 /// Boxed into the error enum for the same reason as
 /// [`DependencyNotDelivered`]: four inline strings for one rare refusal would
 /// widen every `Result<_, OrbitError>` in the workspace.
+/// Evidence behind [`OrbitError::FrictionNotLocal`]: an unqualified
+/// `resolves` target is missing from this workspace but present in others
+/// on the same host [ORB-11078].
+///
+/// Boxed into the error enum so the multi-field payload does not widen
+/// every `Result<_, OrbitError>`.
+#[derive(Debug, Serialize)]
+pub struct FrictionNotLocal {
+    pub friction_id: String,
+    pub task_id: String,
+    pub workspace_id: String,
+    pub found_in: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorkspaceClaimHeld {
     /// The governed operation that was refused, e.g. `orbit.workflow.ship`.
@@ -145,6 +159,15 @@ pub enum OrbitError {
         id: String,
         artifact_origin: ArtifactOrigin,
     },
+    /// An unqualified `resolves` friction ID belongs to another workspace
+    /// on this host, so completing the task must not count as coverage
+    /// [ORB-11078]. Distinct from a dangling miss, which is audit-visible
+    /// and does not block completion.
+    #[error(
+        "resolves target '{}' is not in workspace '{}' (found in {}); auto-resolve is workspace-local — resolve it from its owning workspace with orbit.friction.resolve, or land a covering task there",
+        .0.friction_id, .0.workspace_id, .0.found_in.join(", ")
+    )]
+    FrictionNotLocal(Box<FrictionNotLocal>),
     #[error("companion not installed: {0}")]
     CompanionNotInstalled(String),
     #[error("invalid input: {0}")]
@@ -297,6 +320,27 @@ impl OrbitError {
             kind,
             id: id.into(),
             artifact_origin,
+        }
+    }
+
+    pub fn friction_not_local(
+        friction_id: impl Into<String>,
+        task_id: impl Into<String>,
+        workspace_id: impl Into<String>,
+        found_in: Vec<String>,
+    ) -> Self {
+        Self::FrictionNotLocal(Box::new(FrictionNotLocal {
+            friction_id: friction_id.into(),
+            task_id: task_id.into(),
+            workspace_id: workspace_id.into(),
+            found_in,
+        }))
+    }
+
+    pub fn friction_not_local_details(&self) -> Option<&FrictionNotLocal> {
+        match self {
+            Self::FrictionNotLocal(details) => Some(details),
+            _ => None,
         }
     }
 

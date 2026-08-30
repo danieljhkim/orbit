@@ -157,6 +157,8 @@ pub trait FrictionStoreBackend: Send + Sync {
     fn add(&self, params: FrictionAddParams) -> Result<StoredFrictionRecord, OrbitError>;
     fn list(&self, filter: &FrictionListFilter) -> Result<Vec<StoredFrictionRecord>, OrbitError>;
     fn show(&self, id: &str) -> Result<Option<StoredFrictionRecord>, OrbitError>;
+    /// Workspace IDs other than this store's that already hold `id`.
+    fn foreign_owners_of(&self, id: &str) -> Result<Vec<String>, OrbitError>;
     fn update(
         &self,
         id: &str,

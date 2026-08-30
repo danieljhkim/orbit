@@ -188,6 +188,9 @@ impl RuntimeHost for OrbitRuntime {
                 existing_task.plan.as_str(),
             )?;
         }
+        if update.status == Some(TaskStatus::Done) && existing_task.status != TaskStatus::Done {
+            self.ensure_resolves_are_workspace_local(&existing_task)?;
+        }
         let (agent, model) = self
             .try_canonical_agent_model_identity(update.agent.as_deref(), update.model.as_deref())?;
         let runtime_model_identity = <Self as RuntimeHost>::actor_model_identity(self);

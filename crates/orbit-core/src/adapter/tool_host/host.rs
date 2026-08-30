@@ -416,6 +416,20 @@ impl HubCoordinationExecutor {
                 .transpose()?;
         let artifacts = super::input::parse_artifacts(&input)?;
         let relations = super::input::parse_relations(&input)?;
+        if status == Some(TaskStatus::Done)
+            && current.status != TaskStatus::Done
+            && let Ok(frictions) = self.friction_store()
+        {
+            let mut preview = current.clone();
+            if let Some(relations) = &relations {
+                preview.relations = relations.clone();
+            }
+            crate::application::task::ensure_resolves_targets_are_workspace_local(
+                frictions.as_ref(),
+                &self.inner.workspace_id,
+                &preview,
+            )?;
+        }
         let comment = optional_string(&input, "comment")?;
         let task_type = optional_string_alias(&input, &["type", "task_type", "taskType"])?
             .map(|value| super::input::parse_task_type("type", &value))
