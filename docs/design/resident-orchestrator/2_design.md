@@ -78,8 +78,8 @@ An epic with **no** children is normal and skips this phase entirely.
 worktree**, after the children have merged ([The epic agent works in the worktree instead of dispatching](./4_decisions.md#the-epic-agent-works-in-the-worktree-instead-of-dispatching), [ORB-10817]).
 
 - **Tools:** worktree-scoped writes and process execution on the same footing as `agent_implement`
-  (provider-native file-read/delete tools, `proc.spawn` over the repo's allowed programs), plus `orbit.task.*`,
-  `orbit.search`, and `orbit.session_log.*`.
+  (provider-native file-read/delete tools, `proc.spawn` over the repo's allowed programs), plus `orbit.task.*`
+  and `orbit.search`.
 - **Mandate:** validate the merged result of the children, resolve integration gaps, finish what
   the children did not cover, and bring the epic to the state its acceptance criteria describe.
   Subagents are a provider capability — the CLI runner spawns the provider CLI directly — not new
@@ -95,8 +95,7 @@ The worktree-mismatch guard is the pattern to copy from `agent_implement`: compa
 `git rev-parse --show-toplevel` against the supplied roots before any write, and fail rather than
 write somewhere else.
 
-Conversation resume across fires stays out of scope. Each invoke starts fresh from Orbit state plus
-`orbit.session_log.list`.
+Conversation resume across fires stays out of scope. Each invoke starts fresh from Orbit state.
 
 ## 3. `epic_pipeline` job
 
@@ -218,7 +217,7 @@ answers "does this workspace still have unresolved work", which is a drain quest
 The agent has no retained CLI conversation. It needs a notebook that survives a fresh invoke:
 status of the last fire, notes to self, and "check this later."
 
-That is `orbit.session_log`, a **workspace-scoped, append-only** store. It is not a task, not a
+That is the workspace session log, a **workspace-scoped, append-only** store. It is not a task, not a
 comment thread, and not a knowledgebase markdown file (the drain runs in the *target* workspace;
 the cron repo is the wrong disk).
 
@@ -233,8 +232,9 @@ Each entry:
 | `related_task_ids` / `related_run_ids` | optional |
 | `resolved_at` | set only on `check_later` via `resolve` |
 
-Tools: `orbit.session_log.append`, `orbit.session_log.list` (filters `kind`, `unresolved_only`,
-`since`), `orbit.session_log.resolve`.
+The store remains an internal Core/runtime capability (append, list, resolve). The
+`orbit.session_log.*` agent tools were withdrawn from MCP and `orbit tool list` ([ORB-11097])
+until a concrete consumer re-exposes them.
 
 `status` and `note` never wake the scan. Unresolved `check_later` **does** — that is how "remind me"
 works without session resume. Resolving a check-later is how the agent tells the next scan the
@@ -328,7 +328,8 @@ child. The banner table at the top says which rows below are already true of the
 - **[ORB-10775]** — v1 implementation epic.
 - **[ORB-10776]** — v1 contract and its decisions.
 - **[ORB-10779]** — v1 scan, orchestrator activity, `epic_pipeline`.
-- **[ORB-10784]** — `orbit.session_log`.
+- **[ORB-10784]** — session-log store.
+- **[ORB-11097]** — withdrew `orbit.session_log.*` from the public agent tool surface.
 - **[ORB-10788]** — v1 sequencer, leaf-ship exclusion, `orbit run auto`.
 - **[ORB-10815]** — This revision.
 - **[ORB-10816]** — §1 epic worktree, sequential child drain, epic reservation.

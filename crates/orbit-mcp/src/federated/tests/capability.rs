@@ -21,9 +21,6 @@ const ADVERTISED_TOOL_CLASSES: &[(&str, McpToolClass)] = &[
     ("orbit.friction.list", McpToolClass::ControlPlane),
     ("orbit.friction.update", McpToolClass::ControlPlane),
     ("orbit.search", McpToolClass::ControlPlane),
-    ("orbit.session_log.append", McpToolClass::Execute),
-    ("orbit.session_log.list", McpToolClass::Execute),
-    ("orbit.session_log.resolve", McpToolClass::Execute),
     ("orbit.task.add", McpToolClass::ControlPlane),
     ("orbit.task.approve", McpToolClass::ControlPlane),
     ("orbit.task.artifact.put", McpToolClass::ControlPlane),
@@ -61,7 +58,7 @@ fn the_locked_mapping_covers_exactly_the_advertised_surface() {
         .collect::<std::collections::BTreeSet<_>>();
 
     assert_eq!(advertised, locked);
-    assert_eq!(advertised.len(), 23);
+    assert_eq!(advertised.len(), 20);
 }
 
 #[test]

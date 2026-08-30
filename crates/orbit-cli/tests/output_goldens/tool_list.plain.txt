@@ -12,9 +12,6 @@ orbit.friction.update	id:string	Update triage metadata for an Orbit friction rec
 orbit.pipeline.invoke	job_name:string, input:object	Submit a durable pipeline run and return immediately with its run ID.
 orbit.pipeline.wait	run_ids:string|string[]	Block until the supplied pipeline runs reach terminal state or timeout.
 orbit.search	-	Search tasks, docs, and frictions. Decision records are indexed as ordinary docs; hybrid vector ranking applies to indexed tasks and docs.
-orbit.session_log.append	kind:string, body:string	Append a workspace session-log entry (status, note, or check_later). Bodies are immutable; check_later rows wake the drain scan until resolved.
-orbit.session_log.list	-	List workspace session-log entries. Filter by kind, unresolved check_later rows, or entries at/after `since` (RFC3339).
-orbit.session_log.resolve	id:string	Mark a check_later session-log entry resolved. Other kinds cannot be resolved; bodies are never edited.
 orbit.task.add	title:string, description:string, complexity:string	Create an Orbit task and return the created task JSON
 orbit.task.approve	id:string	Approve an Orbit task and return the updated task JSON
 orbit.task.artifact.put	id:string, source_path:string	Store a source file under a task's artifacts directory

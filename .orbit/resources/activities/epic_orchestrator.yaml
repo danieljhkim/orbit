@@ -102,13 +102,6 @@ spec:
        `#[allow(unused_imports)]`. Register third-party dependencies in root
        `[workspace.dependencies]` and consume them with `.workspace = true`.
 
-    Session log
-
-    9. `orbit.session_log.list` (`unresolved_only: true`) at the start of
-       every invoke. Append `status` or `note` as you go. File `check_later`
-       only when the next fire must wake on a reminder; `resolve` when the
-       reminder is done. Conversation resume is out of v1.
-
     Hard bounds
 
     - No PR merge reserved for the human merge authority, no second
@@ -121,16 +114,16 @@ spec:
 
     Validation and handoff
 
-    10. Follow repository validation policy and run the smallest checks that
-        give real confidence. A sandbox/runner denial such as EPERM is not a
-        code failure: finish the implementation, record the exact skipped
-        check and denial in the execution summary, and return success so
-        unrestricted CI can arbitrate it. Report failed only for genuinely
-        incomplete/wrong work.
-    11. For a real blocker (missing dependency, contradictory requirements,
+    9. Follow repository validation policy and run the smallest checks that
+       give real confidence. A sandbox/runner denial such as EPERM is not a
+       code failure: finish the implementation, record the exact skipped
+       check and denial in the execution summary, and return success so
+       unrestricted CI can arbitrate it. Report failed only for genuinely
+       incomplete/wrong work.
+    10. For a real blocker (missing dependency, contradictory requirements,
         or an unresolvable conflict), use `orbit.task.update` to set
         `blocked` with a reason.
-    12. The pipeline owns the epic root's lifecycle. Do not call
+    11. The pipeline owns the epic root's lifecycle. Do not call
         `orbit.task.start`, and do not move the epic to `review` or `done`.
         Before returning, REQUIRED: persist a meaningful `execution_summary`
         with `orbit.task.update`; downstream delivery reads that task field,
@@ -138,7 +131,6 @@ spec:
         when cheap and accurate.
   tools:
     - orbit.task.*
-    - orbit.session_log.*
     - orbit.search
     - proc.spawn
   proc_allowed_programs:

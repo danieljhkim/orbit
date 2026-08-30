@@ -52,6 +52,30 @@ fn registry_validation_rejects_removed_graph_mcp_names() {
     );
 }
 
+#[test]
+fn registry_validation_rejects_removed_session_log_mcp_names() {
+    let wildcard = validate_tool_allowlist(&["orbit.session_log.*".to_string()])
+        .expect_err("removed session-log wildcard must fail");
+    assert_eq!(
+        wildcard,
+        ToolAllowlistError::WildcardRootNotPermitted {
+            entry: "orbit.session_log.*".to_string()
+        }
+    );
+
+    let concrete = validate_tool_allowlist_against_registered_tools(
+        &["orbit.session_log.append".to_string()],
+        ["orbit.search", "orbit.task.show"],
+    )
+    .expect_err("removed session-log tool name must fail");
+    assert_eq!(
+        concrete,
+        ToolAllowlistError::UnknownToolName {
+            entry: "orbit.session_log.append".to_string()
+        }
+    );
+}
+
 /// [ORB-10959] Granting `proc.spawn` without declaring the program allowlist
 /// used to mean "unconstrained" — the omitted key was more permissive than an
 /// explicit `[]`. Load-time validation now refuses the pairing.

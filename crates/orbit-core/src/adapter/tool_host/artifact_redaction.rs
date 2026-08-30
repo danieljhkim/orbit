@@ -275,14 +275,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> ActionPolicy {
             nested_arrays: &[],
             nested_objects: AUTO_TASK_TEMPLATE,
         },
-        OrbitBuiltinAction::SessionLogAppend => ActionPolicy {
-            free_text_fields: &["body"],
-            free_text_arrays: &[],
-            path_fields: &[],
-            path_arrays: &[],
-            nested_arrays: &[],
-            nested_objects: &[],
-        },
         OrbitBuiltinAction::AdrSupersede => ActionPolicy {
             free_text_fields: &[],
             free_text_arrays: &[],
@@ -313,8 +305,6 @@ fn policy_for_action(action: OrbitBuiltinAction) -> ActionPolicy {
         | OrbitBuiltinAction::PipelineInvoke
         | OrbitBuiltinAction::PipelineWait
         | OrbitBuiltinAction::Search
-        | OrbitBuiltinAction::SessionLogList
-        | OrbitBuiltinAction::SessionLogResolve
         | OrbitBuiltinAction::SemanticIndex
         | OrbitBuiltinAction::SemanticInstall
         | OrbitBuiltinAction::SemanticStats
@@ -352,7 +342,6 @@ fn is_covered_mutating_action(action: OrbitBuiltinAction) -> bool {
             | OrbitBuiltinAction::TaskReject
             | OrbitBuiltinAction::AutoTaskAdd
             | OrbitBuiltinAction::AutoTaskUpdate
-            | OrbitBuiltinAction::SessionLogAppend
             | OrbitBuiltinAction::Friction(FrictionVerb::Add | FrictionVerb::Update)
     )
 }
@@ -658,11 +647,6 @@ fn artifact_target(
                 task_id: None,
             })
         }
-        OrbitBuiltinAction::SessionLogAppend => Ok(ArtifactTarget {
-            artifact_type: "session_log",
-            artifact_id: response_string(response, "id")?,
-            task_id: None,
-        }),
         _ => Err(OrbitError::Execution(format!(
             "unsupported redaction audit action: {action:?}"
         ))),
@@ -688,7 +672,6 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
         OrbitBuiltinAction::Friction(FrictionVerb::Update) => "orbit.friction.update",
         OrbitBuiltinAction::AutoTaskAdd => "orbit.auto_task.add",
         OrbitBuiltinAction::AutoTaskUpdate => "orbit.auto_task.update",
-        OrbitBuiltinAction::SessionLogAppend => "orbit.session_log.append",
         _ => "orbit.unknown",
     }
 }
@@ -699,7 +682,6 @@ mod tests {
     use std::fs;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    use crate::adapter::command::override_activity_tools_for_test;
     use crate::adapter::tool_host::test_support::test_runtime;
 
     struct EnvVarGuard {
@@ -935,72 +917,6 @@ mod tests {
             .expect("redaction audit payload");
         assert!(arguments.contains("\"field_path\":\"title\""));
         assert!(arguments.contains("\"env\""));
-        assert!(!arguments.contains(token));
-    }
-
-    #[test]
-    fn dispatch_redacts_session_log_body_and_emits_an_audit_report() {
-        let token = "orbit-session-log-secret-value";
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
-        let _activity_tools = override_activity_tools_for_test([
-            "orbit.session_log.append",
-            "orbit.session_log.list",
-        ]);
-        let (_root, runtime, _repo_root) = test_runtime();
-
-        let output = runtime
-            .execute_tool_command(
-                "orbit.session_log.append",
-                json!({
-                    "kind": "note",
-                    "body": format!("captured {token}"),
-                }),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("session log append succeeds");
-
-        assert_eq!(output["redactions_applied"], true);
-        assert_eq!(output["body"], "captured [REDACTED_ENV]");
-        assert_eq!(
-            output["redactions"],
-            json!([{
-                "field_path": "body",
-                "redaction_kinds": ["env"],
-                "redaction_classes": ["sensitive_environment_value"]
-            }])
-        );
-        assert!(!output["body"].as_str().expect("body").contains(token));
-
-        let listed = runtime
-            .execute_tool_command(
-                "orbit.session_log.list",
-                json!({}),
-                Some("codex".to_string()),
-                Some(orbit_common::test_fixtures::TEST_CODEX_MODEL.to_string()),
-            )
-            .expect("session log list succeeds");
-        assert_eq!(listed["entries"][0]["body"], "captured [REDACTED_ENV]");
-
-        let events = runtime
-            .list_audit_events(
-                None,
-                Some("orbit.session_log.append".to_string()),
-                None,
-                None,
-                16,
-            )
-            .expect("session-log redaction audit query succeeds");
-        let redaction_event = events
-            .iter()
-            .find(|event| event.command == "artifact_redaction")
-            .expect("session-log redaction audit event");
-        let arguments = redaction_event
-            .arguments_json
-            .as_deref()
-            .expect("session-log redaction audit payload");
-        assert!(arguments.contains("\"artifact_type\":\"session_log\""));
-        assert!(arguments.contains("\"field_path\":\"body\""));
         assert!(!arguments.contains(token));
     }
 
