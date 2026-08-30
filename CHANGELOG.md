@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.17.0
+
+### Breaking Changes
+
+- **session_log tools withdrawn**: `orbit.session_log.append`, `orbit.session_log.list`, and `orbit.session_log.resolve` are gone from the public MCP/CLI agent surface → no public replacement. ([ORB-11097])
+- **ci-failure-remediation auto-task removed**: the shipped `ci-failure-remediation` auto-task, catalog entry, and seed file are gone; existing workspace copies stay until removed by hand. ([ORB-11115])
+- **code-review auto-task renamed**: the seeded `code-review-sweep` auto-task is now `code-review`; the old name no longer loads. ([ORB-11095])
+- **Remote MCP `--operator` ignored**: destination-side caller authorization no longer honors caller `--operator` argv; a missing `~/.orbit/mcp-callers.toml` yields `agent` only. ([ORB-11052])
+
+### Highlights
+
+- **Agent plugins restored**: Claude Code, Codex, and Cursor plugin distribution ships again after the 0.15.0 retirement. ([ORB-11038])
+- **Federated MCP includes local workspaces**: federated serve now includes the accepting machine's local workspaces automatically, so a missing destinations file is a valid local-only server. ([ORB-11044])
+- **Task publication V1**: operators can bind a private Git publication repo, publish owner-only snapshots, inspect labelled read-only state, and restore without renumbering. ([ORB-11077])
+- **Managed workspace routing**: managed CLI and MCP calls now keep the catalog workspace selector instead of inferring from a linked-worktree cwd. ([ORB-11117])
+- **Richer task.show projections**: `orbit.task.show` can project every stable public task field, including relations, job run, and attribution. ([ORB-11119])
+
 ## 0.16.0
 
 ### Breaking Changes
