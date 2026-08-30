@@ -472,6 +472,9 @@ fn task_show_schema_distinguishes_execution_crew_from_orchestrator() {
         "complexity",
         "created_at",
         "updated_at",
+        "relations",
+        "job_run_id",
+        "external_refs",
     ] {
         assert!(
             fields.description.contains(field),

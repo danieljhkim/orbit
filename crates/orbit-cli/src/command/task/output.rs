@@ -292,6 +292,13 @@ pub(super) fn task_field_to_json(
             })?,
         ))
         .map_err(|e| OrbitError::Io(e.to_string())),
+        "relations" => serde_json::to_value(resolve_task_relations(
+            task,
+            status_by_id.ok_or_else(|| {
+                OrbitError::Execution("missing task status index for relations".to_string())
+            })?,
+        ))
+        .map_err(|e| OrbitError::Io(e.to_string())),
         "history" => serde_json::to_value(runtime.get_task_history(&task.id)?)
             .map_err(|e| OrbitError::Io(e.to_string())),
         "context_files" => {
@@ -415,6 +422,20 @@ pub(super) fn print_single_task_field(
                 })?,
             ) {
                 println!("{}", dependency);
+            }
+            Ok(())
+        }
+        "relations" => {
+            for relation in resolve_task_relations(
+                task,
+                status_by_id.ok_or_else(|| {
+                    OrbitError::Execution("missing task status index for relations".to_string())
+                })?,
+            ) {
+                println!(
+                    "{}",
+                    serde_json::to_string(&relation).map_err(|e| OrbitError::Io(e.to_string()))?
+                );
             }
             Ok(())
         }

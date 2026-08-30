@@ -15,6 +15,9 @@ fn normalize_accepts_ordinary_top_level_fields() {
         "complexity".to_string(),
         "created_at".to_string(),
         "updated_at".to_string(),
+        "relations".to_string(),
+        "job_run_id".to_string(),
+        "external_refs".to_string(),
     ])
     .expect("ordinary top-level fields are projectable");
     assert_eq!(
@@ -28,8 +31,20 @@ fn normalize_accepts_ordinary_top_level_fields() {
             "complexity",
             "created_at",
             "updated_at",
+            "relations",
+            "job_run_id",
+            "external_refs",
         ]
     );
+}
+
+#[test]
+fn normalize_rejects_terminal_with_status_guidance() {
+    let error = normalize_task_show_fields(&["terminal".to_string()])
+        .expect_err("terminal is derived lifecycle state, not a field");
+    let message = error.to_string();
+    assert!(message.contains("use `status`"), "{message}");
+    assert!(message.contains(TASK_SHOW_PROJECTION_FIELDS_CSV));
 }
 
 #[test]

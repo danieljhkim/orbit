@@ -35,8 +35,8 @@ use orbit_types::record::FrictionStatus;
 use orbit_types::task::{
     Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_required_tools,
     normalize_task_dependencies, normalize_task_tags, resolve_task_dependencies,
-    task_dependencies_ready, task_matches_tags, task_show_record_field_json,
-    unknown_task_show_field_message, validate_task_dependencies,
+    resolve_task_relations, task_dependencies_ready, task_matches_tags,
+    task_show_record_field_json, unknown_task_show_field_message, validate_task_dependencies,
 };
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Map, Value, json};
@@ -794,6 +794,7 @@ impl HubCoordinationExecutor {
                         .map(|entry| entry.label())
                         .collect::<Vec<_>>()
                 )),
+                "relations" => Ok(json!(resolve_task_relations(&task, &status))),
                 "tags" => Ok(json!(task.tags)),
                 "context_files" => Ok(json!(task.context_files)),
                 "crew" => Ok(json!(task.crew)),
@@ -1254,7 +1255,7 @@ mod checkoutless_hub_tests {
     }
 
     #[test]
-    fn task_show_projects_status_and_mixed_fields_without_checkout() {
+    fn task_show_projects_public_dto_fields_without_checkout() {
         let (_root, executor, context) = executor();
         let created = executor
             .execute_tool(
@@ -1264,6 +1265,7 @@ mod checkoutless_hub_tests {
                     "title": "Hub status projection",
                     "description": "Exercise fields:[status] on the hub.",
                     "complexity": "low",
+                    "relations": [{"type": "related_to", "target": "DK-00042"}],
                     "model": "codex"
                 }),
                 context.clone(),
@@ -1281,18 +1283,33 @@ mod checkoutless_hub_tests {
                 .expect("fields:[status] must succeed"),
             json!("proposed")
         );
+        executor
+            .execute_tool(
+                "orbit.task.update",
+                json!({"id": id, "job_run_id": "jrun-hub", "model": "codex"}),
+                context.clone(),
+            )
+            .expect("attach checkoutless job run");
         assert_eq!(
             executor
                 .execute_tool(
                     "orbit.task.show",
-                    json!({"id": id, "fields": ["status", "title", "plan"]}),
+                    json!({
+                        "id": id,
+                        "fields": ["status", "relations", "external_refs", "job_run_id"],
+                    }),
                     context,
                 )
                 .expect("mixed projection must succeed"),
             json!({
                 "status": "proposed",
-                "title": "Hub status projection",
-                "plan": "",
+                "relations": [{
+                    "type": "related_to",
+                    "target": "DK-00042",
+                    "verification": "not verifiable here",
+                }],
+                "external_refs": [],
+                "job_run_id": "jrun-hub",
             })
         );
     }
