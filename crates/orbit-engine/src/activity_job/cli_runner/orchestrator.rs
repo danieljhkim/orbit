@@ -261,15 +261,23 @@ pub fn run_cli_backend(
     // task store. `ORBIT_ROOT` cannot carry this contract because it is the
     // operator's explicit data-root override and deliberately pins global,
     // shared, and local roots together. The managed-only locator changes only
-    // the global registry; cwd/registry routing continues to own workspace
-    // selection and fails closed when it cannot resolve one. [ORB-10980]
-    // [ORB-11066]
+    // the global registry. Workspace selection is the separate logical
+    // `ORBIT_WORKSPACE` selector below, not the linked-worktree cwd.
+    // [ORB-10980] [ORB-11066] [ORB-11117]
     let registry_locator_injected = if let Some(registry_root) = host.orbit_registry_root() {
         dispatch_env.push(("ORBIT_REGISTRY_ROOT".to_string(), registry_root));
         true
     } else {
         false
     };
+    // Carry the trusted logical `ws_*` identity so nested `orbit tool run`
+    // and `orbit mcp serve` do not rediscover ownership from a linked-worktree
+    // cwd. The child honors this only together with managed-run provenance;
+    // an explicit `--workspace` or tool-payload selector still wins and still
+    // fails closed. [ORB-11117]
+    if let Some(workspace) = host.orbit_workspace_selector() {
+        dispatch_env.push(("ORBIT_WORKSPACE".to_string(), workspace));
+    }
     // The child's whole environment is composed here and applied to a cleared
     // one by every launcher, so the `[execution.env]` allowlist governs what an
     // untrusted provider subprocess can read. The provider's declared

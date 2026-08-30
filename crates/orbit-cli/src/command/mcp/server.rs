@@ -162,7 +162,9 @@ pub(super) fn serve_mcp_listener(
 /// `bound_workspace` is the launching configuration's answer to "which
 /// workspace is this server for" — the same selector a client could announce
 /// at initialize, supplied by whoever wrote the integration because most MCP
-/// clients cannot announce anything. It is still just a selector: it is
+/// clients cannot announce anything. A managed child that launches this
+/// server without `--workspace` still supplies that selector through the
+/// trusted `ORBIT_WORKSPACE` envelope. It is still just a selector: it is
 /// resolved against this machine's registry on every call and overridden by an
 /// explicit per-call `workspace`.
 fn compose_server(

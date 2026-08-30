@@ -221,9 +221,20 @@ pub trait RuntimeHost: Send + Sync {
     ///
     /// This is the registry that owns the task store, not the dispatching
     /// checkout's workspace `.orbit`. The locator selects only the global
-    /// registry; the child still resolves its workspace from its registered
-    /// linked-worktree cwd. [ORB-10980] [ORB-11066]
+    /// registry. Workspace ownership for nested tool calls is the separate
+    /// logical selector from [`RuntimeHost::orbit_workspace_selector`].
+    /// [ORB-10980] [ORB-11066] [ORB-11117]
     fn orbit_registry_root(&self) -> Option<String> {
+        None
+    }
+    /// The trusted logical `ws_*` selector to hand a spawned CLI agent as
+    /// `ORBIT_WORKSPACE`.
+    ///
+    /// Nested MCP and CLI tool calls use this identity instead of inferring
+    /// durable ownership from a linked-worktree cwd. Hosts that are not bound
+    /// to a registered workspace return `None`, and the child then keeps its
+    /// ordinary fail-closed resolution. [ORB-11117]
+    fn orbit_workspace_selector(&self) -> Option<String> {
         None
     }
     fn missing_required_environment_vars(&self, _required_env_vars: &[&str]) -> Vec<String> {

@@ -54,6 +54,7 @@ fn cli_agent_envelope_carries_input_run_id_and_task_context() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec(Duration::from_secs(5));
     spec.instruction = "perform the requested task".to_string();

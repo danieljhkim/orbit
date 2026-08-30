@@ -164,7 +164,9 @@ impl McpWorkspace {
             .env_remove("ORBIT_AGENT_MODEL")
             .env_remove("ORBIT_OPERATOR")
             .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
-            .env_remove("ORBIT_TASK_ACTOR_KIND");
+            .env_remove("ORBIT_TASK_ACTOR_KIND")
+            .env_remove("ORBIT_REGISTRY_ROOT")
+            .env_remove("ORBIT_WORKSPACE");
         command
     }
 
@@ -2846,6 +2848,209 @@ fn managed_mcp_config_routes_a_linked_worktree_by_its_logical_workspace_id() {
     );
 }
 
+/// ORB-11117: a managed MCP child launched without `--workspace` still uses
+/// the trusted envelope selector. A general-purpose client that omits
+/// `_meta.orbit.workspace` must not see workspace-required.
+#[test]
+fn managed_mcp_env_binding_updates_without_a_workspace_argument() {
+    let workspace = McpWorkspace::init();
+    let task_id = author_task(&workspace, "Managed envelope MCP routing");
+    let worktree = add_linked_worktree(&workspace.work);
+    write_shadow_worktree_identity(&worktree);
+
+    let mut client = spawn_managed_env_server(&workspace, &worktree, "ws_mcp-roundtrip");
+
+    let listed = client.request("tools/list", Value::Null);
+    let description = tool_workspace_description(&listed, "orbit_task_update");
+    assert!(
+        description.contains("Optional in this session"),
+        "a managed envelope-bound session must advertise the selector as optional: {description}"
+    );
+
+    let updated = client.call_tool_ok(
+        "orbit_task_update",
+        json!({
+            "id": task_id,
+            "execution_summary": "Routed by the managed envelope",
+            "model": "codex",
+        }),
+    );
+    assert_eq!(
+        updated["execution_summary"],
+        "Routed by the managed envelope"
+    );
+
+    let friction = client.call_tool_ok(
+        "orbit_friction_add",
+        json!({
+            "body": "Managed MCP envelope routed friction add.",
+            "model": "codex",
+        }),
+    );
+    assert!(
+        friction.get("id").and_then(Value::as_str).is_some(),
+        "friction add must persist through the envelope binding: {friction}"
+    );
+
+    let listed_tasks = client.call_tool_ok("orbit_task_list", json!({ "limit": 10 }));
+    let ids = task_ids_from_list(&listed_tasks);
+    assert!(
+        ids.contains(&task_id),
+        "read path must use the same canonical workspace: {listed_tasks}"
+    );
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.task.update").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.friction.add").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.task.list").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+
+    let rejected = client.call_tool_err(
+        "orbit_task_update",
+        json!({ "id": task_id, "workspace": "ws_not_registered", "model": "codex" }),
+    );
+    assert!(
+        rejected["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("ws_not_registered")),
+        "an explicit selector must fail closed without cwd fallback: {rejected}"
+    );
+    drop(client);
+
+    assert_eq!(
+        cli_task_execution_summary(&workspace, &workspace.work, &task_id),
+        "Routed by the managed envelope"
+    );
+    assert_no_shadow_task_store(&worktree);
+}
+
+/// ORB-11117: production-shaped managed CLI from a disposable linked worktree.
+#[test]
+fn managed_cli_from_linked_worktree_updates_canonical_workspace() {
+    let workspace = McpWorkspace::init();
+    let task_id = author_task(&workspace, "Managed envelope CLI routing");
+    let worktree = add_linked_worktree(&workspace.work);
+    write_shadow_worktree_identity(&worktree);
+
+    let update_input = json!({
+        "id": task_id,
+        "execution_summary": "CLI routed by the managed envelope",
+        "model": "codex",
+    })
+    .to_string();
+    let update = managed_cli(&workspace, &worktree)
+        .args(["tool", "run", "orbit.task.update", "--input", &update_input])
+        .output()
+        .expect("managed CLI task update");
+    assert_command_succeeded("managed CLI orbit.task.update", &update);
+
+    let friction_input = json!({
+        "body": "Managed CLI envelope routed friction add.",
+        "model": "codex",
+    })
+    .to_string();
+    let friction = managed_cli(&workspace, &worktree)
+        .args([
+            "tool",
+            "run",
+            "orbit.friction.add",
+            "--input",
+            &friction_input,
+        ])
+        .output()
+        .expect("managed CLI friction add");
+    assert_command_succeeded("managed CLI orbit.friction.add", &friction);
+
+    let list_input = json!({ "limit": 10, "model": "codex" }).to_string();
+    let listed = managed_cli(&workspace, &worktree)
+        .args(["tool", "run", "orbit.task.list", "--input", &list_input])
+        .output()
+        .expect("managed CLI task list");
+    assert_command_succeeded("managed CLI orbit.task.list", &listed);
+    let listed_json: Value = serde_json::from_slice(&listed.stdout).expect("parse list");
+    assert!(
+        task_ids_from_list(&listed_json).contains(&task_id),
+        "managed CLI list must read the canonical workspace: {listed_json}"
+    );
+
+    assert_eq!(
+        cli_task_execution_summary(&workspace, &workspace.work, &task_id),
+        "CLI routed by the managed envelope"
+    );
+    assert_no_shadow_task_store(&worktree);
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.task.update").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.friction.add").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+    assert_eq!(
+        latest_tool_audit_workspace(&workspace, "orbit.task.list").as_deref(),
+        Some("ws_mcp-roundtrip")
+    );
+
+    let unknown = managed_cli(&workspace, &worktree)
+        .args([
+            "--workspace",
+            "ws_not_registered",
+            "tool",
+            "run",
+            "orbit.task.list",
+            "--input",
+            &list_input,
+        ])
+        .output()
+        .expect("invalid explicit selector");
+    assert!(
+        !unknown.status.success(),
+        "an invalid explicit selector must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(
+        stderr.contains("ws_not_registered"),
+        "the refusal must name the rejected selector: {stderr}"
+    );
+}
+
+/// ORB-11117: an inherited `ORBIT_WORKSPACE` without managed provenance is not
+/// a launch binding.
+#[test]
+fn unmanaged_orbit_workspace_env_does_not_bind_mcp() {
+    let workspace = McpWorkspace::init();
+    let child = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
+        .env("ORBIT_WORKSPACE", "ws_mcp-roundtrip")
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn unbound MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "unmanaged-env", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+    let unscoped = client.call_tool_err("orbit_task_list", json!({}));
+    assert!(
+        unscoped["message"]
+            .as_str()
+            .is_some_and(|message| { message.contains("requires an explicit workspace selector") })
+    );
+}
+
 /// Author one task through the checkout-local CLI surface and return its ID.
 fn author_task(workspace: &McpWorkspace, title: &str) -> String {
     let input = json!({
@@ -2953,6 +3158,88 @@ fn cli_task_execution_summary(workspace: &McpWorkspace, cwd: &Path, task_id: &st
         .as_str()
         .expect("execution summary")
         .to_string()
+}
+
+fn spawn_managed_env_server(workspace: &McpWorkspace, cwd: &Path, selector: &str) -> McpClient {
+    let child = McpWorkspace::orbit_command(cwd, &workspace.home)
+        .env("ORBIT_MANAGED_RUN_CONTEXT", "1")
+        .env("ORBIT_RUN_ID", "jrun-managed-mcp")
+        .env("ORBIT_WORKSPACE", selector)
+        .args(["mcp", "serve"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn managed-envelope MCP server");
+    let mut client = McpClient::new(child);
+    client.request(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "managed-executor", "version": "0" },
+        }),
+    );
+    client.notify("notifications/initialized");
+    client
+}
+
+fn managed_cli(workspace: &McpWorkspace, cwd: &Path) -> Command {
+    let mut command = McpWorkspace::orbit_command(cwd, &workspace.home);
+    command
+        .env("ORBIT_MANAGED_RUN_CONTEXT", "1")
+        .env("ORBIT_RUN_ID", "jrun-managed-cli")
+        .env("ORBIT_WORKSPACE", "ws_mcp-roundtrip");
+    command
+}
+
+fn write_shadow_worktree_identity(worktree: &Path) {
+    let orbit_dir = worktree.join(".orbit");
+    std::fs::create_dir_all(&orbit_dir).expect("worktree local orbit");
+    std::fs::write(
+        orbit_dir.join("config.yaml"),
+        "schema_version: 1\nworkspace_id: daniel-e9c542\n",
+    )
+    .expect("shadow worktree identity");
+}
+
+fn assert_no_shadow_task_store(worktree: &Path) {
+    assert!(
+        !worktree.join(".orbit/tasks").exists(),
+        "managed routing must not create a worktree-local shadow task store"
+    );
+}
+
+fn latest_tool_audit_workspace(workspace: &McpWorkspace, tool_name: &str) -> Option<String> {
+    let connection =
+        Connection::open(workspace.home.join(".orbit/orbit.db")).expect("open audit store");
+    connection
+        .query_row(
+            "SELECT workspace_id FROM audit_events
+             WHERE tool_name = ?1 AND workspace_id IS NOT NULL
+             ORDER BY rowid DESC LIMIT 1",
+            [tool_name],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+}
+
+fn task_ids_from_list(value: &Value) -> Vec<String> {
+    let items = value
+        .as_array()
+        .cloned()
+        .or_else(|| value.get("items").and_then(Value::as_array).cloned())
+        .or_else(|| value.get("tasks").and_then(Value::as_array).cloned())
+        .unwrap_or_default();
+    items
+        .iter()
+        .filter_map(|task| {
+            task.get("id")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }
 
 /// The advertised `workspace` selector documentation for one listed tool.

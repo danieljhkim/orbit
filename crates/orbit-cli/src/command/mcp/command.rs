@@ -166,11 +166,13 @@ pub struct ServeArgs {
     /// Most MCP clients cannot announce `_meta.orbit.workspace` on their
     /// initialize, so without this a workspace-scoped tool must repeat the
     /// selector on every call. Local `orbit mcp init` and `orbit workspace
-    /// init --mcp` write this into the integrations they generate; the
-    /// federated init path is session-unbound. A client that does announce a
-    /// workspace, and any explicit per-call `workspace`, still take
-    /// precedence. The selector is resolved against the accepting server's
-    /// registry per call, never from the server process cwd.
+    /// init --mcp` write this into the integrations they generate; a managed
+    /// child that launches `orbit mcp serve` without the flag still inherits
+    /// `ORBIT_WORKSPACE` from the trusted execution envelope. The federated
+    /// init path is session-unbound. A client that does announce a workspace,
+    /// and any explicit per-call `workspace`, still take precedence. The
+    /// selector is resolved against the accepting server's registry per call,
+    /// never from the server process cwd.
     #[arg(long, value_name = "SELECTOR", conflicts_with = "mode")]
     pub workspace: Option<String>,
 }
@@ -214,7 +216,8 @@ impl ServeArgs {
                 } else {
                     McpSessionAuthority::Agent
                 },
-                self.workspace,
+                self.workspace
+                    .or_else(orbit_core::runtime::managed_workspace_selector_from_env),
                 // `--caller` is unreachable without `--accept-ssh`, so the
                 // "honored only under a forced command" rule is carried by the
                 // type the server receives rather than re-checked downstream.

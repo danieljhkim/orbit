@@ -242,6 +242,7 @@ pub(in crate::activity_job::cli_runner) struct TestHost {
     pub(in crate::activity_job::cli_runner) task_context: Option<Value>,
     pub(in crate::activity_job::cli_runner) workspace_root: Option<PathBuf>,
     pub(in crate::activity_job::cli_runner) orbit_registry_root: Option<String>,
+    pub(in crate::activity_job::cli_runner) orbit_workspace_selector: Option<String>,
 }
 
 impl TestHost {
@@ -254,6 +255,7 @@ impl TestHost {
             task_context: None,
             workspace_root: None,
             orbit_registry_root: None,
+            orbit_workspace_selector: None,
         }
     }
 }
@@ -356,6 +358,10 @@ impl RuntimeHost for TestHost {
 
     fn orbit_registry_root(&self) -> Option<String> {
         self.orbit_registry_root.clone()
+    }
+
+    fn orbit_workspace_selector(&self) -> Option<String> {
+        self.orbit_workspace_selector.clone()
     }
 }
 

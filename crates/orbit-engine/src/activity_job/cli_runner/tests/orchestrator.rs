@@ -886,6 +886,7 @@ fn run_cli_backend_returns_error_when_declared_workspace_path_missing() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
     let input = serde_json::json!({
@@ -946,6 +947,7 @@ fn run_cli_backend_records_resolved_cwd_in_started_event() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1016,6 +1018,7 @@ fn linux_bwrap_failed_invocation_names_ungranted_write_path_and_deny() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1126,6 +1129,7 @@ fn linux_bwrap_exit_zero_without_an_envelope_still_names_the_denied_write() {
         })),
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -1195,6 +1199,7 @@ fn run_cli_backend_emits_provider_pid_between_the_started_and_finished_events() 
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -2995,6 +3000,7 @@ fn run_cli_backend_passes_provider_config_to_codex_runtime_args() {
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let spec = test_agent_loop_spec(Duration::from_secs(5));
 
@@ -3068,6 +3074,7 @@ fn run_cli_backend_passes_model_to_grok_and_captures_well_formed_stdout() {
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3145,6 +3152,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3199,6 +3207,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3254,6 +3263,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: None,
+        orbit_workspace_selector: None,
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3290,7 +3300,7 @@ fn run_cli_backend_injects_managed_registry_root_from_host() {
         &script,
         r#"#!/bin/sh
 cat > /dev/null
-if [ "$ORBIT_REGISTRY_ROOT" = "/resolved/orbit/root" ] && [ -z "$ORBIT_ROOT" ]; then
+if [ "$ORBIT_REGISTRY_ROOT" = "/resolved/orbit/root" ] && [ -z "$ORBIT_ROOT" ] && [ "$ORBIT_WORKSPACE" = "ws_orbit" ]; then
   printf '%s\n' '{"schemaVersion":1,"status":"success","result":{"identity":"ok"},"error":null}'
 else
   printf '%s\n' '{"schemaVersion":1,"status":"failed","error":{"code":"registry_root_missing","message":"managed registry routing was not isolated","details":null}}'
@@ -3314,6 +3324,7 @@ fi
         task_context: None,
         workspace_root: None,
         orbit_registry_root: Some("/resolved/orbit/root".to_string()),
+        orbit_workspace_selector: Some("ws_orbit".to_string()),
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());
@@ -3372,6 +3383,8 @@ fail() {{
 }}
 [ "$ORBIT_REGISTRY_ROOT" = "{registry}" ] || fail registry_root_not_authoritative
 [ -z "$ORBIT_ROOT" ] || fail operator_root_leaked_into_managed_child
+[ "$ORBIT_WORKSPACE" = "ws_orbit" ] || fail workspace_selector_missing
+[ "$ORBIT_WORKSPACE" = "daniel-e9c542" ] && fail workspace_selector_is_worktree_identity
 [ "$ORBIT_REGISTRY_ROOT" = "{workspace_state}" ] && fail registry_root_is_workspace_state_root
 [ "$ORBIT_REGISTRY_ROOT" = "{worktree_state}" ] && fail registry_root_is_worktree_state_root
 [ -n "$ORBIT_BIN" ] || fail orbit_bin_missing
@@ -3409,6 +3422,7 @@ printf '%s\n' '{{"schemaVersion":1,"status":"success","result":{{"identity":"ok"
         })),
         workspace_root: None,
         orbit_registry_root: Some(registry_root.display().to_string()),
+        orbit_workspace_selector: Some("ws_orbit".to_string()),
     };
     let mut spec = test_agent_loop_spec_for("grok", Duration::from_secs(5));
     spec.model = Some("grok-build".to_string());

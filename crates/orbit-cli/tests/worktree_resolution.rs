@@ -372,6 +372,7 @@ fn clear_agent_identity_env(command: &mut AssertCommand) {
         .env_remove("ORBIT_AGENT_MODEL")
         .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
         .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_WORKSPACE")
         .env_remove("ORBIT_TASK_ID")
         .env_remove("ORBIT_ACTIVE_TASK_ID")
         .env_remove("ORBIT_SESSION_ID")
