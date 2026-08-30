@@ -998,9 +998,7 @@ impl OrbitRuntime {
             let run = self
                 .get_job_run_backend(run_id)?
                 .ok_or_else(|| OrbitError::not_found(NotFoundKind::JobRun, run_id.to_string()))?;
-            if let Some(owner_pid) = run.pid
-                && !claimed
-            {
+            if run.pid == Some(child_pid) && !claimed {
                 let _ = self.record_pipeline_audit(
                     "pipeline.worker.claimed",
                     Some(run_id),
@@ -1009,7 +1007,7 @@ impl OrbitRuntime {
                     json!({
                         "run_id": run_id,
                         "worker_pid": child_pid,
-                        "owner_pid": owner_pid,
+                        "owner_pid": child_pid,
                         "workspace": workspace,
                         "worker_log": worker_log,
                         "state": run.state.to_string(),
@@ -1030,10 +1028,42 @@ impl OrbitRuntime {
                     .filter(|value| !value.is_empty())
                     .map(|value| format!("; worker output:\n{value}"))
                     .unwrap_or_default();
+                // [ORB-11116] A second worker can lose the atomic Start race
+                // and exit successfully while the incumbent's PID remains on
+                // the run. Only this observer's exact child PID establishes
+                // ownership; another non-null PID is a benign duplicate
+                // delivery, not evidence that this child abandoned the run.
+                if let Some(owner_pid) = run.pid.filter(|owner_pid| *owner_pid != child_pid) {
+                    tracing::info!(
+                        target: "orbit.core.job_run",
+                        run_id,
+                        worker_pid = child_pid,
+                        owner_pid,
+                        exit_status = %status,
+                        "duplicate pipeline worker exited without owning the persisted run",
+                    );
+                    let _ = self.record_pipeline_audit(
+                        "pipeline.worker.duplicate",
+                        Some(run_id),
+                        actor,
+                        AuditEventStatus::Success,
+                        json!({
+                            "run_id": run_id,
+                            "worker_pid": child_pid,
+                            "owner_pid": owner_pid,
+                            "workspace": workspace,
+                            "worker_log": worker_log,
+                            "state": run.state.to_string(),
+                            "exit_status": status.to_string(),
+                        }),
+                        None,
+                    );
+                    return Ok(());
+                }
                 if run.state.is_terminal() {
                     return Ok(());
                 }
-                let ownership = if run.pid.is_some() {
+                let ownership = if run.pid == Some(child_pid) {
                     "after claiming"
                 } else {
                     "before claiming"
