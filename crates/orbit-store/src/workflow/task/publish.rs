@@ -535,18 +535,34 @@ impl PublicationCache {
         Ok(commit_runner.run(&args)?.to_ascii_lowercase())
     }
 
-    /// Push as an ordinary fast-forward. A moved branch is an authority
-    /// conflict for the operator to resolve, never something to merge or force.
+    /// Push as an exact compare-and-swap of the observed tip. Ordinary Git
+    /// fast-forward is not enough: a branch deleted or rewound after observation
+    /// can still accept a descendant and recreate or advance the ref. The lease
+    /// names the expected old object (or requires the ref to stay absent); the
+    /// refspec is not force-prefixed, so a matching lease cannot replace
+    /// non-fast-forward history. A moved branch is an authority conflict, never
+    /// something to merge or force.
     fn push_fast_forward(
         &self,
         request: &ValidatedRequest,
         commit: &str,
         observed_tip: Option<&str>,
     ) -> Result<(), OrbitError> {
+        #[cfg(test)]
+        run_before_push_hook();
+
         let git_dir = self.git_dir_str()?;
+        let lease = compare_and_swap_lease(&request.publication_branch, observed_tip);
         let refspec = format!("{commit}:{}", request.publication_branch);
-        let attempt =
-            runner().try_run(&["--git-dir", git_dir, "push", "--atomic", "origin", &refspec])?;
+        let attempt = runner().try_run(&[
+            "--git-dir",
+            git_dir,
+            "push",
+            "--atomic",
+            &lease,
+            "origin",
+            &refspec,
+        ])?;
         if !attempt.success {
             let current = self.remote_branch_tip(request)?;
             if current.as_deref() != observed_tip {
@@ -817,8 +833,43 @@ struct PendingPublication {
     previous_publication: Option<String>,
 }
 
+/// Branch-scoped expected-old-object lease. An empty expect (`<branch>:`)
+/// requires the ref to still be absent; a commit id requires that exact tip.
+fn compare_and_swap_lease(branch: &str, observed_tip: Option<&str>) -> String {
+    match observed_tip {
+        Some(oid) => format!("--force-with-lease={branch}:{oid}"),
+        None => format!("--force-with-lease={branch}:"),
+    }
+}
+
 fn runner() -> GitRunner<'static> {
     GitRunner::new(PUBLISH_LABEL)
+}
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_PUSH: std::cell::RefCell<Option<Box<dyn FnOnce() + 'static>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Install a one-shot callback that runs after the pending record is written
+/// and immediately before the compare-and-swap push. Tests use this to mutate
+/// the remote between observation and push.
+#[cfg(test)]
+pub(crate) fn set_before_push_hook(hook: impl FnOnce() + 'static) {
+    BEFORE_PUSH.with(|cell| *cell.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+pub(crate) fn clear_before_push_hook() {
+    BEFORE_PUSH.with(|cell| cell.borrow_mut().take());
+}
+
+#[cfg(test)]
+fn run_before_push_hook() {
+    if let Some(hook) = BEFORE_PUSH.with(|cell| cell.borrow_mut().take()) {
+        hook();
+    }
 }
 
 fn redact_remote(message: &str, remote: &str) -> String {
