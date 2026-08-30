@@ -8,6 +8,7 @@ use tempfile::tempdir;
 
 use crate::OrbitRuntime;
 use crate::application::task::TaskUpdateParams;
+use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 
 use super::interval_params;
@@ -122,6 +123,41 @@ fn skip_if_open_never_files_a_second_open_instance() {
     let drained = fire(&runtime, t0 + Duration::minutes(240));
     assert_eq!(drained[0].0, "fired");
     assert_eq!(runtime.list_tasks().expect("tasks").len(), 2);
+}
+
+#[test]
+fn shipped_ci_failure_remediation_fire_persists_the_five_github_reads() {
+    let runtime = runtime();
+    let (_, yaml) = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .find(|(name, _)| *name == "ci-failure-remediation")
+        .expect("shipped ci-failure-remediation");
+    let dest =
+        crate::auto_tasks::definition_path(&runtime.paths().local_dir, "ci-failure-remediation");
+    std::fs::create_dir_all(dest.parent().expect("auto_tasks parent"))
+        .expect("create auto_tasks dir");
+    std::fs::write(&dest, yaml).expect("install shipped definition");
+    runtime
+        .auto_task_toggle("ci-failure-remediation", true)
+        .expect("enable for scheduled fire");
+
+    let t0 = at(2026, 1, 1, 0, 15);
+    assert_eq!(fire(&runtime, t0)[0].0, "baselined");
+    let reports = fire(&runtime, at(2026, 1, 1, 1, 16));
+    assert_eq!(reports[0].0, "fired");
+    let task = runtime
+        .get_task(&reports[0].1.clone().expect("task id"))
+        .expect("fired task");
+    assert_eq!(
+        task.required_tools,
+        vec![
+            "github.auth.status",
+            "github.pr.list",
+            "github.run.list",
+            "github.run.logs",
+            "github.run.view",
+        ]
+    );
 }
 
 #[test]

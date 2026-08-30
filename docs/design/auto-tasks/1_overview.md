@@ -107,7 +107,10 @@ definition of the same name.
   through the read-only `github.*` builtin tools, which bound log output and
   redact credentials; a `github.auth.status` preflight makes an execution lane
   that cannot authenticate report a capability-unavailable outcome instead of a
-  clean pipeline (ORB-11059).
+  clean pipeline (ORB-11059). The template persists the five exact GitHub-read
+  names as `required_tools` so dispatch unions them with the ordinary
+  `agent_implement` baseline rather than widening that activity (ORB-11070;
+  DANI-10056 is the missing-requirements incident, not a clean result).
 
 ## Workspace-authored definitions in this repo
 
@@ -143,5 +146,9 @@ encode this repository's branches and gates. Re-init preserves them:
 - ORB-11059 — Routed the default's CI discovery through the read-only
   `github.run.*` / `github.pr.list` / `github.auth.status` builtin tools and
   added the capability-unavailable outcome.
+- ORB-11070 — Adopted those five exact names as the template's `required_tools`
+  so minted CI-remediation tasks can reach them under `agent_implement`
+  without changing that activity's baseline. DANI-10056 remains cited as
+  failed-validation evidence of the missing-requirements bug.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

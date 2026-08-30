@@ -9,10 +9,23 @@ use orbit_types::workflow::{DedupePolicy, auto_task_tag};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 use crate::auto_tasks::state::cursor_state_path;
 
 use super::interval_params;
+
+fn install_shipped_ci_remediation(runtime: &OrbitRuntime) {
+    let (_, yaml) = DEFAULT_AUTO_TASK_FILES
+        .iter()
+        .find(|(name, _)| *name == "ci-failure-remediation")
+        .expect("shipped ci-failure-remediation");
+    let dest =
+        crate::auto_tasks::definition_path(&runtime.paths().local_dir, "ci-failure-remediation");
+    std::fs::create_dir_all(dest.parent().expect("auto_tasks parent"))
+        .expect("create auto_tasks dir");
+    std::fs::write(&dest, yaml).expect("install shipped definition");
+}
 
 fn runtime() -> OrbitRuntime {
     OrbitRuntime::in_memory().expect("build in-memory runtime")
@@ -103,6 +116,26 @@ fn mint_matches_a_scheduler_fire_field_for_field() {
     assert_eq!(
         minted.required_tools,
         vec!["github.auth.status", "github.run.list"]
+    );
+}
+
+#[test]
+fn mint_of_shipped_ci_failure_remediation_persists_the_five_github_reads() {
+    let runtime = runtime();
+    install_shipped_ci_remediation(&runtime);
+
+    let minted = runtime
+        .auto_task_mint("ci-failure-remediation")
+        .expect("mint shipped definition");
+    assert_eq!(
+        minted.required_tools,
+        vec![
+            "github.auth.status",
+            "github.pr.list",
+            "github.run.list",
+            "github.run.logs",
+            "github.run.view",
+        ]
     );
 }
 

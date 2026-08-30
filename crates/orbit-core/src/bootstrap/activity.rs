@@ -340,6 +340,34 @@ backend = "cli"
     }
 
     #[test]
+    fn agent_implement_tools_remain_the_implementation_baseline() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "agent_implement")
+            .expect("agent implement activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse agent implement activity");
+        let ActivityV2Spec::AgentLoop(spec) = asset.spec.spec else {
+            panic!("expected agent_loop activity");
+        };
+        assert_eq!(
+            spec.tools,
+            [
+                "orbit.task.*",
+                "orbit.friction.*",
+                "orbit.search",
+                "proc.spawn"
+            ]
+        );
+        assert!(
+            spec.tools
+                .iter()
+                .all(|tool| !tool.starts_with("github.") && !tool.contains("ceiling")),
+            "agent_implement must not widen to GitHub reads or grow a task ceiling: {:?}",
+            spec.tools
+        );
+    }
+
+    #[test]
     fn agent_implement_context_loading_reads_files_and_lists_directories() {
         let (_, yaml) = DEFAULT_ACTIVITY_FILES
             .iter()
