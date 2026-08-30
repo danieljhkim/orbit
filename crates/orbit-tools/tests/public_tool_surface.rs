@@ -393,6 +393,7 @@ fn task_add_schema_uses_trimmed_authoring_surface() {
             "workspace",
             "acceptance_criteria",
             "tags",
+            "required_tools",
             "context_files",
             "priority",
             "complexity",
