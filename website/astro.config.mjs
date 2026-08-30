@@ -25,12 +25,20 @@ export default defineConfig({
         replacesTitle: true,
       },
       favicon: '/favicon.svg',
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/danieljhkim/orbit',
+        },
+      ],
       tableOfContents: {
         minHeadingLevel: 2,
         maxHeadingLevel: 3,
       },
       customCss: ['./src/styles/custom.css'],
       components: {
+        SiteTitle: './src/components/SiteTitle.astro',
         ThemeProvider: './src/components/ThemeProvider.astro',
         ThemeSelect: './src/components/ThemeSelect.astro',
         Footer: './src/components/Footer.astro',
