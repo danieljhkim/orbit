@@ -44,4 +44,5 @@ fn registry_serialization_keeps_paths_out_of_logical_workspaces() {
     assert!(value["workspaces"][0].get("orbit_dir").is_none());
     assert_eq!(value["checkouts"][0]["role"], "replica");
     assert_eq!(value["checkouts"][0]["owner_machine_id"], "hm_owner");
+    assert!(value.get("publication_bindings").is_none());
 }
