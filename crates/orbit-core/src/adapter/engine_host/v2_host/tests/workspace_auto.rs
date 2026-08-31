@@ -66,7 +66,7 @@ fn list_epic_descendants_err(
 }
 
 #[test]
-fn epic_descendants_are_dependency_then_priority_ordered_and_terminal_tasks_are_skipped() {
+fn epic_descendants_are_dependency_then_dispatch_ordered_and_terminal_tasks_are_skipped() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let epic = runtime
         .add_task(TaskAddParams {
@@ -116,6 +116,19 @@ fn epic_descendants_are_dependency_then_priority_ordered_and_terminal_tasks_are_
             ..Default::default()
         })
         .expect("seed independent");
+    let corrective = runtime
+        .add_task(TaskAddParams {
+            parent_id: Some(epic.id.clone()),
+            title: "Corrective".to_string(),
+            description: "Corrective fixture".to_string(),
+            acceptance_criteria: vec!["Done".to_string()],
+            plan: "Implement".to_string(),
+            priority: TaskPriority::Low,
+            task_type: Some(TaskType::Bug),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed corrective child");
     let done = runtime
         .add_task(TaskAddParams {
             parent_id: Some(epic.id.clone()),
@@ -131,9 +144,9 @@ fn epic_descendants_are_dependency_then_priority_ordered_and_terminal_tasks_are_
     let output = list_epic_descendants(&runtime, &epic.id);
     assert_eq!(
         output["task_ids"],
-        json!([independent.id, foundation.id, dependent.id])
+        json!([independent.id, corrective.id, foundation.id, dependent.id])
     );
-    assert_eq!(output["task_count"], 3);
+    assert_eq!(output["task_count"], 4);
     assert!(
         !output["task_ids"]
             .as_array()
@@ -322,6 +335,64 @@ fn two_loose_tasks_and_one_epic_root_are_admissible_together() {
     assert_eq!(second["epic_task_id"], epic.id);
     assert_eq!(second["loose_task_ids"], json!([]));
     assert_eq!(second["has_leaves"], false);
+}
+
+#[test]
+fn automatic_epic_root_choice_uses_the_shared_dispatch_order() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let high_feature = runtime
+        .add_task(TaskAddParams {
+            title: "High feature epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            priority: TaskPriority::High,
+            task_type: Some(TaskType::Feature),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed high feature epic");
+    let corrective = runtime
+        .add_task(TaskAddParams {
+            title: "Low security review epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string(), "security-review".to_string()],
+            plan: "Delegate children".to_string(),
+            priority: TaskPriority::Low,
+            task_type: Some(TaskType::Chore),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed corrective epic");
+    let critical = runtime
+        .add_task(TaskAddParams {
+            title: "Critical refactor epic".to_string(),
+            description: "Epic fixture".to_string(),
+            acceptance_criteria: vec!["Supervised".to_string()],
+            tags: vec!["epic".to_string()],
+            plan: "Delegate children".to_string(),
+            priority: TaskPriority::Critical,
+            task_type: Some(TaskType::Refactor),
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed critical epic");
+
+    assert_eq!(classify(&runtime)["epic_task_id"], critical.id);
+
+    runtime
+        .update_task(
+            &critical.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .expect("complete critical epic");
+    assert_eq!(classify(&runtime)["epic_task_id"], corrective.id);
+    assert_ne!(classify(&runtime)["epic_task_id"], high_feature.id);
 }
 
 #[test]

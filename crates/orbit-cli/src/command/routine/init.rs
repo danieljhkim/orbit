@@ -1,12 +1,13 @@
+use std::path::Path;
+
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
 use orbit_core::routines::install_clock;
 use orbit_registry::load_host_identity;
-use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 #[command(
-    after_help = "Reads the machine identity from ~/.orbit/host.toml (created by\n\
+    after_help = "Reads the machine identity from the selected Orbit root's host.toml (created by\n\
                         `orbit init`) and, with --install-clock, installs the per-user OS\n\
                         clock unit that invokes `orbit sweep` every minute (launchd on\n\
                         macOS, a systemd user timer on Linux). It never creates or rewrites\n\
@@ -19,12 +20,10 @@ pub struct RoutineInitArgs {
 }
 
 impl RoutineInitArgs {
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let global_root = workspace_registry::global_orbit_dir()?;
-
+    pub fn execute_without_runtime(self, global_root: &Path) -> CommandOut {
         // Read-only: host identity is owned by `orbit init`. Fail closed with
         // an actionable error when it is absent or unmigrated.
-        let identity = load_host_identity(&global_root)?;
+        let identity = load_host_identity(global_root)?;
         println!(
             "host identity: host_id=\"{}\", machine_id={}",
             identity.host_id, identity.machine_id
@@ -35,7 +34,7 @@ impl RoutineInitArgs {
             return Ok(CommandOutput::Silent);
         }
 
-        let report = install_clock(&global_root)?;
+        let report = install_clock(global_root)?;
         for file in &report.files_written {
             println!("wrote {}", file.display());
         }

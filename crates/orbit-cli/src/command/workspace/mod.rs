@@ -6,6 +6,7 @@ mod remove;
 mod role;
 mod show;
 mod support;
+mod sync;
 mod teardown;
 
 pub use command::{WorkspaceCommand, WorkspaceSubcommand};

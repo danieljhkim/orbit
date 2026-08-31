@@ -5,7 +5,7 @@ tags: [operations, health, doctor, dashboard, routines]
 paths: ["crates/orbit-cmd/src/doctor.rs", "crates/orbit-core/src/application/job/run/reconcile.rs"]
 related_features: [orbit-core, activity-job, routines]
 related_artifacts: [ORB-10005, ORB-10070, ORB-10473, ORB-10501, ORB-10558, ORB-10986]
-last_validated: 2026-08-23
+last_validated: 2026-08-31
 ---
 
 # Check Orbit Health
@@ -82,6 +82,14 @@ There is deliberately no blanket `--fix` or resolve-all option. Configuration re
 recovery, job cancellation, graph cleanup, id-allocation retirement, filesystem lock deletion,
 task-reservation release, and retired activity-backend cleanup have different evidence and
 safety gates, so each repair remains explicit and safety-scoped.
+
+For definition convergence after installing a new Orbit binary, use `orbit workspace sync`
+rather than a doctor repair. Sync uses managed manifests to create newly shipped definitions,
+refresh or retire only provably unedited Orbit-written instances, migrate legacy routine
+provenance, and preserve operator content. `orbit workspace sync --check` is the read-only fleet
+inspection form. Doctor continues to diagnose invalid/stale artifacts and perform only the
+specific repair named by an individual flag; neither command upgrades the binary or pulls a
+remote repository.
 
 ### Repair retired activity backends
 

@@ -109,6 +109,7 @@ macro_rules! gh_tool {
 pub(super) use gh_tool;
 
 pub mod auth;
+pub mod dependabot_alerts;
 pub mod pr_checkout;
 pub mod pr_checks;
 pub mod pr_close;

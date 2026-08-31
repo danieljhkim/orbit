@@ -1,6 +1,7 @@
+use std::path::Path;
+
 use clap::{Args, Subcommand};
 use orbit_core::routines::{clock_status, set_clock_cadence, set_clock_enabled};
-use orbit_registry::workspace_registry;
 
 use crate::command::{CommandOut, CommandOutput};
 
@@ -29,11 +30,10 @@ enum RoutineClockSubcommand {
 }
 
 impl RoutineClockArgs {
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let global_root = workspace_registry::global_orbit_dir()?;
+    pub fn execute_without_runtime(self, global_root: &Path) -> CommandOut {
         match self.command {
             RoutineClockSubcommand::Status => {
-                let status = clock_status(&global_root)?;
+                let status = clock_status(global_root)?;
                 let state = if !status.enabled {
                     "paused"
                 } else if status.schedulable {
@@ -56,21 +56,21 @@ impl RoutineClockArgs {
                 }
             }
             RoutineClockSubcommand::Pause => {
-                let status = set_clock_enabled(&global_root, false)?;
+                let status = set_clock_enabled(global_root, false)?;
                 println!(
                     "host sweep clock paused ({}); manual `orbit sweep` remains available",
                     status.platform
                 );
             }
             RoutineClockSubcommand::Enable => {
-                let status = set_clock_enabled(&global_root, true)?;
+                let status = set_clock_enabled(global_root, true)?;
                 println!(
                     "host sweep clock enabled: runs every {} seconds ({})",
                     status.configured_cadence_seconds, status.platform
                 );
             }
             RoutineClockSubcommand::Set { cadence_seconds } => {
-                set_clock_cadence(&global_root, cadence_seconds)?;
+                set_clock_cadence(global_root, cadence_seconds)?;
                 println!("host sweep clock cadence set to {cadence_seconds} seconds and reloaded");
             }
         }

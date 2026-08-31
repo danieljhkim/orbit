@@ -8,6 +8,7 @@ use super::*;
 use crate::workflow::task::restore::{RestoreFailurePoint, restore_publication_with_failure};
 
 const WORKSPACE: &str = "ws_restore";
+const TASK_WORKSPACE: &str = "ws_restore-runtime";
 const FINGERPRINT: &str = "git@github.com:example/orbit-source.git";
 const PUBLICATION: &str = "pub_orbit_restore";
 const AUTHORITY: &str = "hm_owner";
@@ -17,6 +18,7 @@ struct RestoreFixture {
     destination: TempDir,
     remote: PathBuf,
     cache: PathBuf,
+    task_workspace_id: String,
 }
 
 impl RestoreFixture {
@@ -26,6 +28,7 @@ impl RestoreFixture {
 
     fn request(&self, mode: PublicationRestoreMode) -> PublicationRestoreRequest {
         PublicationRestoreRequest {
+            task_workspace_id: self.task_workspace_id.clone(),
             publication: PublicationInspectRequest {
                 workspace_id: WORKSPACE.to_string(),
                 source_repository_fingerprint: FINGERPRINT.to_string(),
@@ -41,12 +44,16 @@ impl RestoreFixture {
     }
 }
 
-fn bind_restore(registry: &TaskRegistryStore, root: &Path) -> WorkspaceCheckoutBinding {
-    let orbit_dir = root.join("repos").join(WORKSPACE).join(".orbit");
+fn bind_restore(
+    registry: &TaskRegistryStore,
+    root: &Path,
+    workspace_id: &str,
+) -> WorkspaceCheckoutBinding {
+    let orbit_dir = root.join("repos").join(workspace_id).join(".orbit");
     fs::create_dir_all(&orbit_dir).unwrap();
     registry
         .bind_workspace(BindWorkspaceParams {
-            workspace_id: Some(WORKSPACE.to_string()),
+            workspace_id: Some(workspace_id.to_string()),
             slug: "restore".to_string(),
             repo_root: orbit_dir.parent().unwrap().to_path_buf(),
             workspace_path: orbit_dir.parent().unwrap().to_path_buf(),
@@ -57,9 +64,16 @@ fn bind_restore(registry: &TaskRegistryStore, root: &Path) -> WorkspaceCheckoutB
 }
 
 fn fixture(kind: AttachmentPolicyKind) -> RestoreFixture {
+    fixture_with_task_workspace(kind, WORKSPACE)
+}
+
+fn fixture_with_task_workspace(
+    kind: AttachmentPolicyKind,
+    task_workspace_id: &str,
+) -> RestoreFixture {
     let source = TempDir::new().unwrap();
     let source_registry = open_registry(source.path());
-    let source_binding = bind_restore(&source_registry, source.path());
+    let source_binding = bind_restore(&source_registry, source.path(), WORKSPACE);
     let store = bundle_store(&source_registry, &source_binding);
     seed(
         &store,
@@ -117,13 +131,14 @@ fn fixture(kind: AttachmentPolicyKind) -> RestoreFixture {
 
     let destination = TempDir::new().unwrap();
     let destination_registry = open_registry(destination.path());
-    bind_restore(&destination_registry, destination.path());
+    bind_restore(&destination_registry, destination.path(), task_workspace_id);
     let cache = destination.path().join("publication-cache");
     RestoreFixture {
         _source: source,
         destination,
         remote,
         cache,
+        task_workspace_id: task_workspace_id.to_string(),
     }
 }
 
@@ -163,6 +178,43 @@ fn empty_destination_restore_preserves_ids_rebuilds_projection_and_advances_allo
 }
 
 #[test]
+fn restore_keeps_logical_identity_but_writes_to_the_runtime_task_partition() {
+    let fixture = fixture_with_task_workspace(AttachmentPolicyKind::Include, TASK_WORKSPACE);
+    let registry = fixture.registry();
+    let outcome = restore_publication(
+        &registry,
+        fixture.request(PublicationRestoreMode::EmptyDestination),
+    )
+    .unwrap();
+
+    assert_eq!(outcome.workspace_id, WORKSPACE);
+    assert_eq!(
+        registry.tasks_for_workspace(TASK_WORKSPACE).unwrap().len(),
+        2
+    );
+    assert!(registry.tasks_for_workspace(WORKSPACE).unwrap().is_empty());
+    let checkout = registry
+        .find_workspace_checkout(TASK_WORKSPACE)
+        .unwrap()
+        .unwrap();
+    for task_id in &outcome.restored_task_ids {
+        assert!(checkout.orbit_dir.join("tasks").join(task_id).is_symlink());
+        assert!(
+            registry
+                .canonical_task_bundle_path(TASK_WORKSPACE, task_id)
+                .unwrap()
+                .is_dir()
+        );
+        assert!(
+            !registry
+                .canonical_task_bundle_path(WORKSPACE, task_id)
+                .unwrap()
+                .exists()
+        );
+    }
+}
+
+#[test]
 fn identical_retry_is_explicit_and_does_not_duplicate_or_advance() {
     let fixture = fixture(AttachmentPolicyKind::Include);
     let registry = fixture.registry();
@@ -193,7 +245,7 @@ fn identical_retry_is_explicit_and_does_not_duplicate_or_advance() {
 fn restore_preserves_crlf_attachment_bytes_despite_gitattributes() {
     let source = TempDir::new().unwrap();
     let source_registry = open_registry(source.path());
-    let source_binding = bind_restore(&source_registry, source.path());
+    let source_binding = bind_restore(&source_registry, source.path(), WORKSPACE);
     let store = bundle_store(&source_registry, &source_binding);
     seed(
         &store,
@@ -230,12 +282,13 @@ fn restore_preserves_crlf_attachment_bytes_despite_gitattributes() {
 
     let destination = TempDir::new().unwrap();
     let destination_registry = open_registry(destination.path());
-    bind_restore(&destination_registry, destination.path());
+    bind_restore(&destination_registry, destination.path(), WORKSPACE);
     let cache = destination.path().join("publication-cache");
     let (env, sentinel) = poison_publication_git_filters(destination.path());
     let outcome = restore_publication(
         &destination_registry,
         PublicationRestoreRequest {
+            task_workspace_id: WORKSPACE.to_string(),
             publication: PublicationInspectRequest {
                 workspace_id: WORKSPACE.to_string(),
                 source_repository_fingerprint: FINGERPRINT.to_string(),

@@ -293,6 +293,26 @@ up the machine with `orbit init` and then run `orbit workspace init` from the
 project directory. `orbit.workspace.list` is global and reports active
 workspaces that have a checkout registered on that machine.
 
+Workspace lifecycle commands have deliberately separate jobs:
+
+- `orbit workspace init` bootstraps and registers a checkout once.
+- `orbit workspace sync` converges only Orbit-managed shipped definitions for
+  an existing registered workspace. It creates newly shipped defaults,
+  refreshes or retires only content whose manifest proves Orbit wrote the
+  on-disk bytes, and preserves operator edits and name collisions with an
+  actionable path. Routine provenance records the shipped-template digest,
+  the exact rendered-instance digest, and the rendered `name`/`hosts` binding
+  separately, so a host rename or checkout-directory change is reported as
+  binding drift rather than a template update. Use `--check` for a read-only
+  inspection (nonzero when convergence or provenance migration is pending) and
+  `--json` for structured per-kind actions.
+- `orbit doctor` diagnoses health and offers only narrow, evidence-specific
+  repairs; it is not the managed-definition convergence command.
+
+`workspace sync` is local: it does not pull a repository, contact another
+host, upgrade the Orbit binary, alter workspace registration/configuration, or
+apply store/layout migrations.
+
 ### Federated MCP
 
 The opt-in federated server presents one MCP namespace over this machine's

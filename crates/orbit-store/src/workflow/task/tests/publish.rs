@@ -167,6 +167,7 @@ fn request(
 ) -> PublicationPublishRequest {
     PublicationPublishRequest {
         workspace_id: fixture.workspace_id.clone(),
+        task_workspace_id: fixture.workspace_id.clone(),
         source_repository_fingerprint: FINGERPRINT.to_string(),
         publication_id: PUBLICATION_ID.to_string(),
         authority_machine_id: AUTHORITY.to_string(),
@@ -471,11 +472,12 @@ fn replica_callers_and_stale_owners_may_not_publish() {
     );
 
     let mut unregistered = request(&fixture, 1, None);
-    unregistered.workspace_id = "ws_unregistered".to_string();
+    unregistered.task_workspace_id = "ws_unregistered".to_string();
     let error = publish(&fixture, unregistered).unwrap_err().to_string();
     assert!(error.contains("not registered"), "{error}");
 
     let mut inside_source = request(&fixture, 1, None);
+    inside_source.workspace_id = "ws_logical_publication".to_string();
     inside_source.cache_dir = fixture.source.join(".orbit-publication-cache");
     let error = publish(&fixture, inside_source).unwrap_err().to_string();
     assert!(error.contains("outside the source repository"), "{error}");

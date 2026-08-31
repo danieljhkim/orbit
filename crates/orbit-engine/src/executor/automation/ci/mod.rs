@@ -14,13 +14,16 @@
 //! is one bounded, redacted JSON snapshot — no token, no host configuration,
 //! and no way to run another query.
 //!
-//! Three endings stay distinct here and are never allowed to collapse into one
+//! Four endings stay distinct here and are never allowed to collapse into one
 //! another or into a clean pass: [`OUTCOME_CAPABILITY_UNAVAILABLE`] (we could
 //! not look), [`OUTCOME_NO_CURRENT_FAILURE`] (we looked and nothing is
-//! failing), and [`OUTCOME_CURRENT_FAILURES`] (we looked and something is).
+//! failing), [`OUTCOME_CURRENT_FAILURES`] (we looked and something is), and
+//! [`OUTCOME_RETRYABLE_ERROR`] (a bounded discovery or investigation failed).
 
 mod collect;
 mod query;
+
+pub(in crate::executor::automation) use query::AuthStatus;
 
 use std::path::PathBuf;
 
@@ -38,6 +41,9 @@ pub(super) const OUTCOME_CAPABILITY_UNAVAILABLE: &str = "capability_unavailable"
 pub(super) const OUTCOME_NO_CURRENT_FAILURE: &str = "no_current_failure";
 /// The queries ran and found at least one current failure to file.
 pub(super) const OUTCOME_CURRENT_FAILURES: &str = "current_failures";
+/// A discovery or investigation failed. The partial evidence remains visible,
+/// but the pipeline must retry rather than consuming it as clean.
+pub(super) const OUTCOME_RETRYABLE_ERROR: &str = "retryable_error";
 
 /// Run conclusions that are not a pass.
 ///

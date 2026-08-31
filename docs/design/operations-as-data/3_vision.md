@@ -2,14 +2,14 @@
 title: Operations as Data — Vision
 owner: claude
 last_updated: 2026-07-26
-last_validated: 2026-08-09
+last_validated: 2026-08-31
 status: Accepted
 feature: operations-as-data
 doc_role: vision
 type: design
 summary: Open questions left by the friction pilot — which nouns migrate next, whether responses become data, and what the registry could enable beyond deduplication.
 tags: [operations-as-data, architecture, adr-0209]
-paths: ["crates/orbit-common/src/operation.rs"]
+paths: ["crates/orbit-common/src/governance/operation.rs"]
 related_features: [operations-as-data, orbit-core]
 related_artifacts: [ORB-10358]
 ---

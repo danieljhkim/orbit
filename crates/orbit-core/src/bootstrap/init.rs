@@ -11,11 +11,12 @@ use crate::OrbitRuntime;
 use crate::application::MANAGED_ASSET_MANIFEST_FILE;
 use crate::application::executor::seed_default_executors;
 use crate::application::job::seed_default_jobs;
-use crate::application::routine::seed_default_routines;
 use crate::application::skill::{
     default_skill_ids, is_default_skill_file_for_root, seed_default_skills,
 };
-use crate::auto_tasks::seed_default_auto_tasks;
+use crate::application::workspace_sync::{
+    ManagedArtifactOutcome, reconcile_workspace_managed_artifacts,
+};
 use crate::bootstrap::activity::seed_default_activities;
 use crate::bootstrap::policy::seed_default_policies;
 use orbit_common::fs::io::{create_dir_symlink, remove_path_if_exists};
@@ -269,26 +270,44 @@ pub fn init_workspace_at_root(
             // directory), so defaults seed here rather than in the global branch.
             // Host identity is owned by higher-level composition and injected;
             // Core never opens host.toml or falls back to an OS hostname.
-            if let Some(host_id) = options.routine_host_id.as_deref() {
-                let reconciliation = seed_default_routines(
-                    &orbit_root.join("routines"),
-                    host_id,
+            {
+                let reconciliation = reconcile_workspace_managed_artifacts(
+                    &global_root,
+                    &orbit_root,
+                    options.routine_host_id.as_deref(),
                     workspace_slug_from_orbit_root(&orbit_root).as_deref(),
-                    // Routine definitions become workspace-authored after
-                    // seeding. Refresh global defaults without overwriting
-                    // cadence, host pins, policy, or enabled choices here;
-                    // destructive `force` already recreated the root.
-                    options.force,
+                    false,
                 )?;
-                refreshed_default_routines = reconciliation.refreshed;
-                managed_asset_warnings.extend(reconciliation.warnings);
+                refreshed_default_routines = reconciliation
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        action.kind == "routine"
+                            && matches!(
+                                action.outcome,
+                                ManagedArtifactOutcome::Created | ManagedArtifactOutcome::Refreshed
+                            )
+                    })
+                    .count();
+                seeded_default_auto_tasks = reconciliation
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        action.kind == "auto_task"
+                            && matches!(
+                                action.outcome,
+                                ManagedArtifactOutcome::Created | ManagedArtifactOutcome::Refreshed
+                            )
+                    })
+                    .count();
+                managed_asset_warnings.extend(
+                    reconciliation
+                        .actions
+                        .into_iter()
+                        .filter(|action| action.outcome == ManagedArtifactOutcome::Preserved)
+                        .filter_map(|action| action.detail),
+                );
             }
-            // Auto-task definitions are workspace-authored after seeding. Never
-            // refresh an existing file: `workspace init --force` reconciles
-            // registration and must not overwrite an operator's definition.
-            let auto_task_reconciliation = seed_default_auto_tasks(&orbit_root)?;
-            seeded_default_auto_tasks = auto_task_reconciliation.refreshed;
-            managed_asset_warnings.extend(auto_task_reconciliation.warnings);
             (
                 global_result.refreshed_default_activities,
                 global_result.retired_default_activities,

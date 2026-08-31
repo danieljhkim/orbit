@@ -4,6 +4,7 @@
 //! Every test drives the action through `run_deterministic`, which is the only
 //! way a job step reaches it.
 
+use orbit_common::OrbitError;
 use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
 use orbit_types::task::TaskStatus;
@@ -11,6 +12,7 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
+use crate::adapter::engine_host::v2_host::ci_failure_tasks::file_ci_failure_tasks_with_add;
 use crate::adapter::engine_host::v2_host::test_support::runtime_with_workspace_layout;
 use crate::application::task::TaskUpdateParams;
 
@@ -27,6 +29,18 @@ fn file(runtime: &OrbitRuntime, input: Value) -> Value {
             ToolContext::default(),
         )
         .expect("file ci failure tasks")
+}
+
+fn file_error(runtime: &OrbitRuntime, input: Value) -> String {
+    runtime
+        .run_deterministic(
+            "file_ci_failure_tasks",
+            &json!({}),
+            &input,
+            ToolContext::default(),
+        )
+        .expect_err("file ci failure tasks must remain retryable")
+        .to_string()
 }
 
 /// One current failure, shaped exactly as `collect_ci_evidence` emits it.
@@ -63,6 +77,7 @@ fn failure(run_id: u64, workflow: &str, job: &str, step: &str, log: &str, checko
 }
 
 fn snapshot(current: Vec<Value>) -> Value {
+    let latest = current.clone();
     json!({
         "schema_version": 1,
         "collected": true,
@@ -74,10 +89,11 @@ fn snapshot(current: Vec<Value>) -> Value {
         },
         "repository": {"name": "orbit", "full_name": "acme/orbit", "default_branch": "main"},
         "heads": [{"kind": "integration", "branch": "agent-main", "current_head_sha": HEAD}],
+        "latest_runs": latest,
         "current_failures": current,
         "stale_or_superseded": [],
         "in_flight": [],
-        "query_errors": [],
+        "retryable_errors": [],
         "truncation": {"runs_listed": 4, "current_failures_discovered": 1, "notes": []},
         "collected_at": "2026-08-30T02:00:00Z",
     })
@@ -260,6 +276,120 @@ fn a_filed_task_is_an_ordinary_backlog_bug_carrying_usable_evidence() {
 }
 
 #[test]
+fn live_run_fixture_files_once_with_complete_actionable_evidence() {
+    const RUN_ID: u64 = 33_358_160_088;
+    const JOB_ID: u64 = 99_384_177_985;
+    const SHA: &str = "2a4cb4e4631a856552d901b6b062fa6596475cc0";
+    const RUN_URL: &str = "https://github.com/danieljhkim/orbit/actions/runs/33358160088";
+    const JOB_URL: &str =
+        "https://github.com/danieljhkim/orbit/actions/runs/33358160088/job/99384177985";
+    const TEST: &str = "orbit-cli::routine_root::routine_commands_honor_orbit_root_and_mutate_only_the_selected_root";
+    const EXCERPT: &str = "routine command touched isolated HOME at /tmp/.tmpgNchET/empty-home";
+
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let mut live = failure(
+        RUN_ID,
+        "CI",
+        "Rust tests",
+        "Run Rust tests",
+        &format!(
+            "CI\tRust tests\tassertion failed: {TEST} at crates/orbit-cli/tests/routine_root.rs:218: {EXCERPT}\n"
+        ),
+        SHA,
+    );
+    live["url"] = json!(RUN_URL);
+    live["event_reported_head_sha"] = json!(SHA);
+    live["current_ref_head_sha"] = json!(SHA);
+    live["actual_checkout_shas"] = json!([SHA]);
+    live["checkout_evidence"] = json!([format!("HEAD is now at {SHA}")]);
+    live["failed_jobs"] = json!([{
+        "job_id": JOB_ID,
+        "name": "Rust tests",
+        "conclusion": "failure",
+        "url": JOB_URL,
+        "failed_steps": [{"name": "Run Rust tests", "conclusion": "failure"}],
+    }]);
+    let evidence = snapshot(vec![live]);
+
+    let first = file(&runtime, json!({"ci_evidence": evidence.clone()}));
+    assert_eq!(first["outcome"], json!("current_failures"));
+    assert_eq!(first["filed_count"], json!(1));
+    assert_eq!(first["audit"]["latest_run_ids"], json!([RUN_ID]));
+    assert_eq!(first["audit"]["current_failure_run_ids"], json!([RUN_ID]));
+    assert_eq!(
+        first["audit"]["investigated_failure_run_ids"],
+        json!([RUN_ID])
+    );
+    assert_eq!(first["audit"]["tasks_created"], json!(1));
+    let task_id = filed_task_ids(&first).remove(0);
+    let task = runtime.get_task(&task_id).expect("read filed task");
+    for expected in [
+        RUN_URL,
+        JOB_URL,
+        "33358160088",
+        "99384177985",
+        "CI",
+        "conclusion `failure`",
+        "Run Rust tests",
+        TEST,
+        "crates/orbit-cli/tests/routine_root.rs:218",
+        EXCERPT,
+        SHA,
+        "event-reported head SHA",
+        "current head of that ref",
+        "commit actually checked out",
+    ] {
+        assert!(
+            task.description.contains(expected),
+            "filed task must contain {expected:?}:\n{}",
+            task.description
+        );
+    }
+
+    let second = file(&runtime, json!({"ci_evidence": evidence}));
+    assert_eq!(second["outcome"], json!("current_failures"));
+    assert_eq!(second["filed_count"], json!(0));
+    assert_eq!(second["skipped_existing"][0]["task_id"], json!(task_id));
+    assert_eq!(second["audit"]["existing_task_skips"], json!(1));
+    assert_eq!(second["audit"]["existing_task_owners"], json!([task_id]));
+    assert_eq!(second["audit"]["current_failure_run_ids"], json!([RUN_ID]));
+}
+
+#[test]
+fn task_add_failure_is_retryable_and_cannot_persist_a_handled_state() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let evidence = snapshot(vec![failure(
+        10,
+        "CI",
+        "Rust tests",
+        "Run Rust tests",
+        "CI\tRust tests\tassertion failed: injected filing fault\n",
+        CHECKOUT,
+    )]);
+
+    let error =
+        file_ci_failure_tasks_with_add(&runtime, &json!({"ci_evidence": evidence}), |_params| {
+            Err(OrbitError::Execution(
+                "injected orbit.task.add failure".to_string(),
+            ))
+        })
+        .expect_err("task creation failure must fail the pipeline")
+        .to_string();
+
+    assert!(error.contains("retryable_error"));
+    assert!(error.contains("task_creation"));
+    assert!(error.contains("orbit.task.add"));
+    assert!(error.contains("\"current_failure_run_ids\":[10]"));
+    assert!(
+        runtime
+            .list_tasks_by_tags(&["ci-failure-sweep".to_string()])
+            .expect("list tasks")
+            .is_empty(),
+        "failed task creation must not persist a dedupe owner or handled marker"
+    );
+}
+
+#[test]
 fn a_second_sweep_over_a_still_red_run_does_not_file_a_second_task() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let log = "ci\tbuild\t2026-08-30T01:00:00Z error: expected 3 arguments, found 2\n";
@@ -349,13 +479,20 @@ fn a_listed_but_uninvestigated_failure_is_not_filed_as_an_evidence_free_task() {
     uninvestigated["failed_jobs"] = json!([]);
     uninvestigated["log_excerpt"] = json!("");
 
-    let output = file(
+    let error = file_error(
         &runtime,
         json!({"ci_evidence": snapshot(vec![uninvestigated])}),
     );
 
-    assert_eq!(output["clusters"], json!(0));
-    assert_eq!(output["outcome"], json!("no_current_failure"));
+    assert!(error.contains("retryable_error"));
+    assert!(error.contains("current_failure_not_investigated"));
+    assert!(error.contains("\"current_failure_run_ids\":[10]"));
+    assert!(
+        runtime
+            .list_tasks_by_tags(&["ci-failure-sweep".to_string()])
+            .expect("list tasks")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -646,6 +783,66 @@ fn error_signature_prefers_an_annotated_error_over_a_checkout_commit_message() {
 }
 
 #[test]
+fn generic_runner_trailer_does_not_collapse_distinct_unannotated_diagnostics() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let trailer =
+        "build\tRun go build\t2026-08-30T01:00:00Z ##[error]Process completed with exit code 1.\n";
+    let foo_log = realistic_github_step_log(
+        "go build ./...",
+        2,
+        &format!(
+            "build\tRun go build\t2026-08-30T01:00:00Z ./main.go:10:2: undefined: Foo\n{trailer}"
+        ),
+    );
+    let bar_log = realistic_github_step_log(
+        "go build ./...",
+        2,
+        &format!(
+            "build\tRun go build\t2026-08-30T01:00:00Z ./main.go:14:2: undefined: Bar\n{trailer}"
+        ),
+    );
+
+    let first = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![
+            failure(10, "ci", "build", "go build", &foo_log, CHECKOUT),
+            failure(11, "ci", "build", "go build", &bar_log, CHECKOUT),
+        ])}),
+    );
+
+    assert_eq!(first["filed_count"], json!(2));
+    let filed = first["filed"].as_array().expect("filed");
+    assert_ne!(filed[0]["failure_key"], filed[1]["failure_key"]);
+    for (task_id, diagnostic) in filed_task_ids(&first).iter().zip(["foo", "bar"]) {
+        let description = runtime
+            .get_task(task_id)
+            .expect("read filed task")
+            .description;
+        let signature = signature_line(&description).to_ascii_lowercase();
+        assert!(
+            signature.contains(diagnostic),
+            "specific diagnostic must be the signature: {signature}"
+        );
+        assert!(
+            !signature.contains("process completed"),
+            "generic runner trailer must not be the signature: {signature}"
+        );
+    }
+
+    let repeated = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            12, "ci", "build", "go build", &foo_log, NEXT_HEAD,
+        )])}),
+    );
+    assert_eq!(repeated["filed_count"], json!(0));
+    assert_eq!(
+        repeated["skipped_existing"][0]["failure_key"], filed[0]["failure_key"],
+        "the same diagnostic must retain its failure key across commits"
+    );
+}
+
+#[test]
 fn checkout_commit_message_containing_failure_is_not_the_signature() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let log = dani_10111_style_log("chore: add ci failure sweep routine", None);
@@ -704,7 +901,7 @@ fn same_failure_under_a_different_commit_message_reuses_the_failure_key() {
 }
 
 #[test]
-fn empty_excerpt_surfaces_the_matching_log_query_error() {
+fn query_error_prevents_filing_and_remains_retryable() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let mut missing_log = failure(10, "ci", "build", "Run CI guardrails", "", CHECKOUT);
     missing_log["log_excerpt"] = json!("");
@@ -722,30 +919,15 @@ fn empty_excerpt_surfaces_the_matching_log_query_error() {
         }
     ]);
 
-    let output = file(&runtime, json!({"ci_evidence": evidence}));
-    let task_id = filed_task_ids(&output)
-        .first()
-        .cloned()
-        .expect("one filed task");
-    let description = runtime.get_task(&task_id).expect("read").description;
-    let excerpt = excerpt_block(&description);
+    let error = file_error(&runtime, json!({"ci_evidence": evidence}));
+    assert!(error.contains("retryable_error"));
+    assert!(error.contains("run_logs"));
+    assert!(error.contains("logs for this run are no longer available"));
+    assert!(error.contains("\"current_failure_run_ids\":[10]"));
     assert!(
-        excerpt.contains("No log excerpt was captured"),
-        "empty excerpt must still be stated:\n{excerpt}"
-    );
-    assert!(
-        excerpt.contains("run_logs")
-            && excerpt.contains("10")
-            && excerpt.contains("logs for this run are no longer available"),
-        "relevant query_errors entry must sit next to the empty excerpt:\n{excerpt}"
-    );
-    assert!(
-        !excerpt.contains("unrelated list failure"),
-        "unrelated query errors must not be inlined into this cluster's excerpt:\n{excerpt}"
-    );
-    let signature = signature_line(&description);
-    assert!(
-        signature.contains("step-name fallback"),
-        "step-name signature must be labeled as a fallback: {signature}"
+        runtime
+            .list_tasks_by_tags(&["ci-failure-sweep".to_string()])
+            .expect("list tasks")
+            .is_empty()
     );
 }

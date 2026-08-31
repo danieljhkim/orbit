@@ -1,4 +1,5 @@
 mod ci;
+mod dependabot;
 mod input;
 pub(crate) mod review;
 mod task_update;
@@ -62,6 +63,9 @@ pub(crate) fn execute_engine_action<
 
         // ---- generic built-in actions ----
         EngineDeterministicAction::CollectCiEvidence => ci::collect_ci_evidence(host, input),
+        EngineDeterministicAction::CollectDependabotAlerts => {
+            dependabot::collect_dependabot_alerts(host, input)
+        }
         EngineDeterministicAction::GitCommit => vcs::git_commit(host, input),
         EngineDeterministicAction::GitRebase => vcs::rebase_pr_branch(host, input),
         EngineDeterministicAction::PrFailureHandoff => vcs::pr_failure_handoff(host, input),

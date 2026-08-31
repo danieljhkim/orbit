@@ -30,12 +30,39 @@ pub const SYSTEM_AUDIT_IDENTITY: &str = "system";
 
 pub(crate) const MANAGED_ASSET_MANIFEST_FILE: &str = ".orbit-managed-assets.json";
 const MANAGED_ASSET_MANIFEST_SCHEMA_VERSION: u32 = 1;
+const ROUTINE_MANAGED_ASSET_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ManagedAssetReconciliation {
     pub refreshed: usize,
     pub retired: usize,
     pub warnings: Vec<String>,
+    pub actions: Vec<ManagedAssetAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManagedAssetReconcileMode {
+    Apply,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManagedAssetOutcome {
+    Created,
+    Refreshed,
+    Retired,
+    Migrated,
+    Preserved,
+    BindingDrift,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedAssetAction {
+    pub name: String,
+    pub path: PathBuf,
+    pub outcome: ManagedAssetOutcome,
+    pub detail: Option<String>,
 }
 
 /// How a manifest key maps to the file it manages, relative to the managed
@@ -71,6 +98,23 @@ struct ManagedAssetManifest {
     schema_version: u32,
     asset_kind: String,
     assets: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    routine_provenance: BTreeMap<String, RoutineAssetProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RoutineAssetProvenance {
+    pub template_digest: String,
+    pub rendered_digest: String,
+    pub binding: RoutineMaterializationBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RoutineMaterializationBinding {
+    pub name: String,
+    pub hosts: Vec<String>,
 }
 
 /// Materialize the current embedded resource set and reconcile assets retired
@@ -90,6 +134,26 @@ pub(crate) fn reconcile_managed_assets<'a>(
     layout: ManagedAssetLayout,
     files: &'a [(&'a str, &'a str)],
     overwrite: bool,
+    render: impl FnMut(&'a str, &'a str) -> Result<Cow<'a, str>, OrbitError>,
+) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_managed_assets_in_mode(
+        dir,
+        asset_kind,
+        layout,
+        files,
+        overwrite,
+        ManagedAssetReconcileMode::Apply,
+        render,
+    )
+}
+
+pub(crate) fn reconcile_managed_assets_in_mode<'a>(
+    dir: &Path,
+    asset_kind: &str,
+    layout: ManagedAssetLayout,
+    files: &'a [(&'a str, &'a str)],
+    overwrite: bool,
+    mode: ManagedAssetReconcileMode,
     mut render: impl FnMut(&'a str, &'a str) -> Result<Cow<'a, str>, OrbitError>,
 ) -> Result<ManagedAssetReconciliation, OrbitError> {
     validate_managed_asset_name(asset_kind, ManagedAssetLayout::YamlStem, "asset kind")?;
@@ -109,6 +173,15 @@ pub(crate) fn reconcile_managed_assets<'a>(
             }
             let path = dir.join(layout.relative_path(name));
             if !path.exists() {
+                result.actions.push(ManagedAssetAction {
+                    name: name.clone(),
+                    path,
+                    outcome: ManagedAssetOutcome::Retired,
+                    detail: Some(
+                        "removed stale manifest provenance for an absent artifact".to_string(),
+                    ),
+                });
+                result.retired += 1;
                 continue;
             }
             let content = fs::read_to_string(&path).map_err(|error| {
@@ -118,20 +191,43 @@ pub(crate) fn reconcile_managed_assets<'a>(
                 ))
             })?;
             if sha256_hex(content.as_bytes()) == *managed_digest {
-                fs::remove_file(&path).map_err(|error| {
-                    OrbitError::Io(format!(
-                        "retire managed {asset_kind} '{}': {error}",
-                        path.display()
-                    ))
-                })?;
+                if mode == ManagedAssetReconcileMode::Apply {
+                    fs::remove_file(&path).map_err(|error| {
+                        OrbitError::Io(format!(
+                            "retire managed {asset_kind} '{}': {error}",
+                            path.display()
+                        ))
+                    })?;
+                }
             } else {
-                let preserved =
-                    preserve_modified_retired_asset(dir, asset_kind, layout, name, &path)?;
-                result.warnings.push(format!(
-                    "retired managed {asset_kind} `{name}` was locally modified; Orbit removed it from the active catalog and preserved it at '{}'. Review that file, then migrate it under a new user-authored name or delete it",
+                let preserved = if mode == ManagedAssetReconcileMode::Apply {
+                    preserve_modified_retired_asset(dir, asset_kind, layout, name, &path)?
+                } else {
+                    retired_preservation_path(dir, asset_kind, layout, name)
+                };
+                let warning = format!(
+                    "retired managed {asset_kind} `{name}` was locally modified; Orbit {} it from the active catalog and preserved it at '{}'. Review that file, then migrate it under a new user-authored name or delete it",
+                    if mode == ManagedAssetReconcileMode::Apply {
+                        "removed"
+                    } else {
+                        "would remove"
+                    },
                     preserved.display()
-                ));
+                );
+                result.warnings.push(warning.clone());
+                result.actions.push(ManagedAssetAction {
+                    name: name.clone(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Preserved,
+                    detail: Some(warning),
+                });
             }
+            result.actions.push(ManagedAssetAction {
+                name: name.clone(),
+                path,
+                outcome: ManagedAssetOutcome::Retired,
+                detail: None,
+            });
             result.retired += 1;
         }
     }
@@ -155,11 +251,27 @@ pub(crate) fn reconcile_managed_assets<'a>(
                 })?;
                 if sha256_hex(existing.as_bytes()) == rendered_digest {
                     next_assets.insert((*name).to_string(), rendered_digest);
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Migrated,
+                        detail: Some(
+                            "recorded provenance for an exact existing shipped artifact"
+                                .to_string(),
+                        ),
+                    });
                 } else if previous.is_some() {
-                    result.warnings.push(format!(
+                    let warning = format!(
                         "untracked user-authored {asset_kind} '{}' collides with bundled default `{name}` and was preserved in place. Move or rename it, then rerun `orbit init` to install the bundled default",
                         path.display()
-                    ));
+                    );
+                    result.warnings.push(warning.clone());
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Preserved,
+                        detail: Some(warning),
+                    });
                 }
                 continue;
             }
@@ -183,11 +295,35 @@ pub(crate) fn reconcile_managed_assets<'a>(
                 if sha256_hex(existing.as_bytes()) == *previous_digest
                     && previous_digest != &rendered_digest
                 {
-                    write_text_with_parent(&path, &rendered)?;
+                    if mode == ManagedAssetReconcileMode::Apply {
+                        write_text_with_parent(&path, &rendered)?;
+                    }
                     next_assets.insert((*name).to_string(), rendered_digest);
                     result.refreshed += 1;
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Refreshed,
+                        detail: None,
+                    });
                 } else {
                     next_assets.insert((*name).to_string(), previous_digest.clone());
+                    let modified = sha256_hex(existing.as_bytes()) != *previous_digest;
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: if modified {
+                            ManagedAssetOutcome::Preserved
+                        } else {
+                            ManagedAssetOutcome::Unchanged
+                        },
+                        detail: modified.then(|| {
+                            format!(
+                                "locally modified managed {asset_kind} '{}' was preserved; restore the Orbit-written bytes or move/rename the file, then rerun `orbit workspace sync`",
+                                path.display()
+                            )
+                        }),
+                    });
                 }
                 continue;
             }
@@ -199,20 +335,34 @@ pub(crate) fn reconcile_managed_assets<'a>(
             // read-only.
             if previous_digest == Some(&rendered_digest) {
                 next_assets.insert((*name).to_string(), rendered_digest);
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Unchanged,
+                    detail: None,
+                });
                 continue;
             }
         }
 
-        write_text_with_parent(&path, &rendered)?;
+        if mode == ManagedAssetReconcileMode::Apply {
+            write_text_with_parent(&path, &rendered)?;
+        }
         next_assets.insert((*name).to_string(), rendered_digest);
         result.refreshed += 1;
+        result.actions.push(ManagedAssetAction {
+            name: (*name).to_string(),
+            path,
+            outcome: ManagedAssetOutcome::Created,
+            detail: None,
+        });
     }
 
     // The legacy sweep only makes sense for the flat YAML catalogs: a skill
     // tree's untracked files are ordinary reference material inside an
     // otherwise-managed directory, not stray definitions the loader would pick
     // up.
-    if previous.is_none() && layout == ManagedAssetLayout::YamlStem {
+    if previous.is_none() && layout == ManagedAssetLayout::YamlStem && dir.exists() {
         let ambiguous = ambiguous_legacy_yaml_files(dir, &next_assets)?;
         if !ambiguous.is_empty() {
             result.warnings.push(format!(
@@ -230,8 +380,9 @@ pub(crate) fn reconcile_managed_assets<'a>(
         schema_version: MANAGED_ASSET_MANIFEST_SCHEMA_VERSION,
         asset_kind: asset_kind.to_string(),
         assets: next_assets,
+        routine_provenance: BTreeMap::new(),
     };
-    if previous.as_ref() != Some(&manifest) {
+    if mode == ManagedAssetReconcileMode::Apply && previous.as_ref() != Some(&manifest) {
         let encoded = encode_managed_asset_manifest(&manifest)?;
         record_managed_manifest_write(
             &manifest_path,
@@ -251,6 +402,20 @@ pub(crate) fn reconcile_managed_assets<'a>(
     }
 
     Ok(result)
+}
+
+fn retired_preservation_path(
+    active_dir: &Path,
+    asset_kind: &str,
+    layout: ManagedAssetLayout,
+    name: &str,
+) -> PathBuf {
+    active_dir
+        .parent()
+        .unwrap_or(active_dir)
+        .join(".retired-managed")
+        .join(managed_asset_kind_directory(asset_kind))
+        .join(layout.relative_path(name))
 }
 
 /// Persist one managed-asset manifest. Callers compare against the previous
@@ -343,12 +508,20 @@ fn load_managed_asset_manifest(
             path.display()
         ))
     })?;
-    if manifest.schema_version != MANAGED_ASSET_MANIFEST_SCHEMA_VERSION {
+    let supported_schema = manifest.schema_version == MANAGED_ASSET_MANIFEST_SCHEMA_VERSION
+        || (expected_kind == "routine"
+            && manifest.schema_version == ROUTINE_MANAGED_ASSET_MANIFEST_SCHEMA_VERSION);
+    if !supported_schema {
         return Err(OrbitError::InvalidInput(format!(
-            "managed asset manifest '{}' uses unsupported schemaVersion {}; expected {}",
+            "managed asset manifest '{}' uses unsupported schemaVersion {}; expected {}{}",
             path.display(),
             manifest.schema_version,
-            MANAGED_ASSET_MANIFEST_SCHEMA_VERSION
+            MANAGED_ASSET_MANIFEST_SCHEMA_VERSION,
+            if expected_kind == "routine" {
+                format!(" or {ROUTINE_MANAGED_ASSET_MANIFEST_SCHEMA_VERSION}")
+            } else {
+                String::new()
+            }
         )));
     }
     if manifest.asset_kind != expected_kind {
@@ -523,6 +696,7 @@ pub mod semantic;
 pub mod skill;
 pub mod task;
 pub(crate) mod workflow;
+pub mod workspace_sync;
 
 #[cfg(test)]
 mod tests;

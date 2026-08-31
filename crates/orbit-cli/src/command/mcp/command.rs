@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::{Args, Subcommand, ValueEnum};
 use orbit_core::{OrbitError, OrbitRuntime};
@@ -9,6 +10,56 @@ use crate::command::{CommandOut, CommandOutput, Execute};
 use super::callers::CallersArgs;
 use super::listen::ListenArgs;
 use super::setup::{InitArgs, RemoveArgs};
+
+/// True only when the process environment was made non-observable before CLI
+/// parsing. A public flag cannot set this bit.
+static SSH_ACCEPTANCE_ENV_SEALED: AtomicBool = AtomicBool::new(false);
+
+/// Seal an sshd-provided acceptance bearer before any ordinary CLI startup.
+///
+/// Linux exposes another same-UID process's initial environment through
+/// `/proc/<pid>/environ` while the process is dumpable. `PR_SET_DUMPABLE=0`
+/// moves this process behind the kernel's ptrace-access check. The call happens
+/// at the first line of `main`, before logging, signal setup, or argument
+/// parsing. Processes without the bearer have their previous dumpable state
+/// restored immediately, so ordinary Orbit commands retain normal debugging
+/// and core-dump behavior.
+pub(crate) fn seal_ssh_acceptance_environment() {
+    #[cfg(target_os = "linux")]
+    {
+        // Safety: these prctl operations read or set one process-local integer
+        // attribute and do not dereference any pointers.
+        let previous = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
+        let sealed = previous >= 0
+            // Safety: see above. Zero is the kernel-defined non-dumpable state.
+            && unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } == 0;
+        if std::env::var_os(orbit_mcp::SSH_ACCEPTANCE_ENV).is_some() {
+            SSH_ACCEPTANCE_ENV_SEALED.store(sealed, Ordering::Release);
+        } else if sealed && previous != 0 {
+            // Safety: restore the process attribute captured above.
+            let _ = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, previous) };
+        }
+    }
+}
+
+/// Read the Tier 2 bearer only after the kernel has hidden this process's
+/// environment from ordinary processes under the destination login UID.
+fn sealed_ssh_acceptance_token() -> Result<String, OrbitError> {
+    if !SSH_ACCEPTANCE_ENV_SEALED.load(Ordering::Acquire) {
+        return Err(OrbitError::UnauthorizedCaller(
+            "SSH MCP acceptance environment is not protected on this host; Tier 2 requires the \
+             generated isolated-account SSH deployment on Linux"
+                .to_string(),
+        ));
+    }
+    std::env::var(orbit_mcp::SSH_ACCEPTANCE_ENV).map_err(|_| {
+        OrbitError::UnauthorizedCaller(
+            "SSH MCP acceptance was not supplied by sshd; regenerate and install the \
+             authorized_keys line with `orbit mcp callers authorize`"
+                .to_string(),
+        )
+    })
+}
 
 #[derive(Args)]
 #[command(
@@ -132,19 +183,14 @@ pub struct ServeArgs {
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
     /// Treat this session as SSH-originated after validating the destination
-    /// capability carried by this hidden option.
+    /// capability carried in sshd-provided protected process state.
     ///
     /// Meaningful only inside the forced command printed by `orbit mcp callers
-    /// authorize`. That setup stores only the capability digest locally and
-    /// installs the bearer value in a root-managed `AuthorizedKeysFile`, so a
-    /// caller-authored remote command cannot reproduce it.
-    #[arg(
-        long,
-        value_name = "DESTINATION_TOKEN",
-        hide = true,
-        conflicts_with = "mode"
-    )]
-    pub accept_ssh: Option<String>,
+    /// authorize`. The bearer is deliberately not an argument value: the
+    /// generated key entry supplies it through an environment option, and
+    /// Orbit seals that environment before parsing argv.
+    #[arg(long, hide = true, conflicts_with = "mode")]
+    pub accept_ssh: bool,
     /// The calling machine's identity, as this machine wrote it beside the
     /// authenticating key.
     ///
@@ -221,10 +267,10 @@ impl ServeArgs {
                 // `--caller` is unreachable without `--accept-ssh`, so the
                 // "honored only under a forced command" rule is carried by the
                 // type the server receives rather than re-checked downstream.
-                if let Some(acceptance_token) = self.accept_ssh {
+                if self.accept_ssh {
                     SshAcceptance::ForcedCommand {
                         caller: self.caller,
-                        acceptance_token,
+                        acceptance_token: sealed_ssh_acceptance_token()?,
                     }
                 } else {
                     SshAcceptance::Environment

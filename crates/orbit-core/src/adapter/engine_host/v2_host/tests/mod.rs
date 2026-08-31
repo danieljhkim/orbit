@@ -1,6 +1,7 @@
 mod backlog_exclusion;
 mod ci_failure_tasks;
 mod cli_executor;
+mod dependabot_alert_tasks;
 mod dispatch;
 mod pipeline_actions;
 mod required_tools;

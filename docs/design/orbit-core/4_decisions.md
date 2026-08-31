@@ -31,7 +31,7 @@ Split the CLI-facing command layer out of the orbit-core god-crate into a new in
 **Recorded:** 2026-07-14 21:04:22.153730Z · [ORB-10026], [ORB-10200], [ORB-10358]
 
 ### Context
-Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP (`orbit-mcp`), the web dashboard (`orbit-dashboard`), and the in-runtime agent tool hosts — are four hand-wired adapter layers over the same underlying operations, so every new operation is plumbed by hand up to four times. The same shape keeps constraining refactors: inherent `impl OrbitRuntime` methods plus the orphan rule forced the ORB-10016 / [Extract the CLI-facing command layer into orbit-cmd](#extract-the-cli-facing-command-layer-into-orbit-cmd) orbit-cmd extraction to leave the runtime-entangled command groups behind in orbit-core as documented residuals, and the same wall shelved the docs+search pluginization (docs/design/orbit-docs-plugin/1_scope.md — pending commit). Repeated point refactors treat symptoms; the missing piece is a recorded long-term bearing that future refactors steer by. Real alternatives existed: keep the status quo and continue paying per-surface wiring, or mandate a big-bang plugin/microkernel rewrite.
+Orbit's four consumer surfaces — the CLI (`orbit-cli`), MCP (`orbit-mcp`), the web dashboard (`orbit-web`), and the in-runtime agent tool hosts — are four hand-wired adapter layers over the same underlying operations, so every new operation is plumbed by hand up to four times. The same shape keeps constraining refactors: inherent `impl OrbitRuntime` methods plus the orphan rule forced the ORB-10016 / [Extract the CLI-facing command layer into orbit-cmd](#extract-the-cli-facing-command-layer-into-orbit-cmd) orbit-cmd extraction to leave the runtime-entangled command groups behind in orbit-core as documented residuals, and the same wall shelved the docs+search pluginization (docs/design/orbit-docs-plugin/1_scope.md — pending commit). Repeated point refactors treat symptoms; the missing piece is a recorded long-term bearing that future refactors steer by. Real alternatives existed: keep the status quo and continue paying per-surface wiring, or mandate a big-bang plugin/microkernel rewrite.
 
 ### Decision
 Record five bearings as orbit's north star. This is an **incremental bearing, not a rewrite mandate**: no code changes are required by this ADR, and existing code is not wrong for predating it.
@@ -65,7 +65,7 @@ other three hand-copied nouns; that is the ratchet below, not a backlog item.
 over that table: `orbit-tools` builds each `ToolSchema` and MCP exposure policy
 from the spec (seven hand-written `Tool` impls deleted), `orbit-cli` builds the
 clap subcommand tree and the tool input from the spec (seven `Args` structs and
-seven `Execute` impls deleted), `orbit-dashboard` takes its tool names and
+seven `Execute` impls deleted), `orbit-web` takes its tool names and
 parameter names from the registry, and `orbit-core` holds the handler half of
 the table keyed on `FrictionVerb`. `OrbitBuiltinAction`'s seven `Friction*`
 variants collapsed to one `Friction(FrictionVerb)`.

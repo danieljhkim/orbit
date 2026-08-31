@@ -60,6 +60,9 @@ const DIAG_LIMIT = positiveIntParam("diag", 50);
 const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const FRICTION_STATUSES = ["open", "triaged", "resolved"];
+const DEFAULT_FRICTION_STATUS_FILTER = "active";
+const FRICTION_ACCORDION_QUERY = "(max-width: 1000px)";
+const frictionAccordionMedia = window.matchMedia(FRICTION_ACCORDION_QUERY);
 
 const $ = (id) => document.getElementById(id);
 
@@ -81,6 +84,7 @@ let activeOperationsSubtab = "routines";
 let isRefreshing = false;
 let activeFrictionId = null;
 let frictionSearchQuery = "";
+let frictionStatusFilter = DEFAULT_FRICTION_STATUS_FILTER;
 
 // Health strip state
 let lastSummary = null;
@@ -402,23 +406,43 @@ function renderFrictionStats(stats = {}) {
   $("friction-resolved-month-value").textContent = formatBigInt(stats.resolved_this_month || 0);
 }
 
+function frictionFilterLabel() {
+  return frictionStatusFilter === "all" ? "all" : frictionStatusFilter;
+}
+
+function frictionAvailableCount(stats = {}) {
+  const open = Number(stats.open) || 0;
+  const triaged = Number(stats.triaged) || 0;
+  const total = Number(stats.total) || 0;
+  if (frictionStatusFilter === "active") return open + triaged;
+  if (frictionStatusFilter === "open") return open;
+  if (frictionStatusFilter === "triaged") return triaged;
+  if (frictionStatusFilter === "resolved") return Math.max(0, total - open - triaged);
+  return total;
+}
+
 function renderFrictions(payload) {
   const body = $("frictions-body");
   if (!body) return;
   const items = Array.isArray(payload && payload.items) ? payload.items : [];
   const stats = (payload && payload.stats) || {};
+  const accordion = frictionAccordionMedia.matches;
   renderFrictionStats(stats);
-  $("knowledge-count").textContent = `${items.length}/${stats.total || items.length}`;
+  const available = frictionAvailableCount(stats);
+  const count = $("knowledge-count");
+  count.textContent = `${items.length}/${available}`;
+  count.title = `Showing ${items.length} of ${available} ${frictionFilterLabel()} frictions`;
 
   if (items.length > 0 && !items.some((item) => item.id === activeFrictionId)) {
-    activeFrictionId = items[0].id;
+    activeFrictionId = accordion ? null : items[0].id;
   }
   if (items.length === 0) activeFrictionId = null;
 
   if (items.length === 0) {
+    const suffix = frictionSearchQuery ? " match the current search." : ".";
     syncNodes(body, [el("div", { class: "empty-state" }, [
       el("div", { class: "icon", text: "✧" }),
-      el("div", { class: "text", text: "No frictions match the current filter." }),
+      el("div", { class: "text", text: `No ${frictionFilterLabel()} frictions${suffix}` }),
     ])]);
     renderFrictionDetail(null);
     return;
@@ -428,11 +452,14 @@ function renderFrictions(payload) {
 
   for (const friction of items) {
     const title = friction.title || friction.id;
+    const expanded = activeFrictionId === friction.id;
+    const detailId = `friction-accordion-${friction.id}`;
     const row = el("div", { class: "knowledge-row friction-row", title }, [
       el("div", { class: "top" }, [
         el("span", { class: "id", text: friction.id, title: friction.id }),
         el("span", { class: "spacer" }),
         el("span", { class: "when", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+        accordion ? el("span", { class: "friction-row-toggle", text: expanded ? "▾" : "▸" }) : null,
       ]),
       el("div", { class: "title", text: title }),
       el("div", { class: "summary", text: truncate(friction.body || title, 180) }),
@@ -447,23 +474,43 @@ function renderFrictions(payload) {
       ]),
     ]);
     row.dataset.key = `friction-${friction.id}`;
-    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${activeFrictionId === friction.id}`;
-    if (activeFrictionId === friction.id) row.classList.add("active");
-    row.addEventListener("click", () => {
-      activeFrictionId = friction.id;
+    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${accordion}-${expanded}`;
+    if (expanded) row.classList.add("active");
+    const toggle = () => {
+      activeFrictionId = accordion && expanded ? null : friction.id;
       renderFrictions(lastFrictionPayload);
-    });
+    };
+    row.addEventListener("click", toggle);
+    if (accordion) {
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-expanded", String(expanded));
+      row.setAttribute("aria-controls", detailId);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggle();
+      });
+    }
     frag.appendChild(row);
+    if (accordion && expanded) {
+      const inlineDetail = el("section", { class: "friction-accordion-detail" });
+      inlineDetail.id = detailId;
+      inlineDetail.dataset.key = `friction-detail-${friction.id}`;
+      inlineDetail.dataset.hash = JSON.stringify({ friction, tags: lastFrictionPayload.tags });
+      inlineDetail.setAttribute("aria-label", `Details for ${friction.id}`);
+      renderFrictionDetail(friction, inlineDetail);
+      frag.appendChild(inlineDetail);
+    }
   }
 
   syncNodes(body, Array.from(frag.children));
-  renderFrictionDetail(items.find((item) => item.id === activeFrictionId) || items[0]);
+  renderFrictionDetail(accordion ? null : items.find((item) => item.id === activeFrictionId) || items[0]);
 }
 
-function renderFrictionDetail(friction) {
-  const detail = $("friction-detail");
+function renderFrictionDetail(friction, detail = $("friction-detail")) {
   if (!detail) return;
-  const count = $("friction-detail-count");
+  const count = detail.id === "friction-detail" ? $("friction-detail-count") : null;
   if (!friction) {
     if (count) count.textContent = "-";
     syncNodes(detail, [el("div", { class: "empty-state" }, [
@@ -669,6 +716,23 @@ function wireFrictionSearch() {
     debounce = setTimeout(() => {
       if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
     }, 200);
+  });
+}
+
+function wireFrictionStatusFilter() {
+  const select = $("friction-status-filter");
+  if (!select) return;
+  select.value = frictionStatusFilter;
+  select.addEventListener("change", (e) => {
+    frictionStatusFilter = e.target.value;
+    activeFrictionId = null;
+    if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
+  });
+}
+
+function wireFrictionResponsiveDetail() {
+  frictionAccordionMedia.addEventListener("change", () => {
+    renderFrictions(lastFrictionPayload);
   });
 }
 
@@ -1177,15 +1241,29 @@ function fetchAndRenderFrictions() {
     renderKnowledgeDetailPlaceholder("friction");
     return Promise.resolve();
   }
-  const sp = new URLSearchParams();
-  sp.set("limit", String(FRICTION_LIMIT));
-  if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
+  const statuses = frictionStatusFilter === "active" ? ["open", "triaged"] : [frictionStatusFilter];
+  const listRequests = statuses.map((status) => {
+    const sp = new URLSearchParams();
+    sp.set("limit", String(FRICTION_LIMIT));
+    if (status !== "all") sp.set("status", status);
+    if (frictionSearchQuery) sp.set("q", frictionSearchQuery);
+    return fetchJson(`/api/frictions?${sp.toString()}`);
+  });
   return Promise.all([
-    fetchJson(`/api/frictions?${sp.toString()}`),
+    Promise.all(listRequests),
     fetchJson("/api/frictions/stats"),
-  ]).then(([payload, stats]) => {
-    lastFrictionPayload = payload || { stats: {}, tags: [], items: [] };
-    lastFrictionPayload.stats = stats || lastFrictionPayload.stats || {};
+  ]).then(([payloads, stats]) => {
+    const items = payloads
+      .flatMap((payload) => Array.isArray(payload && payload.items) ? payload.items : [])
+      .sort((a, b) => {
+        const byCreatedAt = Date.parse(b.created_at || "") - Date.parse(a.created_at || "");
+        return Number.isNaN(byCreatedAt) || byCreatedAt === 0
+          ? String(b.id || "").localeCompare(String(a.id || ""))
+          : byCreatedAt;
+      })
+      .slice(0, FRICTION_LIMIT);
+    const tags = [...new Set(payloads.flatMap((payload) => Array.isArray(payload && payload.tags) ? payload.tags : []))].sort();
+    lastFrictionPayload = { stats: stats || {}, tags, items };
     renderFrictions(lastFrictionPayload);
   });
 }
@@ -1302,6 +1380,8 @@ const tasksContext = taskContext();
 buildChips(tasksContext);
 wireSearch(tasksContext);
 wireFrictionSearch();
+wireFrictionStatusFilter();
+wireFrictionResponsiveDetail();
 wireGlobalTaskResolver();
 buildAuditChips(auditContext());
 wireAuditSearch(auditContext());

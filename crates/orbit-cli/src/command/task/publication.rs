@@ -110,6 +110,7 @@ impl Execute for TaskPublicationPublishArgs {
             ));
         }
         let workspace_id = selected_workspace_id(runtime)?;
+        let task_workspace_id = selected_task_workspace_id(runtime)?;
         let global_root = runtime.global_root();
         let host = load_host_identity(&global_root)?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
@@ -134,6 +135,7 @@ impl Execute for TaskPublicationPublishArgs {
 
         let request = publish_request(
             &binding,
+            task_workspace_id,
             host.machine_id,
             caller_role,
             publication_cache(runtime),
@@ -327,11 +329,13 @@ impl Execute for TaskPublicationRestoreArgs {
             "restoring a task publication into the canonical destination store",
         )?;
         assert_restore_authority(runtime, &self.publication)?;
+        let task_workspace_id = selected_task_workspace_id(runtime)?;
         runtime.record_task_publication_source(
-            &self.publication.workspace_id,
+            &task_workspace_id,
             &self.publication.source_repository_fingerprint,
         )?;
         let request = PublicationRestoreRequest {
+            task_workspace_id,
             publication: self.publication.request(runtime, "restore"),
             mode: if self.allow_identical_retry {
                 PublicationRestoreMode::AllowIdenticalRetry
@@ -389,6 +393,13 @@ impl Execute for TaskPublicationRestoreArgs {
 fn selected_workspace_id(runtime: &OrbitRuntime) -> Result<String, orbit_core::OrbitError> {
     runtime
         .workspace_runtime_binding()
+        .map(|binding| binding.logical_workspace_id.clone())
+        .map_or_else(|| runtime.workspace_id(), Ok)
+}
+
+fn selected_task_workspace_id(runtime: &OrbitRuntime) -> Result<String, orbit_core::OrbitError> {
+    runtime
+        .workspace_runtime_binding()
         .map(|binding| binding.workspace_id.clone())
         .map_or_else(|| runtime.workspace_id(), Ok)
 }
@@ -399,12 +410,14 @@ fn publication_cache(runtime: &OrbitRuntime) -> PathBuf {
 
 fn publish_request(
     binding: &WorkspacePublicationBinding,
+    task_workspace_id: String,
     local_machine_id: String,
     caller_role: PublicationCallerRole,
     cache_dir: PathBuf,
 ) -> PublicationPublishRequest {
     PublicationPublishRequest {
         workspace_id: binding.workspace_id.clone(),
+        task_workspace_id,
         source_repository_fingerprint: binding.source_repository_fingerprint.clone(),
         publication_id: binding.publication_id.clone(),
         authority_machine_id: binding.authority_machine_id.clone(),

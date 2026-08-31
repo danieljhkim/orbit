@@ -47,7 +47,7 @@ Defined in `orbit-search`:
 
 ```rust
 pub trait Embedder: Send + Sync {
-    fn model_id(&self) -> &str;        // e.g. "bge-small-en-v1.5"
+    fn model_id(&self) -> &str;        // e.g. "bge-small"
     fn dim(&self) -> usize;            // e.g. 384
     fn max_input_tokens(&self) -> usize; // e.g. 512
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, OrbitError>;
@@ -86,7 +86,7 @@ JSON Lines over stdio. Each request and response is a single JSON object on a si
 {"id": 4, "method": "exit"}
 
 // Response
-{"id": 1, "result": {"model_id": "bge-small-en-v1.5", "dim": 384, "max_input_tokens": 512}}
+{"id": 1, "result": {"model_id": "bge-small", "dim": 384, "max_input_tokens": 512}}
 {"id": 2, "result": {"vectors": [[...384 floats...], [...384 floats...]]}}
 {"id": 3, "result": {"tokens": 42}}
 {"id": 4, "result": {"ok": true}}
@@ -137,7 +137,7 @@ CREATE TABLE embeddings (
     field       TEXT NOT NULL,         -- "purpose", "plan", "comment_3", "review_1_msg_2", ...
     chunk_idx   INTEGER NOT NULL,      -- 0 for unchunked; >0 for splits of long fields
     content_hash TEXT NOT NULL,        -- BLAKE3 of the embedded text; cheap re-index gate
-    model_id    TEXT NOT NULL,         -- "bge-small-en-v1.5"
+    model_id    TEXT NOT NULL,         -- "bge-small"
     dim         INTEGER NOT NULL,      -- 384
     embedding   BLOB NOT NULL,         -- dim * 4 bytes, native-endian f32
     created_at  TEXT NOT NULL,
@@ -182,25 +182,23 @@ A task bundle has structured fields with different retrieval value. The design i
 
 | Field | Source | Rationale |
 |-------|--------|-----------|
-| `purpose` | `task.yaml.purpose` | High-density signal; what the task is for |
-| `summary` | `task.yaml.summary` | One-line gist; useful for short-query matches |
-| `plan` | `plan.md` | Implementation intent; long-form |
-| `execution_summary` | `execution-summary.md` | What actually shipped |
-| `acceptance_criteria` | `task.yaml.acceptance_criteria[*]` joined | Often the most query-relevant text |
-| `comment_<idx>` | `task.yaml.comments[idx].body` | One row per comment; preserves authorship |
-| `review_<thread>_msg_<idx>` | review_threads | Decision context lives here |
+| `title` | `Task.title` | High-density signal; what the task is for |
+| `description` | `Task.description` | One-line or long-form task context |
+| `plan` | `Task.plan` | Implementation intent; long-form |
+| `execution_summary` | `Task.execution_summary` | What actually shipped |
+| `acceptance` | `Task.acceptance_criteria[*]` joined | Often the most query-relevant text |
 
-A single match in a comment surfaces the parent task; the result formatter rolls field-level hits up to task-level results, with the highest-scoring field shown as a snippet ([Per-field embeddings with chunked overflow, not whole-bundle concatenation](./4_decisions.md#per-field-embeddings-with-chunked-overflow-not-whole-bundle-concatenation)).
+A single match in any indexed field surfaces the parent task; the result formatter rolls field-level hits up to task-level results, with the highest-scoring field shown as a snippet ([Per-field embeddings with chunked overflow, not whole-bundle concatenation](./4_decisions.md#per-field-embeddings-with-chunked-overflow-not-whole-bundle-concatenation)).
 
 ### 4.2 Chunking long fields
 
-`plan.md` and `execution-summary.md` regularly exceed BGE's 512-token context. The chunker splits on paragraph boundaries with a target of 400 tokens per chunk and a 50-token overlap. Each chunk gets its own row with `chunk_idx = 0, 1, 2, ...`. Queries that match multiple chunks of the same field/task collapse to one result with the best-scoring chunk surfaced.
+Long task and doc fields can exceed the active model's context. The chunker splits on paragraph boundaries with a target of 400 tokens per chunk and a 50-token overlap, capped by the model's context limit. Each chunk gets its own row with `chunk_idx = 0, 1, 2, ...`. Queries that match multiple chunks of the same field/source collapse to one result with the best-scoring chunk surfaced.
 
 Token counting uses fastembed-rs's tokenizer for the active model — exact, not heuristic — to keep chunks below the model's actual limit.
 
 ### 4.3 Fields *not* embedded
 
-- `task.yaml.id`, `created_at`, `updated_at`, `status`, `dependencies`, `external_refs`: identifiers and structured metadata; FTS5 handles these better.
+- `task.yaml.id`, `created_at`, `updated_at`, `status`, `dependencies`, `external_refs`: identifiers and structured metadata; ordinary task search handles these separately from the embedding fields.
 - `artifacts/**` blobs: out of scope phase 1. Most are binary or large generated content; embedding them is expensive and rarely useful for "find the related task" queries.
 
 ---
@@ -238,7 +236,7 @@ with `k = 60` (the published-paper default that has held up across many evaluati
 Three queries that motivate the choice:
 
 - **"slow embed inference"** — semantic wins; lexical misses tasks titled "BGE latency degraded after Nomic swap."
-- **"T20260421-0528"** — lexical wins; semantic returns near-random because the literal token has no semantic neighborhood.
+- **"ORB-11027"** — lexical wins; semantic returns near-random because the literal token has no semantic neighborhood.
 - **"file: orbit-store/src/file/task_store/layout.rs"** — lexical wins; literal path tokens dominate.
 
 Either retriever alone has a failure mode the other doesn't. RRF resolves both at the cost of one extra SQL query per search ([Hybrid retrieval (FTS5 BM25 + cosine, fused via RRF) from day one](./4_decisions.md#hybrid-retrieval-fts5-bm25-cosine-fused-via-rrf-from-day-one)).
@@ -252,10 +250,10 @@ Either retriever alone has a failure mode the other doesn't. RRF resolves both a
 ```
 orbit semantic install   [--model bge-small | minilm-l6 | nomic-v1.5] [--force]
 orbit semantic uninstall [--model MODEL] [--all]
-orbit search <query> [--hybrid] [--kind task|doc|all] [--limit N]
+orbit search <query> [--hybrid] [--kind task|doc|friction|all] [--limit N]
                      [--workspace SELECTOR]... [--all-workspaces]
 orbit search similar <task-id> [--limit N]
-orbit search path <path> [--kind task|doc|all] [--limit N]
+orbit search path <path> [--kind task|doc|friction|all] [--limit N]
 orbit semantic index     [--force] [--model MODEL] [--kind tasks|docs|all]
 orbit docs index         [--force] [--model MODEL]
 orbit semantic stats
@@ -283,21 +281,24 @@ If the companion is not installed, task-hybrid search, `orbit search similar <ta
 
 ```jsonc
 {
+  "mode": "hybrid",
+  "kind": "task",
   "results": [
     {
-      "source_kind": "task",
-      "source_id": "T20260421-0528",
+      "kind": "task",
+      "source": "semantic",
+      "id": "ORB-00042",
       "best_field": "plan",
       "snippet": "...",
       "score": 0.87,
       "score_breakdown": { "rrf": 0.87, "bm25_rank": 4, "cosine_rank": 1 }
     }
   ],
-  "model_id": "bge-small-en-v1.5"
+  "notes": []
 }
 ```
 
-The score breakdown is deliberately exposed: agents can use it to decide whether a hit is "lexical exact match" vs. "semantic neighborhood" and adapt downstream behavior.
+The global search response exposes the score breakdown when semantic task search contributes a hit: agents can use it to distinguish a lexical-only hit from a semantic neighborhood and adapt downstream behavior. The internal `orbit-search` result also carries the active `model_id`, but the unified CLI/MCP response uses the global shape shown here.
 
 ### 6.4 Cross-workspace federated search
 
@@ -383,7 +384,7 @@ The companion lives in a separate process and inference happens via stdio JSON-R
 
 ### 8.4 Brute-force scaling ceiling
 
-Cosine over a full table scan stays sub-100ms at ~100K vectors. Phase-2 graph integration will push past that; the schema's forward compatibility with `sqlite-vec` is the planned upgrade path, but `sqlite-vec` is itself a loadable extension that may not be available in every distribution. The decision to revisit storage at phase 2 is in [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](./4_decisions.md#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade).
+Cosine over a full table scan stays sub-100ms at ~100K vectors. A substantially larger future corpus could push past that; the schema's forward compatibility with `sqlite-vec` is the planned upgrade path, but `sqlite-vec` is itself a loadable extension that may not be available in every distribution. The decision to revisit storage at phase 2 is in [Brute-force cosine over SQLite BLOBs; `sqlite-vec` reserved as phase-2 upgrade](./4_decisions.md#brute-force-cosine-over-sqlite-blobs-sqlite-vec-reserved-as-phase-2-upgrade).
 
 ### 8.5 Multilingual content
 

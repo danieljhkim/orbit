@@ -17,6 +17,16 @@
 //! otherwise resolves the repository from the caller's working directory.
 
 pub use crate::builtin::github::auth::build_exec_request as auth_status_request;
+pub use crate::builtin::github::dependabot_alerts::{
+    build_code_scanning_request as code_scanning_alerts_request,
+    build_exec_request as dependabot_alerts_request,
+    build_open_pull_requests_request as dependabot_pull_requests_request,
+    build_secret_locations_request as secret_scanning_locations_request,
+    build_secret_scanning_request as secret_scanning_alerts_request,
+    project_alert as project_dependabot_alert, project_code_scanning_alert,
+    project_pull_request as project_dependabot_pull_request, project_secret_location,
+    project_secret_scanning_alert,
+};
 pub use crate::builtin::github::pr_list::{
     build_exec_request as pr_list_request, project_pull_request,
 };

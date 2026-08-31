@@ -12,9 +12,14 @@ spec:
     rather than assuming branch names; separates the event-reported SHA, the
     ref's current head, and the commit the runner actually checked out; and
     reports every bound it hit in `truncation` rather than silently returning
-    less. When no GitHub client is available or authenticated the snapshot
-    carries `collected: false` and gathers nothing further, so a caller can
-    never mistake it for a clean CI result.
+    less. Workflow runs are listed repository-wide in one query and exactly
+    the latest run of each workflow is authoritative, ordered by creation time
+    then run ID. Discovery or investigation failures are bounded, redacted,
+    and emitted in `retryable_errors`; the filing step rejects such a snapshot
+    so it cannot be mistaken for a clean result. When no GitHub client is
+    available or authenticated the snapshot carries `collected: false` and
+    gathers nothing further, so a caller can never mistake it for a clean CI
+    result.
   input_schema_json:
     type: object
     properties:
@@ -27,8 +32,13 @@ spec:
           to the repository's GitHub default branch.
       base_branch:
         type: string
-      runs_per_ref:
+      max_runs:
         type: number
+        description: >
+          Cap on the single repository-wide workflow-run listing. This is a
+          whole-repository budget, not a per-head one; it must stay deep enough
+          that the integration head's newest run survives the pull-request runs
+          that outnumber it. Defaults to 100, maximum 300.
       max_pull_requests:
         type: number
       max_investigated_runs:
@@ -59,14 +69,18 @@ spec:
             type: object
           heads:
             type: array
+          latest_runs:
+            type: array
           current_failures:
             type: array
           stale_or_superseded:
             type: array
           in_flight:
             type: array
-          query_errors:
+          retryable_errors:
             type: array
+          summary:
+            type: object
           truncation:
             type: object
           collected_at:

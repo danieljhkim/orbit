@@ -1,0 +1,34 @@
+schemaVersion: 2
+kind: Job
+metadata:
+  name: dependabot_alert_sweep_pipeline
+spec:
+  state: enabled
+  kind: workflow
+  max_active_runs: 1
+  default_input:
+    max_alerts: 100
+    max_pull_requests: 100
+    max_code_scanning_alerts: 100
+    max_secret_scanning_alerts: 100
+    max_secret_locations: 20
+    max_tasks: 10
+    # Governs Dependabot and Code scanning; secret scanning is always filed.
+    min_severity: high
+    skip_when_dependabot_pr_open: true
+  steps:
+    - id: collect
+      target: activity:collect_dependabot_alerts
+      default_input:
+        max_alerts: "{{ input.max_alerts }}"
+        max_pull_requests: "{{ input.max_pull_requests }}"
+        max_code_scanning_alerts: "{{ input.max_code_scanning_alerts }}"
+        max_secret_scanning_alerts: "{{ input.max_secret_scanning_alerts }}"
+        max_secret_locations: "{{ input.max_secret_locations }}"
+    - id: file
+      target: activity:file_dependabot_alert_tasks
+      default_input:
+        dependabot_snapshot: "{{ steps.collect.output.dependabot_snapshot }}"
+        max_tasks: "{{ input.max_tasks }}"
+        min_severity: "{{ input.min_severity }}"
+        skip_when_dependabot_pr_open: "{{ input.skip_when_dependabot_pr_open }}"

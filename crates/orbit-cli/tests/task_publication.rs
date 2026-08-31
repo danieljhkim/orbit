@@ -15,6 +15,9 @@ use tempfile::tempdir;
 const SOURCE_REMOTE: &str = "ssh://source.test/orbit.git";
 const PUBLICATION_REMOTE: &str = "ssh://publication.test/orbit-tasks.git";
 const PUBLICATION_ID: &str = "pub_network_free_e2e";
+const LOGICAL_WORKSPACE_ID: &str = "ws_orbit";
+const RUNTIME_WORKSPACE_ID: &str = "ws_orbit-5c61b3";
+const RECOVERY_RUNTIME_WORKSPACE_ID: &str = "ws_orbit-recovery";
 
 #[test]
 fn operator_workflow_is_network_free_labelled_and_fail_closed() {
@@ -48,9 +51,26 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["workspace", "init", "--name", "publication-e2e"],
+        &["workspace", "init", "--name", "orbit-5c61b3"],
     )
     .success();
+
+    // The registry's logical identity may diverge from config.yaml's task
+    // partition. Publication authority follows the former; bundle discovery
+    // must keep using the latter.
+    let registry_path = owner_home.join(".orbit").join("workspaces.json");
+    let registry = fs::read_to_string(&registry_path).expect("workspace registry");
+    fs::write(
+        &registry_path,
+        registry.replace(RUNTIME_WORKSPACE_ID, LOGICAL_WORKSPACE_ID),
+    )
+    .expect("logical workspace registry");
+    let runtime_identity = fs::read_to_string(source_repo.join(".orbit").join("config.yaml"))
+        .expect("runtime workspace identity");
+    assert!(
+        runtime_identity.contains(RUNTIME_WORKSPACE_ID),
+        "config.yaml must retain the task partition: {runtime_identity}"
+    );
 
     let first = add_task(
         &source_repo,
@@ -138,6 +158,8 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &owner_home,
         &publication_bare,
         &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
             "workspace",
             "publication",
             "bind",
@@ -149,6 +171,7 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         ],
     );
     assert_eq!(binding["bound"], true);
+    assert_eq!(binding["workspace_id"], LOGICAL_WORKSPACE_ID);
     assert_eq!(binding["privacy"], "operator-managed");
     assert_eq!(binding["publication_remote"], PUBLICATION_REMOTE);
     let workspace_id = binding["workspace_id"]
@@ -165,6 +188,8 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &owner_home,
         &publication_bare,
         &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
             "task",
             "publication",
             "publish",
@@ -174,6 +199,7 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         ],
     );
     assert_eq!(published["status"], "initialized");
+    assert_eq!(published["workspace_id"], LOGICAL_WORKSPACE_ID);
     assert_eq!(published["generation"], 1);
     assert!(published["omitted_attachment_bytes"].as_u64().unwrap() > 0);
     let published_commit = published["commit_id"]
@@ -189,9 +215,17 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["task", "publication", "status", "--json"],
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "task",
+            "publication",
+            "status",
+            "--json",
+        ],
     );
     assert_eq!(status["state"], "current");
+    assert_eq!(status["workspace_id"], LOGICAL_WORKSPACE_ID);
     assert_eq!(status["remote_commit"], published_commit);
     assert_eq!(status["incomplete_attachments"], true);
 
@@ -236,9 +270,24 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &recovery_repo,
         &recovery_home,
         &publication_bare,
-        &["workspace", "init", "--name", "publication-e2e"],
+        &["workspace", "init", "--name", "orbit-recovery"],
     )
     .success();
+    let recovery_registry_path = recovery_home.join(".orbit").join("workspaces.json");
+    let recovery_registry =
+        fs::read_to_string(&recovery_registry_path).expect("recovery workspace registry");
+    fs::write(
+        &recovery_registry_path,
+        recovery_registry.replace(RECOVERY_RUNTIME_WORKSPACE_ID, LOGICAL_WORKSPACE_ID),
+    )
+    .expect("logical recovery workspace registry");
+    let recovery_runtime_identity =
+        fs::read_to_string(recovery_repo.join(".orbit").join("config.yaml"))
+            .expect("recovery runtime workspace identity");
+    assert!(
+        recovery_runtime_identity.contains(RECOVERY_RUNTIME_WORKSPACE_ID),
+        "recovery config.yaml must retain the task partition: {recovery_runtime_identity}"
+    );
     let recovery_workspace = orbit_json(
         &recovery_repo,
         &recovery_home,
@@ -313,6 +362,12 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         task_ids(&recovery_repo, &recovery_home, &publication_bare),
         [first.clone(), second.clone()]
     );
+    assert_eq!(
+        fs::read_to_string(recovery_repo.join(".orbit").join("config.yaml"))
+            .expect("recovery runtime identity after restore"),
+        recovery_runtime_identity,
+        "restore must not rewrite the destination task partition identity"
+    );
     assert_eq!(repository_state(&recovery_repo), recovery_before);
 
     let recovered_first = task_show(&recovery_repo, &recovery_home, &publication_bare, &first);
@@ -371,7 +426,14 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["task", "publication", "publish", "--json"],
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "task",
+            "publication",
+            "publish",
+            "--json",
+        ],
     )
     .failure();
     assert_output_contains(&conflict, "resolve the publication authority");
@@ -401,6 +463,8 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &owner_home,
         &publication_bare,
         &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
             "workspace",
             "publication",
             "rebind",
@@ -417,14 +481,29 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["workspace", "publication", "show", "--json"],
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "workspace",
+            "publication",
+            "show",
+            "--json",
+        ],
     );
     assert_eq!(shown["publication_id"], "pub_rebound_e2e");
     let removed = orbit_json(
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["workspace", "publication", "remove", "--confirm", "--json"],
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "workspace",
+            "publication",
+            "remove",
+            "--confirm",
+            "--json",
+        ],
     );
     assert_eq!(removed["removed"], true);
     assert_eq!(removed["repository_changed"], false);
@@ -432,9 +511,36 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &source_repo,
         &owner_home,
         &publication_bare,
-        &["workspace", "publication", "show", "--json"],
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "workspace",
+            "publication",
+            "show",
+            "--json",
+        ],
     );
     assert_eq!(unbound["bound"], false);
+    let logical_workspace = orbit_json(
+        &source_repo,
+        &owner_home,
+        &publication_bare,
+        &[
+            "--workspace",
+            LOGICAL_WORKSPACE_ID,
+            "workspace",
+            "show",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(logical_workspace["workspace"]["id"], LOGICAL_WORKSPACE_ID);
+    assert_eq!(
+        fs::read_to_string(source_repo.join(".orbit").join("config.yaml"))
+            .expect("runtime identity after publication"),
+        runtime_identity,
+        "publication must not rewrite the task partition identity"
+    );
     assert_eq!(repository_state(&source_repo), source_before);
 }
 

@@ -4,7 +4,157 @@
 
 use serde_json::json;
 
-use crate::builtin::github::{pr_list, run_list, run_logs, run_view};
+use crate::builtin::github::{dependabot_alerts, pr_list, run_list, run_logs, run_view};
+
+#[test]
+fn dependabot_alert_request_is_bounded_and_projects_compact_evidence() {
+    let req = dependabot_alerts::build_exec_request(&json!({
+        "repo": "openai/orbit",
+        "limit": 500,
+    }))
+    .expect("request");
+    assert_eq!(
+        req.args,
+        [
+            "api",
+            "--method",
+            "GET",
+            "repos/openai/orbit/dependabot/alerts",
+            "-f",
+            "state=open",
+            "-F",
+            "per_page=100"
+        ]
+    );
+
+    let projected = dependabot_alerts::project_alert(&json!({
+        "number": 7, "state": "open",
+        "dependency": {"package": {"ecosystem": "cargo", "name": "time"}, "manifest_path": "Cargo.lock", "scope": "runtime"},
+        "security_advisory": {"severity": "high", "ghsa_id": "GHSA-1234", "cve_id": "CVE-2026-1", "summary": "A concise summary", "description": "long prose must not escape"},
+        "security_vulnerability": {"vulnerable_version_range": "< 1.2.3", "first_patched_version": {"identifier": "1.2.3"}},
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+        "dismissed_at": null, "fixed_at": null, "html_url": "https://github.com/acme/repo/security/dependabot/7"
+    }));
+    assert_eq!(projected["package"], json!("time"));
+    assert_eq!(projected["first_patched_version"], json!("1.2.3"));
+    assert!(projected.get("description").is_none());
+}
+
+#[test]
+fn dependabot_pull_request_discovery_requests_and_projects_the_head_branch() {
+    let req = dependabot_alerts::build_open_pull_requests_request(&json!({
+        "repo": "openai/orbit",
+    }))
+    .expect("request");
+    assert!(
+        req.args
+            .windows(2)
+            .any(|pair| pair == ["--json", "number,title,url,body,author,headRefName"])
+    );
+
+    let projected = dependabot_alerts::project_pull_request(&json!({
+        "number": 4,
+        "title": "Bump time from 1.0.0 to 1.2.3",
+        "url": "https://github.test/pr/4",
+        "body": "Bumps time from 1.0.0 to 1.2.3.",
+        "author": {"login": "app/dependabot"},
+        "headRefName": "dependabot/cargo/time-1.2.3",
+    }));
+    assert_eq!(
+        projected["head_branch"],
+        json!("dependabot/cargo/time-1.2.3")
+    );
+    assert_eq!(projected["author"], json!("app/dependabot"));
+}
+
+#[test]
+fn dependabot_alert_request_rejects_repository_path_injection() {
+    let error = dependabot_alerts::build_exec_request(&json!({"repo": "acme/repo?per_page=999"}))
+        .expect_err("invalid repo must fail");
+    assert!(error.to_string().contains("invalid `repo`"));
+}
+
+#[test]
+fn code_and_secret_scanning_requests_are_bounded_and_validate_repository() {
+    for (request, endpoint) in [
+        (
+            dependabot_alerts::build_code_scanning_request(&json!({
+                "repo": "openai/orbit", "limit": 500
+            }))
+            .expect("code scanning request"),
+            "repos/openai/orbit/code-scanning/alerts",
+        ),
+        (
+            dependabot_alerts::build_secret_scanning_request(&json!({
+                "repo": "openai/orbit", "limit": 500
+            }))
+            .expect("secret scanning request"),
+            "repos/openai/orbit/secret-scanning/alerts",
+        ),
+    ] {
+        assert_eq!(request.args[3], endpoint);
+        assert_eq!(
+            request.args.last().map(String::as_str),
+            Some("per_page=100")
+        );
+        assert!(
+            request
+                .args
+                .windows(2)
+                .any(|pair| pair == ["-f", "state=open"])
+        );
+    }
+
+    let error = dependabot_alerts::build_secret_scanning_request(
+        &json!({"repo": "acme/repo?state=resolved"}),
+    )
+    .expect_err("invalid repo must fail");
+    assert!(error.to_string().contains("invalid `repo`"));
+}
+
+#[test]
+fn scanning_projections_retain_evidence_but_structurally_drop_secret() {
+    let code = dependabot_alerts::project_code_scanning_alert(&json!({
+        "number": 9,
+        "state": "open",
+        "rule": {"id": "rust/sql-injection", "name": "SQL injection", "description": "unsafe query", "security_severity_level": "high", "tags": ["security"]},
+        "tool": {"name": "CodeQL", "guid": "tool-guid", "version": "2.0"},
+        "most_recent_instance": {"ref": "refs/heads/main", "commit_sha": "abc123", "message": {"text": "user input reaches query"}, "location": {"path": "src/db.rs", "start_line": 17, "end_line": 19, "start_column": 4, "end_column": 20}, "classifications": ["test"]},
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z", "html_url": "https://github.test/code/9",
+        "instances_url": "must not escape"
+    }));
+    assert_eq!(code["rule_id"], "rust/sql-injection");
+    assert_eq!(code["path"], "src/db.rs");
+    assert!(code.get("instances_url").is_none());
+
+    let sentinel = "orbit-sentinel-secret-99f0";
+    let secret = dependabot_alerts::project_secret_scanning_alert(&json!({
+        "number": 12, "state": "open", "secret_type": "example_token",
+        "secret_type_display_name": "Example token", "secret": sentinel,
+        "validity": "active", "publicly_leaked": false, "multi_repo": false,
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+        "html_url": "https://github.test/secret/12"
+    }));
+    assert_eq!(secret["secret_type"], "example_token");
+    assert!(
+        !serde_json::to_string(&secret)
+            .expect("encode")
+            .contains(sentinel)
+    );
+    assert!(secret.get("secret").is_none());
+
+    let location = dependabot_alerts::project_secret_location(&json!({
+        "type": "commit", "details": {"path": "config/dev.env", "start_line": 3,
+        "end_line": 3, "commit_sha": "def456", "commit_url": "https://github.test/commit/def456",
+        "diff": sentinel}
+    }));
+    assert_eq!(location["path"], "config/dev.env");
+    assert!(
+        !serde_json::to_string(&location)
+            .expect("encode")
+            .contains(sentinel)
+    );
+}
 
 #[test]
 fn run_list_applies_every_filter_and_caps_the_limit() {

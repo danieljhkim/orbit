@@ -853,12 +853,12 @@ fn dashboard_managed_execution_cost_panel_has_responsive_presentation_hooks() {
     );
 }
 
-/// ORB-10444: the friction list is long enough to scroll the detail
-/// pane out of view mid-read. The pane is pinned below the fixed chrome and
-/// bounded to the remaining viewport so its body scrolls internally rather than
-/// being clipped when the detail is taller than the screen.
+/// ORB-10444: the desktop friction pane stays in view mid-read. ORB-11136:
+/// once Knowledge collapses to one column, detail expands under its owning row
+/// instead of being stranded after the full list.
 #[test]
-fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
+fn dashboard_knowledge_detail_is_sticky_on_desktop_and_inline_when_narrow() {
+    let app = include_str!("../../assets/dashboard/app.js");
     let css = include_str!("../../assets/dashboard/dashboard.css");
 
     let sticky_at = css
@@ -878,13 +878,65 @@ fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
         !css.contains("min-height: calc(100vh - 360px)"),
         "the old fixed min-height fought the bounded sticky pane and must be gone"
     );
-    // The single-column breakpoint stacks the pane under the list, where
-    // pinning would only shrink it — the override must come after the sticky
-    // rule so it wins the equal-specificity tie.
-    let unpin_at = css
-        .find("          position: static;\n          max-height: none;")
-        .expect("the narrow-viewport override must exist");
-    assert!(sticky_at < unpin_at);
+    assert!(
+        css.contains(".friction-stats .tile {\n        padding: 8px 16px;"),
+        "friction summary tiles need outer breathing room at every width"
+    );
+    let accordion_at = css
+        .find("          display: none;\n        }\n        .friction-row-toggle")
+        .expect("the narrow breakpoint must hide the separate detail pane");
+    assert!(sticky_at < accordion_at);
+    assert!(
+        app.contains(r#"const FRICTION_ACCORDION_QUERY = "(max-width: 1000px)";"#)
+            && app.contains(r#"row.setAttribute("aria-expanded", String(expanded));"#)
+            && app.contains(r#"if (event.key !== "Enter" && event.key !== " ") return;"#)
+            && app.contains("frag.appendChild(inlineDetail);")
+            && app.contains("frictionAccordionMedia.addEventListener(\"change\"")
+            && css.contains(".friction-accordion-detail .knowledge-detail-body")
+            && css.contains("@media (max-width: 1400px) {\n        .knowledge-detail-body"),
+        "narrow friction rows must expose a keyboard-operable inline accordion that tracks viewport changes"
+    );
+}
+
+#[test]
+fn dashboard_friction_list_defaults_to_active_and_filters_by_status() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        index.contains(r#"<label class="friction-filter-control" for="friction-status-filter">"#)
+            && index
+                .contains(r#"<select id="friction-status-filter" aria-controls="frictions-body">"#),
+        "the status filter must have a visible label and name the list it controls"
+    );
+    for option in ["active", "open", "triaged", "resolved", "all"] {
+        assert!(
+            index.contains(&format!(r#"<option value="{option}""#)),
+            "the friction status filter must expose {option}"
+        );
+    }
+    assert!(
+        app.contains(r#"const DEFAULT_FRICTION_STATUS_FILTER = "active";"#)
+            && app.contains(
+                r#"frictionStatusFilter === "active" ? ["open", "triaged"] : [frictionStatusFilter]"#,
+            ),
+        "the initial list must fetch open and triaged independently so resolved history cannot consume its limit"
+    );
+    assert!(
+        app.contains(r#"if (status !== "all") sp.set("status", status);"#)
+            && app.contains(r#"if (frictionSearchQuery) sp.set("q", frictionSearchQuery);"#),
+        "status and text search must compose in every list request"
+    );
+    assert!(
+        app.contains("activeFrictionId = null;") && app.contains(".slice(0, FRICTION_LIMIT);"),
+        "filter changes must reset stale selection and the merged active view must honor the shared limit"
+    );
+    assert!(
+        css.contains("#friction-status-filter:focus-visible")
+            && css.contains(".friction-filter-control { flex: 1 1 100%; }"),
+        "the filter needs visible keyboard focus and a narrow-screen layout"
+    );
 }
 
 /// ORB-10444: the Tasks tab's two write actions. Ship is one click — the

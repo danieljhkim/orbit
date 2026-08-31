@@ -9,6 +9,7 @@ use super::publication::WorkspacePublicationCommand;
 use super::remove::WorkspaceRemoveArgs;
 use super::role::WorkspaceRoleArgs;
 use super::show::WorkspaceShowArgs;
+use super::sync::WorkspaceSyncArgs;
 use super::teardown::WorkspaceTeardownArgs;
 
 #[derive(Args)]
@@ -22,6 +23,8 @@ pub struct WorkspaceCommand {
 pub enum WorkspaceSubcommand {
     /// Initialize a new workspace in the current directory
     Init(WorkspaceInitArgs),
+    /// Converge managed artifacts on the defaults shipped by this Orbit binary
+    Sync(WorkspaceSyncArgs),
     /// List all registered workspaces
     List(WorkspaceListArgs),
     /// Show the current workspace
@@ -42,6 +45,9 @@ impl Execute for WorkspaceCommand {
             WorkspaceSubcommand::Init(_) => {
                 // Init is handled without runtime in main.rs
                 unreachable!("workspace init should be handled before runtime initialization")
+            }
+            WorkspaceSubcommand::Sync(_) => {
+                unreachable!("workspace sync should be handled before runtime initialization")
             }
             WorkspaceSubcommand::List(args) => args.execute(runtime),
             WorkspaceSubcommand::Show(args) => args.execute(runtime),

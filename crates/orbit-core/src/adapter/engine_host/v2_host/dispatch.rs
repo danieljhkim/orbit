@@ -20,8 +20,8 @@ use crate::runtime::task::locks::{
 };
 
 use super::{
-    backlog_exclusion, ci_failure_tasks, pipeline_actions, scan_unresolved, task_pilot, triage,
-    workspace_auto,
+    backlog_exclusion, ci_failure_tasks, dependabot_alert_tasks, pipeline_actions, scan_unresolved,
+    task_pilot, triage, workspace_auto,
 };
 
 /// Whether `action` is dispatchable by this runtime — the capability probe
@@ -192,6 +192,14 @@ pub(crate) fn run_deterministic(
         // that JSON and writes tasks.
         CoreDeterministicAction::FileCiFailureTasks => {
             ci_failure_tasks::file_ci_failure_tasks(runtime, input).map_err(|error| {
+                DispatchError::DeterministicActionFailed {
+                    action: action.to_string(),
+                    message: error.to_string(),
+                }
+            })
+        }
+        CoreDeterministicAction::FileDependabotAlertTasks => {
+            dependabot_alert_tasks::file_dependabot_alert_tasks(runtime, input).map_err(|error| {
                 DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),

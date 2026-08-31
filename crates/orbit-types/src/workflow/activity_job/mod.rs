@@ -24,6 +24,7 @@ macro_rules! deterministic_action_catalog {
                 ContextConflictCheck => "context_conflict_check",
                 DrainWindow => "drain_window",
                 FileCiFailureTasks => "file_ci_failure_tasks",
+                FileDependabotAlertTasks => "file_dependabot_alert_tasks",
                 GateStarvationFail => "gate_starvation_fail",
                 InvokeAndWait => "invoke_and_wait",
                 InvokeDetached => "invoke_detached",
@@ -45,6 +46,7 @@ macro_rules! deterministic_action_catalog {
             }
             engine {
                 CollectCiEvidence => "collect_ci_evidence",
+                CollectDependabotAlerts => "collect_dependabot_alerts",
                 GitCommit => "git_commit",
                 GitMerge => "git_merge",
                 GitPush => "git_push",

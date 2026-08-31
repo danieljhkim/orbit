@@ -2,14 +2,14 @@
 title: Operations as Data — Migration Cookbook
 owner: claude
 last_updated: 2026-07-26
-last_validated: 2026-08-09
+last_validated: 2026-08-31
 status: Accepted
 feature: operations-as-data
 doc_role: reference
 type: design
 summary: Step-by-step procedure for migrating a noun to the operation registry, and for adding a verb to an already-migrated noun.
 tags: [operations-as-data, architecture, adr-0209, cookbook]
-paths: ["crates/orbit-common/src/friction/**", "crates/orbit-cli/src/command/operation_args.rs"]
+paths: ["crates/orbit-common/src/governance/friction/**", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data]
 related_artifacts: [ORB-10358]
 ---
@@ -52,8 +52,8 @@ For a noun with verbs `v₁…vₙ`, find:
 | MCP `Tool` impls | `crates/orbit-tools/src/builtin/orbit/<noun>/*.rs` |
 | MCP registration + workspace scope | `crates/orbit-tools/src/builtin/orbit/mod.rs` |
 | Action enum variants | `crates/orbit-tools/src/lib.rs` (`OrbitBuiltinAction`) |
-| Handler dispatch | `crates/orbit-core/src/runtime/orbit_tool_host/dispatch.rs` |
-| Handlers | `crates/orbit-core/src/runtime/orbit_tool_host/<noun>_tools.rs` |
+| Handler dispatch | `crates/orbit-core/src/adapter/tool_host/dispatch.rs` |
+| Handlers | `crates/orbit-core/src/adapter/tool_host/<noun>_tools.rs` |
 | CLI args + `Execute` impls | `crates/orbit-cli/src/command/<noun>.rs` |
 | CLI audit metadata | `crates/orbit-cli/src/command/operation.rs` |
 | Web handlers | `crates/orbit-web/src/api/<noun>s.rs` |
@@ -100,7 +100,7 @@ compiler cannot:
 - subcommand order matches the shipped `--help` order (assert the literal list);
 - MCP exposure matches `docs/design/mcp-bridge/references/conformance-v1.yaml`.
 
-See `crates/orbit-common/src/friction/tests.rs`.
+See `crates/orbit-common/src/governance/friction/tests/mod.rs`.
 
 ### Step 4. Collapse the action enum
 

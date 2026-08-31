@@ -137,6 +137,17 @@ routine an operator has edited is never deleted: it is preserved under
 `.retired-managed/routines/`. `orbit doctor` reports routine artifacts as faulty,
 deprecated, or stale, and `orbit doctor --fix-stale-artifacts` performs the retirement.
 
+A routines directory carrying no manifest at all predates that provenance, and its routines
+are customized by design — flipping `enabled` and keeping the host pin is the lifecycle the
+templates invite. Content alone cannot separate such a routine from a file the operator wrote
+from scratch, so reconciliation adopts it [ORB-11154]: the binding is parsed from that exact
+on-disk instance, and the bytes already on disk are recorded as the ones Orbit owns. Nothing
+is rewritten, no warning is emitted, and a later shipped-template change refreshes the routine
+onto the adopted binding instead of being reported as a collision forever. Adoption is skipped
+for a file that does not parse as a routine or whose binding could not be re-rendered later,
+and once the directory has a manifest, a shipped name the manifest does not claim is genuinely
+user-authored and is still reported and preserved in place.
+
 The seeded `ci_failure_sweep` targets `job:ci_failure_sweep_pipeline` hourly at
 `5 * * * *` — deliberately clear of the other defaults' minutes — with `missed_run: skip`
 and `overlap: forbid`. Its two deterministic steps run every GitHub query on the host and

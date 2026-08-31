@@ -19,8 +19,8 @@ Move the docs + search feature out of orbit-core into a library plus embedded
 command-layer pair:
 
 - **`orbit-docs`** (feature crate): corpus domain — `DocRecord`, docs-root walking, frontmatter,
-  doc/ADR lexical search-source builders, doc/ADR embedding-source builders, doc/ADR index +
-  search orchestration. Depends on `orbit-common`, `orbit-search`, `orbit-store` (Adr types) only.
+  doc lexical and embedding source builders, doc index + search orchestration. Depends on
+  `orbit-common`, `orbit-search`, and `orbit-types` only.
 - **`orbit-docs-cli`** (thin clap `Command` enum + `run(ctx)`): embedded by orbit-cli under
   `orbit docs` / `orbit search` / `orbit semantic`, [Workspace_path-addressable MCP host tools with surface-scoped containment](../mcp-session-context/4_decisions.md#workspacepath-addressable-mcp-host-tools-with-surface-scoped-containment) style. Depends only on `orbit-docs`.
 
@@ -41,10 +41,10 @@ docs/search in core during ORB-10016.
 
 | Piece | Today | Disposition |
 |---|---|---|
-| `orbit-core/src/command/docs/` (~2.3k LOC, 13 modules) | corpus walking, frontmatter, list/show/add, doc+ADR source builders, index params, migrate | **moves** to `orbit-docs` |
-| `orbit-core/src/command/search/` doc/ADR branches | hybrid scoring branches of `global_search` | **moves** to `orbit-docs` |
-| `global_search` orchestration + task/learning branches | merges 4 domains into `GlobalSearchResponse` | **stays** in orbit-core (cross-domain merger is runtime-level; it consumes `orbit-docs` for the doc/ADR branches) |
-| `command/semantic.rs` (139 LOC) | thin dispatch to orbit-search commands | **stays** as thin delegates (or trims further) |
+| `orbit-core/src/application/docs/` | corpus walking, frontmatter, list/show/add, doc source builders, index params, migrate | **moves** to `orbit-docs` |
+| `orbit-core/src/application/search/` doc branch | hybrid scoring branch of `global_search` | **moves** to `orbit-docs` |
+| `global_search` orchestration + task/friction branches | merges 3 domains into `GlobalSearchResponse` | **stays** in orbit-core (cross-domain merger is runtime-level; it consumes `orbit-docs` for the doc branch) |
+| `application/semantic.rs` plus the CLI semantic command | thin dispatch to orbit-search commands | **stays** as thin delegates (or trims further) |
 | Tool hosts (`docs_tools`, `search_tools`, `semantic_tools`, `task_tools::related_docs_for_context`, ~220 LOC) | expose feature as agent tools | **stay** in orbit-core; repointed to call `orbit-docs` via delegates |
 | `builder.rs` VectorStore + EmbedWorker init; `store_delegates.rs` task enqueue/delete cascade | task-mutation indexing plumbing | **stays** — task-domain, out of scope for this pilot |
 | `orbit-search` (7.8k LOC leaf) | scoring, vector store, companion RPC, install/uninstall | **unchanged** |
@@ -54,37 +54,38 @@ docs/search in core during ORB-10016.
 
 1. **Characterize.** Golden-output tests over `orbit docs list/show/index`, `orbit search`,
    `orbit semantic stats/index` (JSON snapshots). These gate every later phase.
-2. **Extract `orbit-docs`.** `git mv` the docs modules + doc/ADR search branches; convert
+2. **Extract `orbit-docs`.** `git mv` the docs modules + doc search branch; convert
    `&OrbitRuntime` params to an explicit `DocsContext` (roots, configs, `&VectorStore`).
    orbit-core keeps delegate methods so orbit-cli/tool hosts compile unchanged. Add the
    dependency-direction guard edge (`orbit-core -> orbit-docs`, never reverse).
 3. **Plug at orbit-cli.** Create `orbit-docs-cli` (Command enum + run), embed under the existing
-   subcommand names; delete the thick Execute impls. Fix the `orbit docs index` →
-   `semantic_index(IndexKind::Docs)` cross-call while touching it — give docs its own index verb.
+   subcommand names; delete the thick Execute impls. Preserve the existing dedicated
+   `orbit docs index` verb while moving its implementation.
 4. **Trim + document.** Repoint tool hosts through the delegates onto `orbit-docs`; trim
    orbit-core re-exports freed by the move; ARCHITECTURE.md, website crate docs, stability
    markers (`orbit-docs`: internal), and the ADR recording the boundary.
 
 ## Size
 
-~5.5k LOC moved (mostly mechanical, `git mv`-preserving), ~500–700 LOC new glue
-(context struct, CLI crate, guard, tests). Comparable to ORB-10016 in mechanics, smaller in
-API-surface churn. 4 PRs.
+The original ~5.5k LOC estimate predates the current `application/docs` split; re-estimate
+after the characterization phase. The move should remain mostly mechanical, with new glue
+for the explicit context, CLI crate, guard, and tests. Comparable to ORB-10016 in mechanics,
+smaller in API-surface churn. 4 PRs.
 
 ## Risks
 
 - **Golden-output drift** — hybrid ranking is fiddly; phase 1 snapshots are the mitigation.
 - **Config leakage** — `DocsContext` must stay data-only; if config *layering* logic creeps into
   `orbit-docs`, the boundary failed. Layering resolution stays in orbit-core.
-- **`global_search` split line** — doc/ADR branch extraction must not change merged ranking;
+- **`global_search` split line** — doc branch extraction must not change merged ranking;
   covered by snapshots.
 - **EmbedWorker semantics** — async, lossy-by-design (batches, drops on queue-full, debug-level
   failures). Out of scope; do not "fix" in passing.
 
 ## Open questions
 
-1. Naming: `orbit-docs` vs `orbit-corpus`? (ADR + learning embedding sources also live in the
-   corpus — "docs" undersells it slightly.)
+1. Naming: `orbit-docs` vs `orbit-corpus`? (The corpus may eventually include other knowledge
+   sources — "docs" could undersell it slightly.)
 2. Do the `orbit semantic` verbs move under the plugin CLI or stay core-side? (Install/uninstall
    are companion lifecycle — arguably orbit-search's CLI, not docs'.)
 3. Standalone binary or embed-only? The separately installed
@@ -92,5 +93,5 @@ API-surface churn. 4 PRs.
    dependencies; docs commands have no comparable isolation need. Standalone
    also requires config resolution without `OrbitRuntime`, so prefer embed-only
    for the pilot.
-4. Does `LearningEmbeddingSource` projection (built inline in semantic.rs from
-   `runtime.list_learnings()`) stay core-side? Suggest yes — learnings are runtime domain.
+4. Do projections from other runtime-owned knowledge surfaces stay core-side? Suggest yes —
+   those surfaces remain runtime-domain concerns.

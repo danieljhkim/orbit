@@ -19,11 +19,14 @@ pub(super) struct FakeQueries {
     pub(super) repo: Value,
     pub(super) pull_requests: Vec<Value>,
     pub(super) branch_heads: HashMap<String, String>,
-    /// Runs per branch. A `Vec` of pages: each `runs_for_branch` call pops the
-    /// next page, so a test can make CI progress between calls.
-    pub(super) runs: Mutex<HashMap<String, Vec<Vec<Value>>>>,
+    /// Repository-wide run pages. Each `repository_runs` call pops the next
+    /// page, so a test can make CI progress between calls.
+    pub(super) runs: Mutex<Vec<Vec<Value>>>,
     pub(super) run_views: HashMap<String, Value>,
     pub(super) logs: HashMap<(String, bool), String>,
+    pub(super) repository_runs_error: Option<String>,
+    pub(super) run_view_errors: HashMap<String, String>,
+    pub(super) log_errors: HashMap<(String, bool), String>,
 }
 
 impl FakeQueries {
@@ -60,16 +63,35 @@ impl FakeQueries {
         self
     }
 
-    pub(super) fn with_runs(self, branch: &str, pages: Vec<Vec<Value>>) -> Self {
-        self.runs
-            .lock()
-            .expect("runs lock")
-            .insert(branch.to_string(), pages);
+    pub(super) fn with_pull_request(mut self, pull_request: Value) -> Self {
+        self.pull_requests.push(pull_request);
+        self
+    }
+
+    pub(super) fn with_runs(self, pages: Vec<Vec<Value>>) -> Self {
+        *self.runs.lock().expect("runs lock") = pages;
         self
     }
 
     pub(super) fn with_run_view(mut self, run_id: &str, view: Value) -> Self {
         self.run_views.insert(run_id.to_string(), view);
+        self
+    }
+
+    pub(super) fn with_repository_runs_error(mut self, message: &str) -> Self {
+        self.repository_runs_error = Some(message.to_string());
+        self
+    }
+
+    pub(super) fn with_run_view_error(mut self, run_id: &str, message: &str) -> Self {
+        self.run_view_errors
+            .insert(run_id.to_string(), message.to_string());
+        self
+    }
+
+    pub(super) fn with_log_error(mut self, run_id: &str, all_scope: bool, message: &str) -> Self {
+        self.log_errors
+            .insert((run_id.to_string(), all_scope), message.to_string());
         self
     }
 
@@ -102,19 +124,22 @@ impl CiQueries for FakeQueries {
             .collect())
     }
 
-    fn runs_for_branch(&self, branch: &str, _limit: u64) -> Result<Vec<Value>, OrbitError> {
+    fn repository_runs(&self, _limit: u64) -> Result<Vec<Value>, OrbitError> {
+        if let Some(message) = &self.repository_runs_error {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         let mut runs = self.runs.lock().expect("runs lock");
-        let Some(pages) = runs.get_mut(branch) else {
-            return Ok(Vec::new());
-        };
-        if pages.len() > 1 {
-            Ok(pages.remove(0))
+        if runs.len() > 1 {
+            Ok(runs.remove(0))
         } else {
-            Ok(pages.first().cloned().unwrap_or_default())
+            Ok(runs.first().cloned().unwrap_or_default())
         }
     }
 
     fn run_view(&self, run_id: &str) -> Result<Value, OrbitError> {
+        if let Some(message) = self.run_view_errors.get(run_id) {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         Ok(self
             .run_views
             .get(run_id)
@@ -128,6 +153,12 @@ impl CiQueries for FakeQueries {
         scope: LogScope,
         max_bytes: usize,
     ) -> Result<RunLog, OrbitError> {
+        if let Some(message) = self
+            .log_errors
+            .get(&(run_id.to_string(), scope == LogScope::All))
+        {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         let raw = self
             .logs
             .get(&(run_id.to_string(), scope == LogScope::All))
@@ -161,4 +192,18 @@ pub(super) fn run(
         "created_at": created_at,
         "url": format!("https://github.com/acme/orbit/actions/runs/{run_id}"),
     })
+}
+
+pub(super) fn run_on_branch(
+    run_id: u64,
+    workflow: &str,
+    branch: &str,
+    sha: &str,
+    status: &str,
+    conclusion: Option<&str>,
+    created_at: &str,
+) -> Value {
+    let mut value = run(run_id, workflow, sha, status, conclusion, created_at);
+    value["head_branch"] = json!(branch);
+    value
 }

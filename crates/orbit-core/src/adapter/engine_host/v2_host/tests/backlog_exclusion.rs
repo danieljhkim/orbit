@@ -4,6 +4,7 @@ use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::adapter::engine_host::v2_host::backlog_exclusion::sort_tasks_for_automatic_dispatch;
 use crate::adapter::engine_host::v2_host::test_support::{
     runtime_with_workspace_layout, seed_list_backlog_task, write_workspace_file,
 };
@@ -135,6 +136,156 @@ fn list_backlog_tasks_preserves_existing_fields_without_conflicts() {
         ])
     );
     assert_eq!(output["excluded"], json!([]));
+}
+
+#[test]
+fn automatic_backlog_selection_prioritizes_critical_then_corrective_work() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let feature = seed_list_backlog_task(
+        &runtime,
+        "High feature",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Feature,
+        None,
+        vec![],
+    );
+    let bug = seed_list_backlog_task(
+        &runtime,
+        "Low bug",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Bug,
+        None,
+        vec![],
+    );
+    let critical = seed_list_backlog_task(
+        &runtime,
+        "Critical feature",
+        TaskStatus::Backlog,
+        TaskPriority::Critical,
+        TaskType::Feature,
+        None,
+        vec![],
+    );
+
+    let output = list_backlog_tasks(&runtime, json!({ "max_tasks": 1 }));
+    assert_eq!(output["task_ids"], json!([critical.id]));
+
+    runtime
+        .update_task(
+            &critical.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .expect("complete critical task");
+    let output = list_backlog_tasks(&runtime, json!({ "max_tasks": 1 }));
+    assert_eq!(output["task_ids"], json!([bug.id]));
+    assert_ne!(output["task_ids"], json!([feature.id]));
+}
+
+#[test]
+fn only_exact_review_tags_enter_the_corrective_band() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let title_only = runtime
+        .add_task(TaskAddParams {
+            title: "[code-review] Title provenance is not structured".to_string(),
+            description: "Fixture task".to_string(),
+            acceptance_criteria: vec!["Selected deterministically".to_string()],
+            plan: "Fixture plan".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed title-only task");
+    let partial_tag = runtime
+        .add_task(TaskAddParams {
+            title: "Review sweep".to_string(),
+            description: "Fixture task".to_string(),
+            acceptance_criteria: vec!["Selected deterministically".to_string()],
+            tags: vec!["code-review-sweep".to_string()],
+            plan: "Fixture plan".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed partial-tag task");
+    let unrelated_tag = runtime
+        .add_task(TaskAddParams {
+            title: "QA follow-up".to_string(),
+            description: "Fixture task".to_string(),
+            acceptance_criteria: vec!["Selected deterministically".to_string()],
+            tags: vec!["review".to_string()],
+            plan: "Fixture plan".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed unrelated-tag task");
+    let code_review = runtime
+        .add_task(TaskAddParams {
+            title: "Confirmed code review finding".to_string(),
+            description: "Fixture task".to_string(),
+            acceptance_criteria: vec!["Selected deterministically".to_string()],
+            tags: vec!["code-review".to_string()],
+            plan: "Fixture plan".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed code-review task");
+    let security_review = runtime
+        .add_task(TaskAddParams {
+            title: "Confirmed security review finding".to_string(),
+            description: "Fixture task".to_string(),
+            acceptance_criteria: vec!["Selected deterministically".to_string()],
+            tags: vec!["security-review".to_string()],
+            plan: "Fixture plan".to_string(),
+            status: Some(TaskStatus::Backlog),
+            task_type: Some(TaskType::Chore),
+            ..Default::default()
+        })
+        .expect("seed security-review task");
+
+    let output = list_backlog_tasks(&runtime, json!({}));
+
+    assert_eq!(
+        output_task_ids(&output),
+        vec![
+            code_review.id,
+            security_review.id,
+            title_only.id,
+            partial_tag.id,
+            unrelated_tag.id,
+        ]
+    );
+}
+
+#[test]
+fn automatic_dispatch_uses_task_id_as_the_total_tie_breaker() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let mut task_two = seed_list_backlog_task(
+        &runtime,
+        "Second ID",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let mut task_one = task_two.clone();
+    task_two.id = "ORB-00002".to_string();
+    task_one.id = "ORB-00001".to_string();
+    let mut tasks = vec![task_two, task_one];
+
+    sort_tasks_for_automatic_dispatch(&mut tasks);
+
+    assert_eq!(
+        tasks.into_iter().map(|task| task.id).collect::<Vec<_>>(),
+        vec!["ORB-00001", "ORB-00002"]
+    );
 }
 
 #[test]
@@ -512,11 +663,20 @@ fn list_backlog_tasks_omits_excluded_for_explicit_task_ids() {
         None,
         vec!["crates/foo/src/lib.rs"],
     );
+    let corrective = seed_list_backlog_task(
+        &runtime,
+        "Corrective task",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Bug,
+        None,
+        vec![],
+    );
 
-    let output = list_backlog_tasks(&runtime, json!({ "task_ids": [backlog.id] }));
+    let output = list_backlog_tasks(&runtime, json!({ "task_ids": [backlog.id, corrective.id] }));
 
-    assert_eq!(output["task_count"], json!(1));
-    assert_eq!(output["task_ids"], json!([backlog.id]));
+    assert_eq!(output["task_count"], json!(2));
+    assert_eq!(output["task_ids"], json!([backlog.id, corrective.id]));
     assert!(output.get("excluded").is_none());
 }
 

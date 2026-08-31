@@ -1,0 +1,58 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: file_dependabot_alert_tasks
+spec:
+  type: deterministic
+  description: >
+    File bounded, evidence-complete backlog tasks from a host-collected
+    Dependabot, Code scanning, and secret scanning snapshot. Preserve
+    Dependabot clustering, severity filtering, and PR skips; dedupe the other
+    families by repository and alert number; and enforce one max_tasks bound
+    across all families. Filed tasks require no tools.
+  input_schema_json:
+    type: object
+    required: [dependabot_snapshot]
+    properties:
+      dependabot_snapshot:
+        type: object
+      min_severity:
+        type: string
+        enum: [low, moderate, high, critical]
+        default: high
+        description: >
+          Minimum severity filed for Dependabot and Code scanning alerts.
+          Secret scanning alerts are always filed regardless of this floor.
+      skip_when_dependabot_pr_open:
+        type: boolean
+        default: true
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 50
+  output_schema_json:
+    type: object
+    required: [outcome, collection_outcome, family_outcomes, clusters, filed_count, filed, skipped_existing, skipped_dependabot_pr, skipped_over_cap, excluded_below_min_severity]
+    properties:
+      outcome:
+        type: string
+      collection_outcome:
+        type: string
+      family_outcomes:
+        type: object
+      clusters:
+        type: number
+      filed_count:
+        type: number
+      filed:
+        type: array
+      skipped_existing:
+        type: array
+      skipped_dependabot_pr:
+        type: array
+      skipped_over_cap:
+        type: array
+      excluded_below_min_severity:
+        type: array
+  action: file_dependabot_alert_tasks
+  config: {}

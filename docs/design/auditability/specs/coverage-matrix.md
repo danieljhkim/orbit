@@ -1,7 +1,7 @@
 ---
 type: design
 summary: Spec: Audit Coverage Matrix
-last_validated: 2026-08-02
+last_validated: 2026-08-31
 ---
 
 # Spec: Audit Coverage Matrix
@@ -21,14 +21,14 @@ Every Orbit operation that touches code, task state, persistent runtime state, e
 | MCP tool preflight or dispatch | Command audit row | tool, status, trusted workspace/caller/process, transport, full capability set, origin session, unique call id, optional run/lease |
 | Task lifecycle update | Command/tool audit plus task history | task id, actor, status transition or document field changed |
 | Task lock reservation/check/release | Targeted command audit row | reservation target, files payload, status, conflict/denial state |
-| Activity/job run | V2 envelope JSONL | run id, agent identity, run start/finish |
-| Activity/job step | V2 envelope JSONL | run id, step id, outcome or skip/retry reason |
-| Filesystem policy decision inside v2 run | V2 envelope JSONL | profile, op, path, allowed, matched rule |
+| Activity/job run | V2 envelope audit row | run id, agent identity, run start/finish |
+| Activity/job step | V2 envelope audit row | run id, step id, outcome or skip/retry reason |
+| Filesystem policy decision inside v2 run | V2 envelope audit row | profile, op, path, allowed, matched rule |
 | Filesystem or proc-spawn policy denial live projection | Global tracing JSONL | target, tool, path, profile, matched_rule |
 | Friction task submission live projection | Global tracing JSONL | target, task_id, agent, model, summary |
-| HTTP provider turn | Loop audit JSONL plus blob store | run id, session id, provider, model, request/response blob hashes |
-| Tool call inside HTTP loop | Loop audit JSONL plus blob store | run id, session id, tool name, input/output blob hashes, outcome |
-| CLI backend provider invocation | V2 envelope JSONL | provider, redacted argv, stdin/stdout/stderr blob refs, timeout, exit code |
+| HTTP provider turn | Loop audit row plus blob store | run id, session id, provider, model, request/response blob hashes |
+| Tool call inside HTTP loop | Loop audit row plus blob store | run id, session id, tool name, input/output blob hashes, outcome |
+| CLI backend provider invocation | V2 envelope audit row | provider, redacted argv, stdin/stdout/stderr blob refs, timeout, exit code |
 | Invocation cost/usage | Invocation store | job run id, activity id, task ids, agent, model, token usage, tool-call summary |
 | Audit export/prune | Command audit row (planned) | command, actor, target, status |
 

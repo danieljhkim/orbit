@@ -15,11 +15,13 @@ spec:
     lock exclusions; it does not report status-based admission or `max_tasks`
     truncation. Explicit `task_ids` input is treated as an override, skips
     conflict filtering, and omits `excluded`.
-    Sorts critical → high → medium → low, then by `created_at` ascending so
-    older high-priority work ships first. Caps at `max_tasks` (default 50) to
-    keep the agent's context window bounded. Also emits conservative singleton
-    `bundles` so downstream dispatch can proceed without depending on an
-    agent's final response payload.
+    Automatic ordering puts critical tasks first, then corrective tasks (`bug`
+    type or an exact `code-review` / `security-review` tag), then all remaining
+    work. Within each band it sorts critical → high → medium → low,
+    followed by `created_at` ascending and task ID ascending. Caps at
+    `max_tasks` (default 50) to keep the agent's context window bounded. Also
+    emits conservative singleton `bundles` so downstream dispatch can proceed
+    without depending on an agent's final response payload.
   input_schema_json:
     type: object
     properties:

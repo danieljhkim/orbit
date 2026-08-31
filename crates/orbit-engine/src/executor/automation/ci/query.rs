@@ -25,18 +25,18 @@ use serde_json::{Value, json};
 /// to report *that*, and an error return would be indistinguishable from the
 /// query itself being broken.
 #[derive(Debug, Clone)]
-pub(super) struct AuthStatus {
-    pub(super) available: bool,
-    pub(super) authenticated: bool,
-    pub(super) detail: String,
+pub(in crate::executor::automation) struct AuthStatus {
+    pub(in crate::executor::automation) available: bool,
+    pub(in crate::executor::automation) authenticated: bool,
+    pub(in crate::executor::automation) detail: String,
 }
 
 impl AuthStatus {
-    pub(super) fn usable(&self) -> bool {
+    pub(in crate::executor::automation) fn usable(&self) -> bool {
         self.available && self.authenticated
     }
 
-    pub(super) fn to_json(&self) -> Value {
+    pub(in crate::executor::automation) fn to_json(&self) -> Value {
         json!({
             "available": self.available,
             "authenticated": self.authenticated,
@@ -91,7 +91,8 @@ pub(super) trait CiQueries {
     /// GitHub itself reports it, never inferred from a naming convention.
     fn repo_view(&self) -> Result<Value, OrbitError>;
     fn open_pull_requests(&self, limit: u64) -> Result<Vec<Value>, OrbitError>;
-    fn runs_for_branch(&self, branch: &str, limit: u64) -> Result<Vec<Value>, OrbitError>;
+    /// Recent runs across the whole repository, without a branch filter.
+    fn repository_runs(&self, limit: u64) -> Result<Vec<Value>, OrbitError>;
     fn run_view(&self, run_id: &str) -> Result<Value, OrbitError>;
     fn run_logs(
         &self,
@@ -188,8 +189,8 @@ impl CiQueries for HostCiQueries {
             .unwrap_or_default())
     }
 
-    fn runs_for_branch(&self, branch: &str, limit: u64) -> Result<Vec<Value>, OrbitError> {
-        let request = github_cli::run_list_request(&json!({"branch": branch, "limit": limit}))?;
+    fn repository_runs(&self, limit: u64) -> Result<Vec<Value>, OrbitError> {
+        let request = github_cli::run_list_request(&json!({"limit": limit}))?;
         let stdout = self.run_gh(request, "gh run list")?;
         let parsed = github_cli::parse_gh_json(&stdout, "gh run list")?;
         Ok(parsed
