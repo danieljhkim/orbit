@@ -48,7 +48,7 @@ spec:
     # ships onto a separate integration branch — set it in the workspace copy
     # of this job when they differ, the same way `task_pr_pipeline` carries
     # `base_branch`.
-    integration_branch: ""
+    integration_branch: "agent-main"
     max_tasks: 5
     max_investigated_runs: 6
 
