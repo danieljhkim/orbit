@@ -150,23 +150,28 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
     let mut current: Vec<Value> = Vec::new();
     let mut stale: Vec<Value> = Vec::new();
     let mut in_flight: Vec<Value> = Vec::new();
-    let mut runs_listed = 0usize;
-
-    for scanned in &refs {
-        let runs = match queries.runs_for_branch(&scanned.branch, bounds.runs_per_ref) {
-            Ok(runs) => runs,
-            Err(error) => {
-                query_errors.push(json!({
-                    "query": "run_list",
-                    "branch": scanned.branch,
-                    "error": error.to_string(),
-                }));
-                continue;
-            }
-        };
-        runs_listed += runs.len();
-        partition_runs(scanned, &runs, &mut current, &mut stale, &mut in_flight);
+    // This query is deliberately repository-wide. Enumerating the integration,
+    // release, and open-PR refs separately lets an unchanged old ref keep an
+    // obsolete failure alive forever. One repository-wide list lets us choose
+    // exactly one latest run for every workflow represented in the snapshot.
+    let runs = match queries.repository_runs(bounds.runs_per_ref) {
+        Ok(runs) => runs,
+        Err(error) => {
+            query_errors.push(json!({
+                "query": "run_list",
+                "error": error.to_string(),
+            }));
+            Vec::new()
+        }
+    };
+    let runs_listed = runs.len();
+    if runs_listed as u64 == bounds.runs_per_ref {
+        notes.push(format!(
+            "repository-wide workflow runs were listed at the cap ({}); older workflows may be absent",
+            bounds.runs_per_ref
+        ));
     }
+    partition_runs(&refs, &runs, &mut current, &mut stale, &mut in_flight);
 
     sort_current_failures(&mut current);
     let discovered = current.len();
@@ -345,76 +350,78 @@ fn head_json(scanned: &ScannedRef) -> Value {
     })
 }
 
-/// Split one ref's runs into current failures, stale/superseded failures, and
-/// runs that have not produced a verdict yet.
+/// Evaluate exactly the latest repository-wide run for each workflow.
+///
+/// Older unsuccessful runs remain useful evidence, but they can never become
+/// current merely because the ref they ran on has not advanced. The latest run
+/// supersedes them regardless of branch, SHA, status, or conclusion.
 fn partition_runs(
-    scanned: &ScannedRef,
+    refs: &[ScannedRef],
     runs: &[Value],
     current: &mut Vec<Value>,
     stale: &mut Vec<Value>,
     in_flight: &mut Vec<Value>,
 ) {
+    let mut workflows = std::collections::BTreeMap::<String, Vec<&Value>>::new();
     for run in runs {
-        let reported = run.get("reported_head_sha").and_then(Value::as_str);
-        let at_current_head = match (scanned.head_sha.as_deref(), reported) {
-            (Some(head), Some(reported)) => head == reported,
-            // With no current head to compare against, staleness is unknowable;
-            // reporting the failure is the honest answer.
-            _ => true,
-        };
-        let completed = run.get("status").and_then(Value::as_str) == Some("completed");
-        let conclusion = run.get("conclusion").and_then(Value::as_str);
-
-        if !completed {
-            if at_current_head {
-                in_flight.push(run_summary(scanned, run));
-            }
-            continue;
-        }
-        if !unsuccessful_conclusion(conclusion) {
-            continue;
-        }
-        if !at_current_head {
-            let mut entry = run_summary(scanned, run);
-            entry["reason"] = json!("advanced_head");
-            entry["evidence"] = json!(format!(
-                "branch '{}' has advanced to {} since this run tested {}",
-                scanned.branch,
-                scanned.head_sha.as_deref().unwrap_or("an unknown commit"),
-                reported.unwrap_or("an unreported commit"),
-            ));
-            stale.push(entry);
-            continue;
-        }
-        if let Some(superseding) = superseding_success(runs, run) {
-            let mut entry = run_summary(scanned, run);
-            entry["reason"] = json!("superseded_by_success");
-            entry["superseded_by"] = json!({
-                "run_id": superseding.get("run_id"),
-                "url": superseding.get("url"),
-                "created_at": superseding.get("created_at"),
-            });
-            stale.push(entry);
-            continue;
-        }
-        current.push(run_summary(scanned, run));
+        let workflow = run
+            .get("workflow")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        workflows.entry(workflow).or_default().push(run);
     }
-}
 
-/// A later successful run of the same workflow at the same reported SHA.
-///
-/// Age alone is never enough to call a failure stale; this is the concrete
-/// evidence that supersedes one.
-fn superseding_success<'a>(runs: &'a [Value], failed: &Value) -> Option<&'a Value> {
-    let workflow = failed.get("workflow")?;
-    let sha = failed.get("reported_head_sha")?;
-    let order = run_order(failed);
-    runs.iter().find(|candidate| {
-        candidate.get("conclusion").and_then(Value::as_str) == Some("success")
-            && candidate.get("workflow") == Some(workflow)
-            && candidate.get("reported_head_sha") == Some(sha)
-            && run_order(candidate) > order
-    })
+    for workflow_runs in workflows.values_mut() {
+        workflow_runs.sort_by_key(|run| std::cmp::Reverse(run_order(run)));
+        let Some(latest) = workflow_runs.first().copied() else {
+            continue;
+        };
+
+        for older in workflow_runs.iter().skip(1).copied() {
+            let completed = older.get("status").and_then(Value::as_str) == Some("completed");
+            let conclusion = older.get("conclusion").and_then(Value::as_str);
+            if completed && unsuccessful_conclusion(conclusion) {
+                let mut entry = run_summary(ref_for_run(refs, older), older);
+                entry["reason"] = json!("superseded_by_newer_workflow_run");
+                entry["evidence"] = json!(format!(
+                    "newer run {} at {} is {} with conclusion {}",
+                    latest
+                        .get("run_id")
+                        .and_then(Value::as_u64)
+                        .map_or_else(|| "unknown".to_string(), |id| id.to_string()),
+                    latest
+                        .get("created_at")
+                        .and_then(Value::as_str)
+                        .unwrap_or("an unknown time"),
+                    latest
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("in an unknown state"),
+                    latest
+                        .get("conclusion")
+                        .and_then(Value::as_str)
+                        .unwrap_or("not yet completed"),
+                ));
+                entry["superseded_by"] = json!({
+                    "run_id": latest.get("run_id"),
+                    "url": latest.get("url"),
+                    "created_at": latest.get("created_at"),
+                    "status": latest.get("status"),
+                    "conclusion": latest.get("conclusion"),
+                });
+                stale.push(entry);
+            }
+        }
+
+        let completed = latest.get("status").and_then(Value::as_str) == Some("completed");
+        let summary = run_summary(ref_for_run(refs, latest), latest);
+        if !completed {
+            in_flight.push(summary);
+        } else if unsuccessful_conclusion(latest.get("conclusion").and_then(Value::as_str)) {
+            current.push(summary);
+        }
+    }
 }
 
 /// Sortable position of a run: creation time first, run id as the tiebreak.
@@ -428,7 +435,12 @@ fn run_order(run: &Value) -> (String, u64) {
     )
 }
 
-fn run_summary(scanned: &ScannedRef, run: &Value) -> Value {
+fn ref_for_run<'a>(refs: &'a [ScannedRef], run: &Value) -> Option<&'a ScannedRef> {
+    let branch = run.get("head_branch").and_then(Value::as_str)?;
+    refs.iter().find(|scanned| scanned.branch == branch)
+}
+
+fn run_summary(scanned: Option<&ScannedRef>, run: &Value) -> Value {
     json!({
         "run_id": run.get("run_id"),
         "workflow": run.get("workflow"),
@@ -439,14 +451,14 @@ fn run_summary(scanned: &ScannedRef, run: &Value) -> Value {
         "url": run.get("url"),
         "created_at": run.get("created_at"),
         "head_branch": run.get("head_branch"),
-        "ref_kind": scanned.kind.as_str(),
-        "pr_number": scanned.pr_number,
-        "pr_url": scanned.pr_url,
+        "ref_kind": scanned.map(|scanned| scanned.kind.as_str()).unwrap_or("other"),
+        "pr_number": scanned.and_then(|scanned| scanned.pr_number.clone()),
+        "pr_url": scanned.and_then(|scanned| scanned.pr_url.clone()),
         // Three commits that are routinely conflated and are kept apart here:
         // what the event reported, what the ref points at now, and — filled in
         // by `investigate` — what the runner actually checked out.
         "event_reported_head_sha": run.get("reported_head_sha"),
-        "current_ref_head_sha": scanned.head_sha,
+        "current_ref_head_sha": scanned.and_then(|scanned| scanned.head_sha.clone()),
         "actual_checkout_shas": Value::Array(Vec::new()),
         "investigated": false,
     })

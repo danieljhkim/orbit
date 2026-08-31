@@ -91,7 +91,8 @@ pub(super) trait CiQueries {
     /// GitHub itself reports it, never inferred from a naming convention.
     fn repo_view(&self) -> Result<Value, OrbitError>;
     fn open_pull_requests(&self, limit: u64) -> Result<Vec<Value>, OrbitError>;
-    fn runs_for_branch(&self, branch: &str, limit: u64) -> Result<Vec<Value>, OrbitError>;
+    /// Recent runs across the whole repository, without a branch filter.
+    fn repository_runs(&self, limit: u64) -> Result<Vec<Value>, OrbitError>;
     fn run_view(&self, run_id: &str) -> Result<Value, OrbitError>;
     fn run_logs(
         &self,
@@ -188,8 +189,8 @@ impl CiQueries for HostCiQueries {
             .unwrap_or_default())
     }
 
-    fn runs_for_branch(&self, branch: &str, limit: u64) -> Result<Vec<Value>, OrbitError> {
-        let request = github_cli::run_list_request(&json!({"branch": branch, "limit": limit}))?;
+    fn repository_runs(&self, limit: u64) -> Result<Vec<Value>, OrbitError> {
+        let request = github_cli::run_list_request(&json!({"limit": limit}))?;
         let stdout = self.run_gh(request, "gh run list")?;
         let parsed = github_cli::parse_gh_json(&stdout, "gh run list")?;
         Ok(parsed
