@@ -1,7 +1,8 @@
+use std::path::Path;
+
 use crate::command::{CommandOut, CommandOutput};
 use clap::Args;
 use orbit_core::routines::resume_routine;
-use orbit_registry::workspace_registry;
 
 #[derive(Args)]
 pub struct RoutineResumeArgs {
@@ -10,9 +11,8 @@ pub struct RoutineResumeArgs {
 }
 
 impl RoutineResumeArgs {
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let global_root = workspace_registry::global_orbit_dir()?;
-        if resume_routine(&global_root, &self.name)? {
+    pub fn execute_without_runtime(self, global_root: &Path) -> CommandOut {
+        if resume_routine(global_root, &self.name)? {
             println!("resumed '{}' on this host", self.name);
         } else {
             println!("'{}' was not paused on this host", self.name);

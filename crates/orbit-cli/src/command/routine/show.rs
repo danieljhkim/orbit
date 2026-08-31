@@ -1,9 +1,10 @@
+use std::path::Path;
+
 use crate::command::{CommandOut, Payload};
 use clap::Args;
 use orbit_cmd::registry_routines::routine_statuses;
 use orbit_core::OrbitError;
 use orbit_core::routines::recent_fires;
-use orbit_registry::workspace_registry;
 use serde_json::json;
 
 const RECENT_FIRE_LIMIT: usize = 10;
@@ -18,9 +19,8 @@ pub struct RoutineShowArgs {
 }
 
 impl RoutineShowArgs {
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let global_root = workspace_registry::global_orbit_dir()?;
-        let report = routine_statuses(&global_root)?;
+    pub fn execute_without_runtime(self, global_root: &Path) -> CommandOut {
+        let report = routine_statuses(global_root)?;
         let Some(status) = report
             .statuses
             .iter()
@@ -31,7 +31,7 @@ impl RoutineShowArgs {
                 self.name
             )));
         };
-        let fires = recent_fires(&global_root, &self.name, RECENT_FIRE_LIMIT)?;
+        let fires = recent_fires(global_root, &self.name, RECENT_FIRE_LIMIT)?;
         let definition = &status.routine.definition;
 
         let doc = json!({

@@ -1,7 +1,8 @@
+use std::path::Path;
+
 use clap::Args;
 use comfy_table::Cell;
 use orbit_cmd::registry_routines::routine_statuses;
-use orbit_registry::workspace_registry;
 use serde_json::json;
 
 use crate::command::{CommandOut, Payload};
@@ -15,9 +16,8 @@ pub struct RoutineListArgs {
 }
 
 impl RoutineListArgs {
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let global_root = workspace_registry::global_orbit_dir()?;
-        let report = routine_statuses(&global_root)?;
+    pub fn execute_without_runtime(self, global_root: &Path) -> CommandOut {
+        let report = routine_statuses(global_root)?;
 
         let statuses: Vec<_> = report
             .statuses

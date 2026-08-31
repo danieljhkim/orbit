@@ -969,9 +969,9 @@ fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> CommandOu
     }
 }
 
-fn dispatch_routine(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
+fn dispatch_routine(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
-        Commands::Routine(command) => command.execute_without_runtime(),
+        Commands::Routine(command) => command.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Routine"),
     }
 }
