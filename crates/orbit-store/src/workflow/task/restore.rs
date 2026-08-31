@@ -38,6 +38,8 @@ pub enum PublicationRecoveryCompleteness {
 /// Pairing inputs and the explicitly selected destination policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicationRestoreRequest {
+    /// Existing task-registry partition that receives restored bundles.
+    pub task_workspace_id: String,
     pub publication: PublicationInspectRequest,
     pub mode: PublicationRestoreMode,
 }
@@ -92,17 +94,18 @@ fn restore_publication_inner(
     // exact result rather than recreating a second validation path.
     let validated = load_validated_publication(request.publication.clone())?;
     let envelope = &validated.inspection.envelope;
-    let workspace_id = envelope.workspace_id.clone();
-    assert_destination_pairing(registry, &request.publication)?;
+    let task_workspace_id = request.task_workspace_id.clone();
+    assert_destination_pairing(registry, &request)?;
 
-    let existing = registry.tasks_for_workspace(&workspace_id)?;
-    let destination_has_entries =
-        canonical_destination_has_entries(registry.workspaces_dir().join(&workspace_id).as_path())?;
+    let existing = registry.tasks_for_workspace(&task_workspace_id)?;
+    let destination_has_entries = canonical_destination_has_entries(
+        registry.workspaces_dir().join(&task_workspace_id).as_path(),
+    )?;
     if request.mode == PublicationRestoreMode::EmptyDestination
         && (!existing.is_empty() || destination_has_entries)
     {
         return Err(restore_error(format!(
-            "workspace '{workspace_id}' is not an empty restore destination"
+            "task workspace '{task_workspace_id}' is not an empty restore destination"
         )));
     }
 
@@ -117,7 +120,8 @@ fn restore_publication_inner(
         let task_id = &published.bundle.envelope.id;
         match registry.find_task_binding(task_id)? {
             None => {
-                let destination = registry.canonical_task_bundle_path(&workspace_id, task_id)?;
+                let destination =
+                    registry.canonical_task_bundle_path(&task_workspace_id, task_id)?;
                 if destination.exists() {
                     return Err(restore_error(format!(
                         "canonical path for task '{task_id}' exists without a registry binding"
@@ -126,7 +130,7 @@ fn restore_publication_inner(
                 missing.push(published);
             }
             Some(binding) => {
-                let identical = binding.workspace_id == workspace_id
+                let identical = binding.workspace_id == task_workspace_id
                     && read_bundle_at(&binding.canonical_path)
                         .is_ok_and(|bundle| bundle == published.bundle);
                 if request.mode != PublicationRestoreMode::AllowIdenticalRetry || !identical {
@@ -152,7 +156,7 @@ fn restore_publication_inner(
         ));
     }
 
-    let workspace_root = registry.workspaces_dir().join(&workspace_id);
+    let workspace_root = registry.workspaces_dir().join(&task_workspace_id);
     fs::create_dir_all(&workspace_root)
         .map_err(|error| OrbitError::from_write_io(&workspace_root, error))?;
     let staging = tempfile::Builder::new()
@@ -170,7 +174,7 @@ fn restore_publication_inner(
         .collect::<Vec<_>>();
     let mut guard = RestoreGuard::new(
         registry,
-        workspace_id.clone(),
+        task_workspace_id.clone(),
         previous_envelopes,
         previous_allocator,
     );
@@ -178,7 +182,7 @@ fn restore_publication_inner(
     for (index, published) in missing.iter().enumerate() {
         let task_id = &published.bundle.envelope.id;
         let source = staging.path().join(task_id);
-        let destination = registry.canonical_task_bundle_path(&workspace_id, task_id)?;
+        let destination = registry.canonical_task_bundle_path(&task_workspace_id, task_id)?;
         fs::rename(&source, &destination)
             .map_err(|error| OrbitError::from_write_io(&destination, error))?;
         guard.published_dirs.push(destination);
@@ -188,16 +192,16 @@ fn restore_publication_inner(
     }
 
     for task_id in &restored_ids {
-        let path = registry.canonical_task_bundle_path(&workspace_id, task_id)?;
-        registry.register_task_bundle(task_id, &workspace_id, &path)?;
+        let path = registry.canonical_task_bundle_path(&task_workspace_id, task_id)?;
+        registry.register_task_bundle(task_id, &task_workspace_id, &path)?;
         guard.registered_ids.push(task_id.clone());
     }
 
-    rebuild_workspace_index(registry, &workspace_id)?;
+    rebuild_workspace_index(registry, &task_workspace_id)?;
     inject(failure, RestoreFailurePoint::IndexRebuild)?;
 
-    let projection = if let Some(checkout) = registry.find_workspace_checkout(&workspace_id)? {
-        let swap = ProjectionSwap::publish(registry, &checkout.orbit_dir, &workspace_id)?;
+    let projection = if let Some(checkout) = registry.find_workspace_checkout(&task_workspace_id)? {
+        let swap = ProjectionSwap::publish(registry, &checkout.orbit_dir, &task_workspace_id)?;
         let result = swap.result.clone();
         guard.projection = Some(swap);
         inject(failure, RestoreFailurePoint::ProjectionRebuild)?;
@@ -227,30 +231,32 @@ fn restore_publication_inner(
 
 fn assert_destination_pairing(
     registry: &TaskRegistryStore,
-    request: &PublicationInspectRequest,
+    request: &PublicationRestoreRequest,
 ) -> Result<(), OrbitError> {
     let binding = registry
-        .find_workspace_binding(&request.workspace_id)?
+        .find_workspace_binding(&request.task_workspace_id)?
         .ok_or_else(|| {
             restore_error(format!(
-                "workspace '{}' is not registered",
-                request.workspace_id
+                "task workspace '{}' is not registered",
+                request.task_workspace_id
             ))
         })?;
-    if binding.workspace_id != request.workspace_id {
+    if binding.workspace_id != request.task_workspace_id {
         return Err(restore_error(
-            "workspace selector resolved to another workspace",
+            "task workspace selector resolved to another workspace",
         ));
     }
     match binding.repo_fingerprint.as_deref() {
-        Some(fingerprint) if fingerprint == request.source_repository_fingerprint => Ok(()),
+        Some(fingerprint) if fingerprint == request.publication.source_repository_fingerprint => {
+            Ok(())
+        }
         Some(fingerprint) => Err(restore_error(format!(
             "source repository fingerprint mismatch: destination has '{fingerprint}', publication expects '{}'",
-            request.source_repository_fingerprint
+            request.publication.source_repository_fingerprint
         ))),
         None => Err(restore_error(format!(
-            "workspace '{}' has no registered source repository fingerprint; restore never adopts one implicitly",
-            request.workspace_id
+            "task workspace '{}' has no registered source repository fingerprint; restore never adopts one implicitly",
+            request.task_workspace_id
         ))),
     }
 }
