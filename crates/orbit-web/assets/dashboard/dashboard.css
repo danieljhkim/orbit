@@ -541,6 +541,40 @@
       #friction-search:focus {
         border-color: var(--accent);
       }
+
+      .friction-filter-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--fg-dim);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      #friction-status-filter {
+        min-width: 116px;
+        background: var(--bg-elev);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        padding: 6px 28px 6px 10px;
+        font: inherit;
+        font-size: 12px;
+        outline: none;
+      }
+
+      #friction-status-filter:focus-visible {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+
+      @media (max-width: 520px) {
+        #friction-search { flex: 1 1 100%; }
+        .friction-filter-control { flex: 1 1 100%; }
+        #friction-status-filter { flex: 1; }
+      }
       
       #task-filter {
         display: flex;

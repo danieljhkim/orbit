@@ -887,6 +887,47 @@ fn dashboard_knowledge_detail_pane_is_sticky_and_internally_scrollable() {
     assert!(sticky_at < unpin_at);
 }
 
+#[test]
+fn dashboard_friction_list_defaults_to_active_and_filters_by_status() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let app = include_str!("../../assets/dashboard/app.js");
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    assert!(
+        index.contains(r#"<label class="friction-filter-control" for="friction-status-filter">"#)
+            && index
+                .contains(r#"<select id="friction-status-filter" aria-controls="frictions-body">"#),
+        "the status filter must have a visible label and name the list it controls"
+    );
+    for option in ["active", "open", "triaged", "resolved", "all"] {
+        assert!(
+            index.contains(&format!(r#"<option value="{option}""#)),
+            "the friction status filter must expose {option}"
+        );
+    }
+    assert!(
+        app.contains(r#"const DEFAULT_FRICTION_STATUS_FILTER = "active";"#)
+            && app.contains(
+                r#"frictionStatusFilter === "active" ? ["open", "triaged"] : [frictionStatusFilter]"#,
+            ),
+        "the initial list must fetch open and triaged independently so resolved history cannot consume its limit"
+    );
+    assert!(
+        app.contains(r#"if (status !== "all") sp.set("status", status);"#)
+            && app.contains(r#"if (frictionSearchQuery) sp.set("q", frictionSearchQuery);"#),
+        "status and text search must compose in every list request"
+    );
+    assert!(
+        app.contains("activeFrictionId = null;") && app.contains(".slice(0, FRICTION_LIMIT);"),
+        "filter changes must reset stale selection and the merged active view must honor the shared limit"
+    );
+    assert!(
+        css.contains("#friction-status-filter:focus-visible")
+            && css.contains(".friction-filter-control { flex: 1 1 100%; }"),
+        "the filter needs visible keyboard focus and a narrow-screen layout"
+    );
+}
+
 /// ORB-10444: the Tasks tab's two write actions. Ship is one click — the
 /// dispatch carries the task id alone, so the pipeline resolves the crew from
 /// the task and the mode from the workspace — and comments post to the
