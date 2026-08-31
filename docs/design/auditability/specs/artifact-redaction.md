@@ -2,7 +2,7 @@
 type: design
 summary: "Spec: Artifact Write Redaction"
 tags: ["auditability"]
-last_validated: 2026-08-02
+last_validated: 2026-08-31
 ---
 
 # Spec: Artifact Write Redaction
@@ -15,12 +15,12 @@ This is the author-facing inventory for the shipped artifact-write redactor. Red
 
 | Tool | Free text (`redact_all` + `redact_home_dir`) | Path-only (`redact_home_dir`) | Skip |
 |------|----------------------------------------------|-------------------------------|------|
-| `orbit.adr.add` / `orbit.adr.update` | `title`, `body` | - | status, owner, related ids/features/tasks, legacy ids |
+| `orbit.adr.add` / `orbit.adr.restore` / `orbit.adr.update` | `title`, `body` | - | status, owner, related ids/features/tasks, legacy ids |
 | `orbit.adr.supersede` | - | - | `old_id`, `new_id` |
 | `orbit.task.add` | `title`, `description`, `plan`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context`, `external_refs[].url` | workspace, ids, enums, dependency/relation targets, crew, tags |
 | `orbit.task.update` | `title`, `description`, `plan`, `execution_summary`, `acceptance_criteria[]`, `comment` | `context_files[]`, `context` | provenance/status/identity fields, tags, raw artifacts |
 | `orbit.task.reject` | `note`, `comment` | - | `id` |
-| `orbit.friction.add` | `body` | - | `model`, `during_task`, tags |
+| `orbit.friction.add` | `body` / `description` | - | `model`, `during_task`, tags |
 | `orbit.friction.update` | `body` | - | `id`, status, tags |
 | `orbit.auto_task.add` / `orbit.auto_task.update` | `description`, `template.title`, `template.description`, `template.acceptance_criteria[]` | - | name, schedule, dedupe, template enums/tags |
 | `orbit.docs.add` | - | - | DocsAdd only registers a validated repo-relative path; it does not persist document content. |
@@ -45,11 +45,7 @@ SSH replacements are class-labelled as `[REDACTED_SSH_FINGERPRINT]`, `[REDACTED_
 
 ## Refuse vs Mask
 
-Free-text fields reject a value that is exactly one high-confidence credential token:
-
-- `^sk-[A-Za-z0-9_-]{20,}$`
-- `^ghp_[A-Za-z0-9]{36}$`
-- `^xox[baprs]-[A-Za-z0-9-]{10,}$`
+Free-text fields reject a value that is exactly one high-confidence credential token, using the shared high-confidence provider-token, secret-assignment, and credentialed-URI patterns.
 
 The rejection is a typed `OrbitError::SensitiveInput` and never includes the token value. The same token shapes embedded in larger prose are masked by the shared redaction module. Path-only fields only normalize HOME-prefixed strings; token-shaped globs and character classes are preserved.
 

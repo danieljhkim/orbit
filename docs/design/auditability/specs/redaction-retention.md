@@ -1,7 +1,7 @@
 ---
 type: design
 summary: Spec: Redaction and Retention Boundaries
-last_validated: 2026-08-02
+last_validated: 2026-08-31
 ---
 
 # Spec: Redaction and Retention Boundaries
@@ -36,7 +36,7 @@ Command audit rows:
 Activity/job and loop traces:
 
 - Live under `.orbit/state/audit/` for workspace-local run reconstruction.
-- Use JSONL for append-friendly event streams.
+- V2 envelope and loop events are persisted through the SQLite-backed v2 audit store.
 - Use content-addressed blobs for payload bodies.
 - May be manually retained or deleted with workspace state until a first-class retention policy exists.
 
@@ -48,8 +48,8 @@ Invocation metrics:
 
 Global process tracing:
 
-- Lives under `~/.orbit/state/logs/orbit.jsonl`.
-- Is append-only and unrotated in v1.
+- Uses `~/.orbit/state/logs/orbit.jsonl` as the active file.
+- Is append-only within the active file; oversized files are renamed to dated archives and old archives are pruned at subscriber initialization.
 - Is an operational log stream, not the canonical workflow envelope.
 - Carries policy-denial path/resource strings and friction summaries after [T20260427-0023], so default tracing redaction is part of its durability boundary.
 
@@ -57,7 +57,7 @@ Global process tracing:
 
 - If a redactor misses an unknown secret shape, the audit layer may persist that value. Reviewers should treat new provider payload shapes as redaction-sensitive changes.
 - If redaction changes payload bytes, the stored hash identifies the redacted payload, not the raw provider payload.
-- If JSONL writes fail, the run may continue with in-memory audit snapshots only; durable reconstruction is incomplete.
+- If v2 audit-store writes fail, the run may continue with in-memory audit snapshots only; durable reconstruction is incomplete.
 - If pruning deletes command audit rows, file-backed run traces and blobs are not automatically pruned unless a future retention task adds that coupling.
 
 ## Migration Path

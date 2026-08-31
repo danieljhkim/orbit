@@ -1,7 +1,7 @@
 ---
 type: design
 summary: "Spec: Color and Styling"
-last_validated: 2026-08-02
+last_validated: 2026-08-31
 ---
 
 # Spec: Color and Styling
@@ -25,7 +25,7 @@ Six roles, closed set. Adding a seventh is a design change, not a call-site deci
 | `muted` | de-emphasized, archived, secondary | dim |
 | `neutral` | no signal | default |
 
-Mapping from domain values to roles is defined once, in one table, covering task status, run state, job state, priority, task type, and doctor status together. The current eight per-domain functions (`status_color`/`_cell`, `priority_color`/`_cell`, `job_state_color`/`_cell`, `doctor_status_color_cell`, `task_type_color_cell`) collapse into it.
+Mapping from domain values to roles is defined once, in one table, covering task status, run state, job state, priority, task type, doctor status, and audit status together. The current eight per-domain functions (`status_color`/`_cell`, `priority_color`/`_cell`, `job_state_color`/`_cell`, `doctor_status_color_cell`, `task_type_color_cell`) collapse into it.
 
 **Unmapped values are `neutral`, never an error.** A new status introduced elsewhere in the codebase must render plainly, not panic and not fall through to an arbitrary color.
 
@@ -35,11 +35,10 @@ Resolved once, at the sink, in this precedence:
 
 1. `--no-color` → off.
 2. `NO_COLOR` set to any non-empty value → off.
-3. `--color=always` → on.
-4. `CLICOLOR_FORCE` non-empty → on.
-5. Otherwise: on if and only if `is_tty`.
+3. `CLICOLOR_FORCE` non-empty → on.
+4. Otherwise: on if and only if `is_tty`.
 
-`TERM=dumb` forces off regardless of 3 and 4.
+`TERM=dumb` forces off regardless of 2 and 3. There are no command-line color override flags; the sink owns this environment-based policy.
 
 **Invariant:** exactly one place in the crate reads these — `output/sink.rs`, enforced by `scripts/check-terminal-state-guard.sh`. A call site that consults them itself is a defect. Because the two styling crates each ship their own probe, "one place" also means the sink must *override* them rather than agree with them: `OutputSink::apply_color_policy` sets `colored`'s global override, and `output::table` passes `enforce_styling`/`force_no_tty` per render. Neither backend is left to ask.
 
@@ -54,7 +53,7 @@ Resolved once, at the sink, in this precedence:
 
 ## 4. Interaction With Modes
 
-- `json`, `ndjson`, and the plain piped form carry **no** escape sequences under any flag. `--color=always` does not apply to them; it applies to `table` on a non-TTY sink, which is the legitimate use (`orbit task list --color=always | less -R`).
+- `json`, `ndjson`, and the plain piped form carry **no** escape sequences. Color policy applies only to human-rendered table and line output.
 - Roles are a rendering concern and never appear in a payload. A payload carries `status: "blocked"`, not `status_role: "error"`. A consumer that wants severity derives it from the value, using the same public mapping.
 
 ## 5. Accessibility
