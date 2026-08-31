@@ -18,16 +18,6 @@
 //! - [`scheduler`] — the pass itself + the deterministic-action projection.
 //! - [`crud`] — the shared add/list/show/update/toggle/mint domain surface.
 
-use std::borrow::Cow;
-use std::path::Path;
-
-use orbit_common::OrbitError;
-use orbit_common::protocol::yaml::parse_auto_task_yaml;
-
-use crate::application::{
-    ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets,
-};
-
 pub mod crud;
 pub mod loader;
 pub mod schedule;
@@ -67,46 +57,6 @@ pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/auto_tasks/security-review.yaml"),
     ),
 ];
-
-/// Seed missing default auto-task definitions without changing an existing
-/// workspace-authored definition. Each asset is parsed before it is written so
-/// a release cannot install an unloadable default.
-///
-/// Seeding is manifest-aware: the digest Orbit wrote for each default is
-/// recorded so a definition dropped from a later release can be retired by
-/// content provenance instead of lingering in every existing workspace.
-// ADR-0366: auto-tasks joined the ADR-0346 managed-asset mechanism.
-pub(crate) fn seed_default_auto_tasks(
-    orbit_dir: &Path,
-) -> Result<ManagedAssetReconciliation, OrbitError> {
-    let auto_tasks_dir = auto_tasks_dir(orbit_dir);
-    reconcile_managed_assets(
-        &auto_tasks_dir,
-        "auto_task",
-        ManagedAssetLayout::YamlStem,
-        DEFAULT_AUTO_TASK_FILES,
-        false,
-        |name, content| {
-            let definition = parse_auto_task_yaml(content).map_err(|error| {
-                OrbitError::InvalidInput(format!(
-                    "default auto-task `{name}` failed validation: {error}"
-                ))
-            })?;
-            if definition.name != name {
-                return Err(OrbitError::InvalidInput(format!(
-                    "default auto-task file stem `{name}` does not match definition name `{}`",
-                    definition.name
-                )));
-            }
-            if definition.enabled {
-                return Err(OrbitError::InvalidInput(format!(
-                    "default auto-task `{name}` must ship disabled"
-                )));
-            }
-            Ok(Cow::Borrowed(content))
-        },
-    )
-}
 
 #[cfg(test)]
 mod tests;

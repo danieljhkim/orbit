@@ -7,7 +7,7 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use catalog::seed_default_jobs;
+pub(crate) use catalog::{DEFAULT_JOB_FILES, seed_default_jobs};
 pub use catalog::{JobCatalogEntry, JobCatalogFilter};
 pub use exec::V2JobRunResult;
 pub use pipeline::{PipelineInvokeResult, PipelineWaitEntry, PipelineWaitResult};

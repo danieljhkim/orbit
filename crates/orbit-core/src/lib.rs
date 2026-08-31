@@ -72,6 +72,10 @@ pub use application::search::{
     task_selectors_contain_path,
 };
 pub use application::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
+pub use application::workspace_sync::{
+    ManagedArtifactOutcome, ManagedArtifactScope, ManagedArtifactSyncAction,
+    WorkspaceManagedArtifactSyncReport, reconcile_workspace_managed_artifacts,
+};
 pub use context::ActorIdentity;
 pub use runtime::workspace_catalog::{FederatedWorkspaceTarget, WorkspaceCatalog, WorkspaceScope};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard

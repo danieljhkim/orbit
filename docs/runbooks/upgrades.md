@@ -5,7 +5,7 @@ tags: [operations, upgrades, migrations, recovery]
 paths: ["crates/orbit-store/src/workflow/layout/**", "crates/orbit-store/src/driver/sqlite/migration/**"]
 related_features: [orbit-core]
 related_artifacts: [ORB-10014]
-last_validated: 2026-08-22
+last_validated: 2026-08-31
 ---
 
 # Upgrade Orbit Safely
@@ -81,10 +81,23 @@ Upgrade the binary. Never hand-edit `layout.version` to force the workspace open
 After reviewing the dry run:
 
 1. Replace or upgrade the binary.
-2. Run `orbit migrate` (or `orbit migrate --dry-run`) to review any still-pending changes.
-3. Run `orbit migrate --confirm` to apply them.
-4. Run `orbit doctor` and require all relevant checks to pass.
-5. Restart any independently managed dashboard process after swapping the binary.
+2. From each initialized, registered workspace, run `orbit workspace sync --check` to review
+   newly shipped, refreshed, retired, or manifest-migration actions. It is read-only and exits
+   nonzero when managed artifacts need convergence.
+3. Run `orbit workspace sync` to apply the provenance-safe managed-artifact actions. Operator
+   edits, user-authored name collisions, and existing routine `name`/`hosts` bindings are
+   preserved and reported with their paths.
+4. Run `orbit migrate` (or `orbit migrate --dry-run`) to review any still-pending layout/store
+   changes.
+5. Run `orbit migrate --confirm` to apply those migrations.
+6. Run `orbit doctor` and require all relevant checks to pass.
+7. Restart any independently managed dashboard process after swapping the binary.
+
+These commands are intentionally independent. `workspace sync` converges local definitions
+embedded in the installed binary; it does not install a newer binary, pull a repository, sync
+another host, or run general layout/store migrations. `workspace init` remains the one-time
+registration/bootstrap operation, while `doctor` diagnoses health and performs only its named,
+narrow repairs.
 
 Agent subprocesses inherit an `ORBIT_BIN` pinned to the Orbit executable that dispatched
 them, and that executable's directory is placed first on their `PATH`. An operator-set

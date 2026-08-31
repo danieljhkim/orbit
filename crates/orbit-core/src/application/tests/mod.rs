@@ -4,3 +4,4 @@ mod job_pipeline;
 mod job_submission;
 mod managed_asset_manifest;
 mod managed_assets;
+mod workspace_sync;
