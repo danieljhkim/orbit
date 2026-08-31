@@ -628,9 +628,11 @@ const ERROR_MARKERS: &[&str] = &[
 /// and paths under a run-specific temp directory. Normalizing those away is
 /// what lets an hourly sweep recognize the same root cause instead of filing it
 /// again every hour. Prefer an `##[error]`-annotated line over an unanchored
-/// marker substring, and never sign off runner-bookkeeping (checkout, group
-/// headers, `env:`/`with:` dumps). With no usable line the step name alone is
-/// the signature — weaker, but stable, and still scoped by workflow and job.
+/// marker substring, except that GitHub's generic runner-completion annotation
+/// yields to a specific unannotated diagnostic immediately before it. Never
+/// sign off runner-bookkeeping (checkout, group headers, `env:`/`with:` dumps).
+/// With no usable line the step name alone is the signature — weaker, but
+/// stable, and still scoped by workflow and job.
 fn error_signature(log_excerpt: &str, step: &str) -> ErrorSignature {
     let lines = classify_log_lines(log_excerpt);
     for (kind, line) in &lines {
@@ -643,6 +645,29 @@ fn error_signature(log_excerpt: &str, step: &str) -> ErrorSignature {
     }
     for (kind, line) in &lines {
         if *kind == LineKind::Marker {
+            return ErrorSignature {
+                text: normalize_signature(&log_payload(line).to_ascii_lowercase()),
+                step_fallback: false,
+            };
+        }
+    }
+    for (index, (kind, _)) in lines.iter().enumerate() {
+        if *kind != LineKind::RunnerCompletion {
+            continue;
+        }
+        if let Some((_, line)) = lines[..index]
+            .iter()
+            .rev()
+            .find(|(kind, line)| *kind == LineKind::Content && is_diagnostic_content(line))
+        {
+            return ErrorSignature {
+                text: normalize_signature(&log_payload(line).to_ascii_lowercase()),
+                step_fallback: false,
+            };
+        }
+    }
+    for (kind, line) in &lines {
+        if *kind == LineKind::RunnerCompletion {
             return ErrorSignature {
                 text: normalize_signature(&log_payload(line).to_ascii_lowercase()),
                 step_fallback: false,
@@ -666,6 +691,7 @@ enum LineKind {
     ParamDump,
     EndGroup,
     ErrorAnnotated,
+    RunnerCompletion,
     Marker,
     Bookkeeping,
     Content,
@@ -698,7 +724,7 @@ fn render_failed_step_excerpt(log: &str, max_bytes: usize) -> FailedStepExcerpt 
 
     let anchor = lines
         .iter()
-        .position(|(kind, _)| *kind == LineKind::ErrorAnnotated)
+        .position(|(kind, _)| matches!(kind, LineKind::ErrorAnnotated | LineKind::RunnerCompletion))
         .or_else(|| lines.iter().position(|(kind, _)| *kind == LineKind::Marker));
 
     let Some(anchor_idx) = anchor else {
@@ -753,7 +779,9 @@ fn classify_log_lines(log: &str) -> Vec<(LineKind, &str)> {
             LineKind::ParamDump
         } else {
             in_param_block = false;
-            if lowered.contains("##[error]") {
+            if is_generic_runner_completion(&lowered) {
+                LineKind::RunnerCompletion
+            } else if lowered.contains("##[error]") {
                 LineKind::ErrorAnnotated
             } else if is_runner_bookkeeping(&lowered) || lowered.contains("##[group]") {
                 LineKind::Bookkeeping
@@ -766,6 +794,25 @@ fn classify_log_lines(log: &str) -> Vec<(LineKind, &str)> {
         out.push((kind, line));
     }
     out
+}
+
+fn is_generic_runner_completion(lowered: &str) -> bool {
+    let Some(message) = lowered.trim().strip_prefix("##[error]") else {
+        return false;
+    };
+    let Some(exit_code) = message
+        .trim()
+        .strip_prefix("process completed with exit code ")
+    else {
+        return false;
+    };
+    let exit_code = exit_code.trim_end_matches('.');
+    !exit_code.is_empty() && exit_code.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_diagnostic_content(line: &str) -> bool {
+    let payload = log_payload(line).trim();
+    !payload.is_empty() && !payload.starts_with("##[")
 }
 
 fn is_run_command_payload(payload: &str) -> bool {

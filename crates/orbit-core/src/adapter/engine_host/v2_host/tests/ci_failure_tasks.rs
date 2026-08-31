@@ -646,6 +646,66 @@ fn error_signature_prefers_an_annotated_error_over_a_checkout_commit_message() {
 }
 
 #[test]
+fn generic_runner_trailer_does_not_collapse_distinct_unannotated_diagnostics() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let trailer =
+        "build\tRun go build\t2026-08-30T01:00:00Z ##[error]Process completed with exit code 1.\n";
+    let foo_log = realistic_github_step_log(
+        "go build ./...",
+        2,
+        &format!(
+            "build\tRun go build\t2026-08-30T01:00:00Z ./main.go:10:2: undefined: Foo\n{trailer}"
+        ),
+    );
+    let bar_log = realistic_github_step_log(
+        "go build ./...",
+        2,
+        &format!(
+            "build\tRun go build\t2026-08-30T01:00:00Z ./main.go:14:2: undefined: Bar\n{trailer}"
+        ),
+    );
+
+    let first = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![
+            failure(10, "ci", "build", "go build", &foo_log, CHECKOUT),
+            failure(11, "ci", "build", "go build", &bar_log, CHECKOUT),
+        ])}),
+    );
+
+    assert_eq!(first["filed_count"], json!(2));
+    let filed = first["filed"].as_array().expect("filed");
+    assert_ne!(filed[0]["failure_key"], filed[1]["failure_key"]);
+    for (task_id, diagnostic) in filed_task_ids(&first).iter().zip(["foo", "bar"]) {
+        let description = runtime
+            .get_task(task_id)
+            .expect("read filed task")
+            .description;
+        let signature = signature_line(&description).to_ascii_lowercase();
+        assert!(
+            signature.contains(diagnostic),
+            "specific diagnostic must be the signature: {signature}"
+        );
+        assert!(
+            !signature.contains("process completed"),
+            "generic runner trailer must not be the signature: {signature}"
+        );
+    }
+
+    let repeated = file(
+        &runtime,
+        json!({"ci_evidence": snapshot(vec![failure(
+            12, "ci", "build", "go build", &foo_log, NEXT_HEAD,
+        )])}),
+    );
+    assert_eq!(repeated["filed_count"], json!(0));
+    assert_eq!(
+        repeated["skipped_existing"][0]["failure_key"], filed[0]["failure_key"],
+        "the same diagnostic must retain its failure key across commits"
+    );
+}
+
+#[test]
 fn checkout_commit_message_containing_failure_is_not_the_signature() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let log = dani_10111_style_log("chore: add ci failure sweep routine", None);
