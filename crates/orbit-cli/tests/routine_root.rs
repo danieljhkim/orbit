@@ -181,9 +181,18 @@ fn run_success(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Path>
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .env_remove("ORBIT_ROOT");
+        .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+        .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_REGISTRY_ROOT");
     if let Some(root) = orbit_root {
         command.env("ORBIT_ROOT", root);
+    }
+    if let Some(root) = managed_registry_root(args, orbit_root) {
+        command
+            .env("ORBIT_MANAGED_RUN_CONTEXT", "1")
+            .env("ORBIT_RUN_ID", "routine-root-test")
+            .env("ORBIT_REGISTRY_ROOT", root);
     }
     command.args(args).assert().success();
 }
@@ -194,9 +203,18 @@ fn run_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Path>) -
         .current_dir(cwd)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .env_remove("ORBIT_ROOT");
+        .env_remove("ORBIT_ROOT")
+        .env_remove("ORBIT_MANAGED_RUN_CONTEXT")
+        .env_remove("ORBIT_RUN_ID")
+        .env_remove("ORBIT_REGISTRY_ROOT");
     if let Some(root) = orbit_root {
         command.env("ORBIT_ROOT", root);
+    }
+    if let Some(root) = managed_registry_root(args, orbit_root) {
+        command
+            .env("ORBIT_MANAGED_RUN_CONTEXT", "1")
+            .env("ORBIT_RUN_ID", "routine-root-test")
+            .env("ORBIT_REGISTRY_ROOT", root);
     }
     let output = command
         .args(args)
@@ -212,6 +230,12 @@ fn run_json(cwd: &Path, home: &Path, args: &[&str], orbit_root: Option<&Path>) -
             String::from_utf8_lossy(&output)
         )
     })
+}
+
+fn managed_registry_root(args: &[&str], orbit_root: Option<&Path>) -> Option<PathBuf> {
+    args.windows(2)
+        .find_map(|pair| (pair[0] == "--root").then(|| PathBuf::from(pair[1])))
+        .or_else(|| orbit_root.map(Path::to_path_buf))
 }
 
 fn assert_home_empty(home: &Path) {
