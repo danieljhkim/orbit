@@ -329,11 +329,13 @@ impl Execute for TaskPublicationRestoreArgs {
             "restoring a task publication into the canonical destination store",
         )?;
         assert_restore_authority(runtime, &self.publication)?;
+        let task_workspace_id = selected_task_workspace_id(runtime)?;
         runtime.record_task_publication_source(
-            &self.publication.workspace_id,
+            &task_workspace_id,
             &self.publication.source_repository_fingerprint,
         )?;
         let request = PublicationRestoreRequest {
+            task_workspace_id,
             publication: self.publication.request(runtime, "restore"),
             mode: if self.allow_identical_retry {
                 PublicationRestoreMode::AllowIdenticalRetry

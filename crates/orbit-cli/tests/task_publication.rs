@@ -17,6 +17,7 @@ const PUBLICATION_REMOTE: &str = "ssh://publication.test/orbit-tasks.git";
 const PUBLICATION_ID: &str = "pub_network_free_e2e";
 const LOGICAL_WORKSPACE_ID: &str = "ws_orbit";
 const RUNTIME_WORKSPACE_ID: &str = "ws_orbit-5c61b3";
+const RECOVERY_RUNTIME_WORKSPACE_ID: &str = "ws_orbit-recovery";
 
 #[test]
 fn operator_workflow_is_network_free_labelled_and_fail_closed() {
@@ -269,9 +270,24 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
         &recovery_repo,
         &recovery_home,
         &publication_bare,
-        &["workspace", "init", "--name", "orbit"],
+        &["workspace", "init", "--name", "orbit-recovery"],
     )
     .success();
+    let recovery_registry_path = recovery_home.join(".orbit").join("workspaces.json");
+    let recovery_registry =
+        fs::read_to_string(&recovery_registry_path).expect("recovery workspace registry");
+    fs::write(
+        &recovery_registry_path,
+        recovery_registry.replace(RECOVERY_RUNTIME_WORKSPACE_ID, LOGICAL_WORKSPACE_ID),
+    )
+    .expect("logical recovery workspace registry");
+    let recovery_runtime_identity =
+        fs::read_to_string(recovery_repo.join(".orbit").join("config.yaml"))
+            .expect("recovery runtime workspace identity");
+    assert!(
+        recovery_runtime_identity.contains(RECOVERY_RUNTIME_WORKSPACE_ID),
+        "recovery config.yaml must retain the task partition: {recovery_runtime_identity}"
+    );
     let recovery_workspace = orbit_json(
         &recovery_repo,
         &recovery_home,
@@ -345,6 +361,12 @@ fn operator_workflow_is_network_free_labelled_and_fail_closed() {
     assert_eq!(
         task_ids(&recovery_repo, &recovery_home, &publication_bare),
         [first.clone(), second.clone()]
+    );
+    assert_eq!(
+        fs::read_to_string(recovery_repo.join(".orbit").join("config.yaml"))
+            .expect("recovery runtime identity after restore"),
+        recovery_runtime_identity,
+        "restore must not rewrite the destination task partition identity"
     );
     assert_eq!(repository_state(&recovery_repo), recovery_before);
 

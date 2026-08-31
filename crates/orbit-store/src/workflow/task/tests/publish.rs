@@ -477,6 +477,7 @@ fn replica_callers_and_stale_owners_may_not_publish() {
     assert!(error.contains("not registered"), "{error}");
 
     let mut inside_source = request(&fixture, 1, None);
+    inside_source.workspace_id = "ws_logical_publication".to_string();
     inside_source.cache_dir = fixture.source.join(".orbit-publication-cache");
     let error = publish(&fixture, inside_source).unwrap_err().to_string();
     assert!(error.contains("outside the source repository"), "{error}");

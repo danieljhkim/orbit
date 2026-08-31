@@ -809,7 +809,7 @@ fn assert_outside_source_checkout(
     registry: &TaskRegistryStore,
     request: &ValidatedRequest,
 ) -> Result<(), OrbitError> {
-    let Some(checkout) = registry.find_workspace_checkout(&request.workspace_id)? else {
+    let Some(checkout) = registry.find_workspace_checkout(&request.task_workspace_id)? else {
         return Ok(());
     };
     let cache = std::path::absolute(&request.cache_dir)
