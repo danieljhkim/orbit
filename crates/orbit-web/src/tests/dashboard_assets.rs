@@ -878,6 +878,10 @@ fn dashboard_knowledge_detail_is_sticky_on_desktop_and_inline_when_narrow() {
         !css.contains("min-height: calc(100vh - 360px)"),
         "the old fixed min-height fought the bounded sticky pane and must be gone"
     );
+    assert!(
+        css.contains(".friction-stats .tile {\n        padding: 8px 16px;"),
+        "friction summary tiles need outer breathing room at every width"
+    );
     let accordion_at = css
         .find("          display: none;\n        }\n        .friction-row-toggle")
         .expect("the narrow breakpoint must hide the separate detail pane");
