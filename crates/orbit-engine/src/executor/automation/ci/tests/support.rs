@@ -24,6 +24,9 @@ pub(super) struct FakeQueries {
     pub(super) runs: Mutex<Vec<Vec<Value>>>,
     pub(super) run_views: HashMap<String, Value>,
     pub(super) logs: HashMap<(String, bool), String>,
+    pub(super) repository_runs_error: Option<String>,
+    pub(super) run_view_errors: HashMap<String, String>,
+    pub(super) log_errors: HashMap<(String, bool), String>,
 }
 
 impl FakeQueries {
@@ -75,6 +78,23 @@ impl FakeQueries {
         self
     }
 
+    pub(super) fn with_repository_runs_error(mut self, message: &str) -> Self {
+        self.repository_runs_error = Some(message.to_string());
+        self
+    }
+
+    pub(super) fn with_run_view_error(mut self, run_id: &str, message: &str) -> Self {
+        self.run_view_errors
+            .insert(run_id.to_string(), message.to_string());
+        self
+    }
+
+    pub(super) fn with_log_error(mut self, run_id: &str, all_scope: bool, message: &str) -> Self {
+        self.log_errors
+            .insert((run_id.to_string(), all_scope), message.to_string());
+        self
+    }
+
     pub(super) fn with_log(mut self, run_id: &str, all_scope: bool, log: &str) -> Self {
         self.logs
             .insert((run_id.to_string(), all_scope), log.to_string());
@@ -105,6 +125,9 @@ impl CiQueries for FakeQueries {
     }
 
     fn repository_runs(&self, _limit: u64) -> Result<Vec<Value>, OrbitError> {
+        if let Some(message) = &self.repository_runs_error {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         let mut runs = self.runs.lock().expect("runs lock");
         if runs.len() > 1 {
             Ok(runs.remove(0))
@@ -114,6 +137,9 @@ impl CiQueries for FakeQueries {
     }
 
     fn run_view(&self, run_id: &str) -> Result<Value, OrbitError> {
+        if let Some(message) = self.run_view_errors.get(run_id) {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         Ok(self
             .run_views
             .get(run_id)
@@ -127,6 +153,12 @@ impl CiQueries for FakeQueries {
         scope: LogScope,
         max_bytes: usize,
     ) -> Result<RunLog, OrbitError> {
+        if let Some(message) = self
+            .log_errors
+            .get(&(run_id.to_string(), scope == LogScope::All))
+        {
+            return Err(OrbitError::Execution(message.clone()));
+        }
         let raw = self
             .logs
             .get(&(run_id.to_string(), scope == LogScope::All))
