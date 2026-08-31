@@ -13,6 +13,7 @@ spec:
     max_secret_scanning_alerts: 100
     max_secret_locations: 20
     max_tasks: 10
+    # Governs Dependabot and Code scanning; secret scanning is always filed.
     min_severity: high
     skip_when_dependabot_pr_open: true
   steps:

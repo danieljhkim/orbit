@@ -418,6 +418,71 @@ fn code_and_secret_alerts_file_evidence_complete_deduplicated_tasks() {
 }
 
 #[test]
+fn code_scanning_severity_floor_excludes_lower_severity_alerts() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let output = file(
+        &runtime,
+        expanded_snapshot(
+            Vec::new(),
+            vec![code_alert(10, "moderate"), code_alert(11, "high")],
+            Vec::new(),
+        ),
+        json!({"min_severity": "high"}),
+    );
+
+    assert_eq!(output["filed_count"], json!(1));
+    assert_eq!(output["filed"][0]["alert_number"], json!(11));
+    assert_eq!(
+        output["excluded_below_min_severity"],
+        json!([{
+            "family": "code_scanning",
+            "alert_number": 10,
+            "rule_id": "rust/sql-injection",
+            "path": "src/db.rs",
+            "security_severity": "moderate",
+            "reason": "below_min_severity",
+        }])
+    );
+}
+
+#[test]
+fn code_scanning_missing_or_unrecognized_severity_is_explicitly_excluded() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let mut missing = code_alert(12, "high");
+    missing
+        .as_object_mut()
+        .expect("code alert object")
+        .remove("security_severity");
+    let output = file(
+        &runtime,
+        expanded_snapshot(
+            Vec::new(),
+            vec![missing, code_alert(13, "informational")],
+            Vec::new(),
+        ),
+        json!({"min_severity": "low"}),
+    );
+
+    assert_eq!(output["filed_count"], json!(0));
+    let excluded = output["excluded_below_min_severity"]
+        .as_array()
+        .expect("excluded alerts");
+    assert_eq!(excluded.len(), 2);
+    assert_eq!(excluded[0]["alert_number"], json!(12));
+    assert_eq!(excluded[0]["security_severity"], "");
+    assert_eq!(
+        excluded[0]["reason"],
+        "missing_or_unrecognized_security_severity"
+    );
+    assert_eq!(excluded[1]["alert_number"], json!(13));
+    assert_eq!(excluded[1]["security_severity"], "informational");
+    assert_eq!(
+        excluded[1]["reason"],
+        "missing_or_unrecognized_security_severity"
+    );
+}
+
+#[test]
 fn max_tasks_is_one_deterministic_bound_across_all_families() {
     let (_root, runtime, _repo) = runtime_with_workspace_layout();
     let output = file(
@@ -489,7 +554,7 @@ fn sentinel_credential_never_reaches_snapshot_output_or_persisted_task_fields() 
 #[test]
 fn unavailable_family_does_not_hide_findings_from_collected_family() {
     let (_root, runtime, _repo) = runtime_with_workspace_layout();
-    let mut snapshot = expanded_snapshot(Vec::new(), vec![code_alert(15, "moderate")], Vec::new());
+    let mut snapshot = expanded_snapshot(Vec::new(), vec![code_alert(15, "high")], Vec::new());
     snapshot["collection_status"] = json!("partially_collected");
     snapshot["secret_scanning"] = json!({
         "collected": false,
