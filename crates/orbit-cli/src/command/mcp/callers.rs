@@ -51,9 +51,9 @@ pub enum CallersSubcommand {
     ///
     /// Under that line sshd composes this machine's argv itself, so the caller
     /// identity stops being a label the caller chose and becomes something it
-    /// had to hold a key to select. The line is printed, never installed. It
-    /// belongs in a root-managed `AuthorizedKeysFile` the login account cannot
-    /// read, because the forced command carries a destination capability.
+    /// had to hold a key to select. Tier 2 requires a dedicated Linux login
+    /// account with no ordinary command path, a root-managed
+    /// `AuthorizedKeysFile`, and per-key environments enabled.
     Authorize(CallersAuthorizeArgs),
 }
 
@@ -273,11 +273,18 @@ fn authorize(global_root: &Path, callers_path: &Path, args: &CallersAuthorizeArg
     );
 
     eprintln!(
-        "\nInstall the line above in a root-owned AuthorizedKeysFile that this login account \
-         cannot read (for example /etc/ssh/authorized_keys/%u configured in sshd_config). Orbit \
-         does not edit login policy. Do not put this line in the account-owned \
-         ~/.ssh/authorized_keys: its destination capability would then be readable and \
-         replayable by an ordinary remote command."
+        "\nTier 2 requires Linux and a dedicated destination login account that cannot run any \
+         ordinary command: no interactive/password/keyboard-interactive login, no unforced SSH \
+         key, and no cron job, service, or other persistent process under that UID. A root-owned \
+         AuthorizedKeysFile alone is not this isolation boundary."
+    );
+    eprintln!(
+        "Install the line above in a root-owned AuthorizedKeysFile that the login account cannot \
+         read (for example /etc/ssh/authorized_keys/%u). In a Match User block, set \
+         PermitUserEnvironment yes so sshd accepts the generated per-key acceptance environment; \
+         restrict authentication to public keys from that forced-command-only file. Orbit seals \
+         the environment before parsing argv and fails closed when the Linux protection is absent. \
+         Orbit does not edit or verify login policy."
     );
     eprintln!(
         "The forced command requests operator authority, but does not grant it: the matched row \
@@ -327,7 +334,8 @@ fn authorize(global_root: &Path, callers_path: &Path, args: &CallersAuthorizeArg
     }
     eprintln!(
         "\nThe generated destination capability binds this forced command to the key fingerprint. \
-         Re-running authorize rotates it and invalidates the previous generated line."
+         Re-running authorize rotates it and invalidates the previous generated line; replace the \
+         root-managed entry as one rotation operation."
     );
     Ok(CommandOutput::Silent)
 }

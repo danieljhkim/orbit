@@ -13,6 +13,7 @@ mod listen;
 mod server;
 mod setup;
 
+pub(crate) use command::seal_ssh_acceptance_environment;
 pub use command::{McpCommand, McpSubcommand};
 pub(crate) use orbit_mcp::safe_mcp_tool_names;
 #[allow(unused_imports)]

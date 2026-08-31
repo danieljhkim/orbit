@@ -5,8 +5,9 @@
 //! missing half: the caller identity is written by the *destination*, next to
 //! a public key, in a root-managed `AuthorizedKeysFile`, and sshd will not run
 //! that forced command for anyone who cannot complete the key exchange. A
-//! destination-issued bearer capability prevents the same argv from being
-//! replayed as an ordinary remote command; Orbit persists only its digest.
+//! destination-issued bearer capability arrives through an sshd-set key
+//! environment rather than argv. The CLI makes that environment unreadable
+//! before it parses any arguments; Orbit persists only the capability digest.
 //!
 //! Three things live here, and nothing else:
 //!
@@ -33,6 +34,13 @@ use sha2::{Digest, Sha256};
 /// when the destination's `sshd_config` has `ExposeAuthInfo yes`.
 const SSH_USER_AUTH_ENV: &str = "SSH_USER_AUTH";
 
+/// Key-option environment variable carrying the Tier 2 acceptance bearer.
+///
+/// This name is public because the CLI must seal process environment metadata
+/// before it reads the value. It is deliberately not a general configuration
+/// input: only [`SshAcceptance::ForcedCommand`] consumes it.
+pub const SSH_ACCEPTANCE_ENV: &str = "ORBIT_MCP_SSH_ACCEPTANCE";
+
 /// The command the *caller* asked for, which a forced command replaces.
 ///
 /// Named here only so the one place that mentions it can say, in one spot,
@@ -42,8 +50,8 @@ const SSH_ORIGINAL_COMMAND_ENV: &str = "SSH_ORIGINAL_COMMAND";
 /// Destination-local capabilities issued into generated forced commands.
 const SSH_ACCEPTANCE_DIR: &str = "mcp-ssh-acceptance";
 
-/// What every issued capability starts with, so an operator reading their own
-/// `authorized_keys` can tell at a glance which field Orbit minted.
+/// What every issued capability starts with, so an operator inspecting their
+/// root-managed SSH configuration can tell which field Orbit minted.
 const ACCEPTANCE_TOKEN_PREFIX: &str = ".orbit-ssh-";
 
 /// Bytes of operating-system entropy behind one acceptance capability.
@@ -134,8 +142,10 @@ impl SshPublicKey {
     ///
     /// `orbit_command` is the absolute path the destination will run, because
     /// sshd executes a forced command without a login shell's `PATH`. The
-    /// destination requests operator so the matched callers-file grant can be
-    /// realized; that grant remains the ceiling and may still cap or deny it.
+    /// acceptance bearer is installed with sshd's per-key `environment`
+    /// option, never in the forced command argv. The destination requests
+    /// operator so the matched callers-file grant can be realized; that grant
+    /// remains the ceiling and may still cap or deny it.
     pub fn authorized_keys_line(
         &self,
         orbit_command: &str,
@@ -148,9 +158,9 @@ impl SshPublicKey {
             .map(|comment| format!(" {comment}"))
             .unwrap_or_default();
         format!(
-            "command=\"{orbit_command} mcp serve --accept-ssh {acceptance_token} --caller \
-             {machine_id} --operator\",\
-             {FORCED_COMMAND_RESTRICTIONS} {algorithm} {blob}{comment}",
+            "environment=\"{SSH_ACCEPTANCE_ENV}={acceptance_token}\",\
+             command=\"{orbit_command} mcp serve --accept-ssh --caller {machine_id} \
+             --operator\",{FORCED_COMMAND_RESTRICTIONS} {algorithm} {blob}{comment}",
             algorithm = self.algorithm,
             blob = self.blob,
         )
@@ -170,7 +180,7 @@ impl SshPublicKey {
 /// those are seeded for collision avoidance, not for secrecy.
 ///
 /// The URL-safe alphabet is chosen over the standard one so the rendered value
-/// is a single unquoted word in the forced command's argv.
+/// needs no escaping inside an `authorized_keys` environment option.
 fn mint_acceptance_token() -> Result<String, OrbitError> {
     let mut entropy = [0u8; ACCEPTANCE_TOKEN_BYTES];
     getrandom::fill(&mut entropy).map_err(|error| {
@@ -185,7 +195,7 @@ fn mint_acceptance_token() -> Result<String, OrbitError> {
 }
 
 /// Issue the destination-only capability embedded in one generated
-/// `authorized_keys` forced command. Only its digest is persisted; the bearer
+/// `authorized_keys` key environment. Only its digest is persisted; the bearer
 /// value exists solely in the line the operator installs.
 pub fn issue_ssh_acceptance(
     global_root: &Path,
@@ -214,7 +224,8 @@ pub fn issue_ssh_acceptance(
 }
 
 /// Validate a forced-command capability and recover the key it was issued
-/// beside. Caller-controlled argv can present a token, but cannot mint one.
+/// beside. The CLI accepts the token only from its sealed process environment;
+/// caller-controlled argv has no value slot that can carry it.
 pub fn verify_ssh_acceptance(
     global_root: &Path,
     machine_id: &str,
