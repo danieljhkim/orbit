@@ -20,6 +20,9 @@ spec:
         type: string
         enum: [low, moderate, high, critical]
         default: high
+        description: >
+          Minimum severity filed for Dependabot and Code scanning alerts.
+          Secret scanning alerts are always filed regardless of this floor.
       skip_when_dependabot_pr_open:
         type: boolean
         default: true

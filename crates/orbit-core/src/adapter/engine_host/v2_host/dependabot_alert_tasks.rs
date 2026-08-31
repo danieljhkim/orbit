@@ -200,6 +200,23 @@ pub(crate) fn file_dependabot_alert_tasks(
         if number == 0 {
             continue;
         }
+        let security_severity = field(&alert, "security_severity").to_ascii_lowercase();
+        let rank = severity_rank(&security_severity);
+        if rank.is_none_or(|rank| rank < floor) {
+            excluded_below_min_severity.push(json!({
+                "family": "code_scanning",
+                "alert_number": number,
+                "rule_id": field(&alert, "rule_id"),
+                "path": field(&alert, "path"),
+                "security_severity": security_severity,
+                "reason": if rank.is_some() {
+                    "below_min_severity"
+                } else {
+                    "missing_or_unrecognized_security_severity"
+                },
+            }));
+            continue;
+        }
         let key = digest(&["code-scanning", repository, &number.to_string()]);
         if let Some(task_id) = open_task_for_key(runtime, CODE_KEY_PREFIX, &key)? {
             skipped_existing.push(json!({
@@ -216,8 +233,7 @@ pub(crate) fn file_dependabot_alert_tasks(
         }
         let rule = field(&alert, "rule_id");
         let path = field(&alert, "path");
-        let rank =
-            severity_rank(&field(&alert, "security_severity").to_ascii_lowercase()).unwrap_or(1);
+        let rank = rank.unwrap_or(floor);
         let task = runtime.add_task(TaskAddParams {
             title: code_task_title(&rule, &path),
             description: code_task_description(snapshot, &alert),
