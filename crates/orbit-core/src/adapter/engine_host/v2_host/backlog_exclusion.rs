@@ -3,7 +3,7 @@ use std::path::Path;
 
 use orbit_common::fs::path::workspace_relative_paths_overlap;
 use orbit_engine::DispatchError;
-use orbit_types::task::{Task, TaskStatus, task_dependencies_ready};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType, task_dependencies_ready};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -129,7 +129,7 @@ pub(super) fn list_backlog_tasks(
                 task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
             })
             .collect();
-        sort_tasks_by_priority_age(&mut backlog);
+        sort_tasks_for_automatic_dispatch(&mut backlog);
         let mut excluded = Vec::new();
         backlog.retain(|task| {
             let Some(membership) = epic_family_membership(task, &task_lookup) else {
@@ -243,17 +243,33 @@ pub(super) fn list_backlog_tasks(
     Ok(Value::Object(payload))
 }
 
-pub(super) fn sort_tasks_by_priority_age(tasks: &mut [Task]) {
-    let rank = |priority: orbit_types::task::TaskPriority| match priority {
-        orbit_types::task::TaskPriority::Critical => 0,
-        orbit_types::task::TaskPriority::High => 1,
-        orbit_types::task::TaskPriority::Medium => 2,
-        orbit_types::task::TaskPriority::Low => 3,
+pub(super) fn sort_tasks_for_automatic_dispatch(tasks: &mut [Task]) {
+    let dispatch_band = |task: &Task| {
+        if task.priority == TaskPriority::Critical {
+            0
+        } else if task.task_type == TaskType::Bug
+            || task
+                .tags
+                .iter()
+                .any(|tag| matches!(tag.as_str(), "code-review" | "security-review"))
+        {
+            1
+        } else {
+            2
+        }
+    };
+    let priority_rank = |priority: TaskPriority| match priority {
+        TaskPriority::Critical => 0,
+        TaskPriority::High => 1,
+        TaskPriority::Medium => 2,
+        TaskPriority::Low => 3,
     };
     tasks.sort_by(|left, right| {
-        rank(left.priority)
-            .cmp(&rank(right.priority))
+        dispatch_band(left)
+            .cmp(&dispatch_band(right))
+            .then(priority_rank(left.priority).cmp(&priority_rank(right.priority)))
             .then(left.created_at.cmp(&right.created_at))
+            .then(left.id.cmp(&right.id))
     });
 }
 
