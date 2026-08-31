@@ -3252,6 +3252,9 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         border-bottom: 1px solid var(--border);
       }
+      .friction-stats .tile {
+        padding: 8px 16px;
+      }
       @media (max-width: 800px) {
         .friction-stats { grid-template-columns: 1fr; }
         .friction-row { grid-template-columns: 120px minmax(0, 1fr) 76px; }
