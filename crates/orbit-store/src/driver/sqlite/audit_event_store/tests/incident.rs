@@ -368,6 +368,76 @@ fn duplicate_worker_diagnostics_are_seven_incidents_not_fourteen_tool_failures()
 }
 
 #[test]
+fn direct_cli_failure_is_unexpected_while_no_tool_start_is_diagnostic() {
+    let mut direct_success = FailureFixture::new(0, 0, "unused")
+        .no_tool()
+        .command("run")
+        .status(AuditEventStatus::Success)
+        .message("operation completed")
+        .build();
+    direct_success.subcommand = Some("show".to_string());
+    direct_success.target_id = Some("jrun-direct".to_string());
+
+    let mut direct_failure = FailureFixture::new(1, 0, "unused")
+        .no_tool()
+        .command("run")
+        .message("storage backend disconnected")
+        .build();
+    direct_failure.subcommand = Some("show".to_string());
+    direct_failure.target_id = Some("jrun-direct".to_string());
+
+    let mut lifecycle_failure = FailureFixture::new(2, 1, "unused")
+        .no_tool()
+        .command("Start")
+        .message("job run start failed")
+        .build();
+    lifecycle_failure.subcommand = None;
+
+    assert!(!is_lifecycle_diagnostic(&direct_success));
+    assert!(!is_lifecycle_diagnostic(&direct_failure));
+    assert!(is_lifecycle_diagnostic(&lifecycle_failure));
+
+    let report = build_report(&[direct_failure, lifecycle_failure], false);
+
+    assert_eq!(report.raw_events_by_class.get("unexpected"), Some(&1));
+    assert_eq!(report.raw_events_by_class.get("diagnostic"), Some(&1));
+
+    let direct = report
+        .incidents
+        .iter()
+        .find(|incident| incident.surface == "run show")
+        .expect("direct CLI incident");
+    assert_eq!(direct.class, FailureClass::Unexpected);
+    assert!(!direct.has_tool_identity);
+    assert_eq!(direct.events.len(), 1);
+    assert_eq!(direct.events[0].id, 1);
+    assert_eq!(direct.events[0].execution_id, "exec-1");
+    assert_eq!(direct.events[0].surface, "run show");
+    assert_eq!(direct.events[0].tool_name, None);
+    assert_eq!(
+        direct.events[0].message.as_deref(),
+        Some("storage backend disconnected")
+    );
+
+    let lifecycle = report
+        .incidents
+        .iter()
+        .find(|incident| incident.surface == "Start")
+        .expect("pipeline lifecycle incident");
+    assert_eq!(lifecycle.class, FailureClass::Diagnostic);
+    assert!(!lifecycle.has_tool_identity);
+    assert_eq!(lifecycle.events.len(), 1);
+    assert_eq!(lifecycle.events[0].id, 2);
+    assert_eq!(lifecycle.events[0].execution_id, "exec-2");
+    assert_eq!(lifecycle.events[0].surface, "Start");
+    assert_eq!(lifecycle.events[0].tool_name, None);
+    assert_eq!(
+        lifecycle.events[0].message.as_deref(),
+        Some("job run start failed")
+    );
+}
+
+#[test]
 fn expected_task_show_and_update_negatives_do_not_enter_unexpected_counts() {
     let failures = vec![
         FailureFixture::new(1, 0, "orbit.task.show")
@@ -650,7 +720,7 @@ fn ten_unknown_lifecycle_rows() -> Vec<AuditEvent> {
 }
 
 #[test]
-fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
+fn ten_unknown_rows_keep_diagnostics_to_the_failure_only_start_surface() {
     let failures = ten_unknown_lifecycle_rows();
     assert_eq!(failures.len(), 10);
     assert!(
@@ -671,10 +741,11 @@ fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
         "2 duplicate Starts collapse; 8 cascade rows from 4 leaves are 4 roots"
     );
     assert_eq!(report.job_run_lifecycle_incidents, 5);
-    assert_eq!(report.lifecycle_diagnostic_events, 10);
-    assert_eq!(report.lifecycle_diagnostic_incidents, 5);
-    assert_eq!(report.lifecycle_diagnostic_affected_run_count, 8);
-    assert_eq!(report.raw_events_by_class.get("diagnostic"), Some(&10));
+    assert_eq!(report.lifecycle_diagnostic_events, 2);
+    assert_eq!(report.lifecycle_diagnostic_incidents, 1);
+    assert_eq!(report.lifecycle_diagnostic_affected_run_count, 0);
+    assert_eq!(report.raw_events_by_class.get("diagnostic"), Some(&2));
+    assert_eq!(report.raw_events_by_class.get("unexpected"), Some(&8));
     assert_eq!(
         report.affected_run_count, 8,
         "4 leaf runs + 4 parent runs; Starts carry no run id"
@@ -686,6 +757,7 @@ fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
         .find(|incident| incident.surface == "Start")
         .expect("duplicate Start incident");
     assert_eq!(start.event_count, 2);
+    assert_eq!(start.class, FailureClass::Diagnostic);
     assert!(start.propagation.is_empty());
     assert!(!start.has_tool_identity);
     assert_eq!(start.events.len(), 2);
@@ -697,6 +769,7 @@ fn ten_unknown_rows_group_as_lifecycle_with_four_cascades_and_one_start() {
         .collect();
     assert_eq!(cascades.len(), 4);
     for incident in cascades {
+        assert_eq!(incident.class, FailureClass::Unexpected);
         assert_eq!(incident.root_event_count, 1);
         assert_eq!(
             incident.propagated_event_count(),
