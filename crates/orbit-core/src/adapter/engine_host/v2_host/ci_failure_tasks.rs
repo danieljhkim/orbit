@@ -29,6 +29,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use orbit_common::OrbitError;
+use orbit_common::security::redaction::redact_all;
 use orbit_types::task::{TaskComplexity, TaskPriority, TaskStatus, TaskType};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -78,6 +79,19 @@ pub(crate) fn file_ci_failure_tasks(
     runtime: &OrbitRuntime,
     input: &Value,
 ) -> Result<Value, OrbitError> {
+    file_ci_failure_tasks_with_add(runtime, input, |params| {
+        runtime.add_task(params).map(|task| task.id)
+    })
+}
+
+pub(in crate::adapter::engine_host::v2_host) fn file_ci_failure_tasks_with_add<F>(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    mut add_task: F,
+) -> Result<Value, OrbitError>
+where
+    F: FnMut(TaskAddParams) -> Result<String, OrbitError>,
+{
     let evidence = input.get("ci_evidence").ok_or_else(|| {
         OrbitError::InvalidInput(
             "file_ci_failure_tasks requires the `ci_evidence` snapshot produced by \
@@ -107,6 +121,7 @@ pub(crate) fn file_ci_failure_tasks(
     // would read exactly like "nothing is failing" — a conclusion that needs
     // queries this host never ran.
     if evidence.get("collected").and_then(Value::as_bool) != Some(true) {
+        let audit = audit_summary(evidence, &[]);
         return Ok(json!({
             "outcome": OUTCOME_CAPABILITY_UNAVAILABLE,
             "capability": capability,
@@ -115,6 +130,7 @@ pub(crate) fn file_ci_failure_tasks(
             "filed": [],
             "skipped_existing": [],
             "skipped_over_cap": [],
+            "audit": audit,
             "detail": "no CI evidence was gathered, so no task was filed; this is not a CI pass",
         }));
     }
@@ -125,7 +141,57 @@ pub(crate) fn file_ci_failure_tasks(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let audit = audit_summary(evidence, &failures);
+    let mut retryable_errors = evidence
+        .get("retryable_errors")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    // Version-1 snapshots emitted `query_errors`. Treat them with the repaired
+    // contract when an older collect step is still paired with this filer.
+    retryable_errors.extend(
+        evidence
+            .get("query_errors")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+    );
+    retryable_errors = retryable_errors
+        .into_iter()
+        .map(normalize_retryable_error)
+        .collect();
+    for failure in &failures {
+        if failure.get("investigated").and_then(Value::as_bool) != Some(true) {
+            retryable_errors.push(json!({
+                "stage": "registration",
+                "operation": "current_failure_not_investigated",
+                "run_id": failure.get("run_id"),
+                "retryable": true,
+                "message": "a current CI failure has no complete investigation and cannot be filed safely",
+            }));
+        }
+    }
+    if !retryable_errors.is_empty() {
+        return Err(retryable_pipeline_error(
+            "collection_or_investigation",
+            &audit,
+            retryable_errors,
+        ));
+    }
     let clusters = cluster_failures(&failures);
+
+    if !failures.is_empty() && clusters.is_empty() {
+        return Err(retryable_pipeline_error(
+            "registration",
+            &audit,
+            vec![json!({
+                "stage": "registration",
+                "operation": "cluster_failures",
+                "retryable": true,
+                "message": "current failures were discovered but none could be registered for task filing",
+            })],
+        ));
+    }
 
     if clusters.is_empty() {
         return Ok(json!({
@@ -136,6 +202,7 @@ pub(crate) fn file_ci_failure_tasks(
             "filed": [],
             "skipped_existing": [],
             "skipped_over_cap": [],
+            "audit": audit,
             "detail": "the queries ran and found no current, non-superseded failure",
         }));
     }
@@ -156,7 +223,21 @@ pub(crate) fn file_ci_failure_tasks(
         .then(|| SYSTEM_CREW.to_string());
 
     for cluster in &clusters {
-        if let Some(task_id) = open_task_for_key(runtime, &cluster.failure_key)? {
+        if let Some(task_id) =
+            open_task_for_key(runtime, &cluster.failure_key).map_err(|error| {
+                retryable_pipeline_error(
+                    "dedupe_lookup",
+                    &audit,
+                    vec![json!({
+                        "stage": "registration",
+                        "operation": "open_task_for_key",
+                        "failure_key": cluster.failure_key,
+                        "retryable": true,
+                        "message": bounded_error(&error.to_string()),
+                    })],
+                )
+            })?
+        {
             skipped_existing.push(json!({
                 "failure_key": cluster.failure_key,
                 "cluster_key": cluster.cluster_key,
@@ -188,7 +269,7 @@ pub(crate) fn file_ci_failure_tasks(
             continue;
         }
 
-        let task = runtime.add_task(TaskAddParams {
+        let task_id = add_task(TaskAddParams {
             title: cluster.title(),
             description: cluster.description(evidence),
             acceptance_criteria: cluster.acceptance_criteria(),
@@ -207,10 +288,24 @@ pub(crate) fn file_ci_failure_tasks(
             status: Some(TaskStatus::Backlog),
             system_created: true,
             ..TaskAddParams::default()
+        })
+        .map_err(|error| {
+            retryable_pipeline_error(
+                "task_creation",
+                &audit,
+                vec![json!({
+                    "stage": "task_creation",
+                    "operation": "orbit.task.add",
+                    "failure_key": cluster.failure_key,
+                    "run_ids": cluster.run_ids(),
+                    "retryable": true,
+                    "message": bounded_error(&error.to_string()),
+                })],
+            )
         })?;
         filed_keys.insert(cluster.failure_key.clone());
         filed.push(json!({
-            "task_id": task.id,
+            "task_id": task_id,
             "failure_key": cluster.failure_key,
             "cluster_key": cluster.cluster_key,
             "workflow": cluster.workflow,
@@ -221,6 +316,7 @@ pub(crate) fn file_ci_failure_tasks(
         }));
     }
 
+    let final_audit = filing_audit(audit, &filed, &skipped_existing);
     Ok(json!({
         "outcome": OUTCOME_CURRENT_FAILURES,
         "capability": capability,
@@ -230,7 +326,96 @@ pub(crate) fn file_ci_failure_tasks(
         "skipped_existing": skipped_existing,
         "skipped_over_cap": skipped_over_cap,
         "max_tasks": max_tasks,
+        "audit": final_audit,
     }))
+}
+
+fn audit_summary(evidence: &Value, failures: &[Value]) -> Value {
+    let latest_run_ids = evidence
+        .get("latest_runs")
+        .and_then(Value::as_array)
+        .map(|runs| {
+            runs.iter()
+                .filter_map(|run| run.get("run_id").cloned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let current_failure_run_ids = failures
+        .iter()
+        .filter_map(|run| run.get("run_id").cloned())
+        .collect::<Vec<_>>();
+    let investigated_failure_run_ids = failures
+        .iter()
+        .filter(|run| run.get("investigated").and_then(Value::as_bool) == Some(true))
+        .filter_map(|run| run.get("run_id").cloned())
+        .collect::<Vec<_>>();
+    json!({
+        "latest_runs_discovered": latest_run_ids.len(),
+        "latest_run_ids": latest_run_ids,
+        "current_failures": current_failure_run_ids.len(),
+        "current_failure_run_ids": current_failure_run_ids,
+        "investigated_failures": investigated_failure_run_ids.len(),
+        "investigated_failure_run_ids": investigated_failure_run_ids,
+        "tasks_created": 0,
+        "created_task_ids": [],
+        "existing_task_skips": 0,
+        "existing_task_owners": [],
+        "retryable_errors": 0,
+    })
+}
+
+fn filing_audit(mut audit: Value, filed: &[Value], skipped_existing: &[Value]) -> Value {
+    let created_task_ids = filed
+        .iter()
+        .filter_map(|entry| entry.get("task_id").cloned())
+        .collect::<Vec<_>>();
+    let existing_task_owners = skipped_existing
+        .iter()
+        .filter_map(|entry| entry.get("task_id").cloned())
+        .collect::<Vec<_>>();
+    audit["tasks_created"] = json!(created_task_ids.len());
+    audit["created_task_ids"] = json!(created_task_ids);
+    audit["existing_task_skips"] = json!(skipped_existing.len());
+    audit["existing_task_owners"] = json!(existing_task_owners);
+    audit
+}
+
+fn retryable_pipeline_error(stage: &str, audit: &Value, errors: Vec<Value>) -> OrbitError {
+    let mut audit = audit.clone();
+    audit["retryable_errors"] = json!(errors.len());
+    OrbitError::Execution(format!(
+        "ci_failure_sweep retryable: {}",
+        json!({
+            "outcome": "retryable_error",
+            "stage": stage,
+            "audit": audit,
+            "errors": errors,
+        })
+    ))
+}
+
+fn bounded_error(message: &str) -> String {
+    redact_all(message).chars().take(500).collect()
+}
+
+fn normalize_retryable_error(error: Value) -> Value {
+    json!({
+        "stage": error.get("stage").and_then(Value::as_str).unwrap_or("collection"),
+        "operation": error
+            .get("operation")
+            .or_else(|| error.get("query"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        "run_id": error.get("run_id").cloned().unwrap_or(Value::Null),
+        "retryable": true,
+        "message": bounded_error(
+            error
+                .get("message")
+                .or_else(|| error.get("error"))
+                .and_then(Value::as_str)
+                .unwrap_or("CI handoff operation failed"),
+        ),
+    })
 }
 
 /// One root cause, with every current run that exhibited it.
@@ -262,6 +447,13 @@ impl FailureCluster {
             .iter()
             .filter_map(|run| run.get("url").and_then(Value::as_str))
             .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    fn run_ids(&self) -> Vec<Value> {
+        self.runs
+            .iter()
+            .filter_map(|run| run.get("run_id").cloned())
             .collect()
     }
 
@@ -478,11 +670,13 @@ impl FailureCluster {
 
 fn render_run(run: &Value) -> String {
     let mut out = format!(
-        "- {} run `{}` ({} on `{}`)\n",
+        "- {} run `{}` ({} on `{}`) — status `{}`, conclusion `{}`\n",
         display(&value_string(run, "url")),
         display(&value_string(run, "run_id")),
         display(&value_string(run, "event")),
         display(&value_string(run, "head_branch")),
+        display(&value_string(run, "status")),
+        display(&value_string(run, "conclusion")),
     );
     out.push_str(&format!(
         "  - event-reported head SHA: `{}`\n",
@@ -522,6 +716,33 @@ fn render_run(run: &Value) -> String {
             "  - checkout evidence: `{}`\n",
             truncate_chars(line, 200)
         ));
+    }
+    for job in run
+        .get("failed_jobs")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .take(3)
+    {
+        out.push_str(&format!(
+            "  - failed job `{}` (id `{}`): {}\n",
+            display(&value_string(job, "name")),
+            display(&value_string(job, "job_id")),
+            display(&value_string(job, "url")),
+        ));
+        let steps = job
+            .get("failed_steps")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(|step| display(&value_string(step, "name")).to_owned())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !steps.is_empty() {
+            out.push_str(&format!("  - failing step(s): `{steps}`\n"));
+        }
     }
     out
 }

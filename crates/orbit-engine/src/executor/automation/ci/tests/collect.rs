@@ -152,11 +152,11 @@ fn latest_non_failing_run_supersedes_older_failures_on_the_same_head() {
         .iter()
         .filter_map(|entry| entry["superseded_by"]["run_id"].as_u64())
         .collect();
-    assert_eq!(superseding_ids, [25, 40]);
+    assert_eq!(superseding_ids, [30, 40]);
 }
 
 #[test]
-fn integration_failure_survives_a_later_non_failing_run_on_another_head() {
+fn newer_repository_wide_success_suppresses_an_older_integration_failure() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
@@ -167,9 +167,8 @@ fn integration_failure_survives_a_later_non_failing_run_on_another_head() {
             "reported_head_sha": OLD,
         }))
         .with_runs(vec![vec![
-            // The pull-request run of `ci` finishes after the integration
-            // push broke, and the release run after that. Neither ran the
-            // integration head's commit, so neither may clear its failure.
+            // The pull-request run of `ci` is the latest repository-wide run
+            // of this workflow, so it supersedes every older failure.
             run_on_branch(
                 40,
                 "ci",
@@ -201,33 +200,24 @@ fn integration_failure_survives_a_later_non_failing_run_on_another_head() {
 
     let evidence = collect(&queries, &input()).expect("collect");
 
-    let current_ids: Vec<u64> = evidence["current_failures"]
-        .as_array()
-        .expect("current failures")
-        .iter()
-        .filter_map(|run| run["run_id"].as_u64())
-        .collect();
+    assert_eq!(evidence["current_failures"], json!([]));
+    assert_eq!(evidence["outcome_hint"], json!("no_current_failure"));
+    assert_eq!(evidence["latest_runs"][0]["run_id"], json!(40));
+    assert_eq!(evidence["stale_or_superseded"][0]["run_id"], json!(20));
     assert_eq!(
-        current_ids,
-        [20],
-        "a run on another head must not supersede the integration head: {evidence}"
+        evidence["stale_or_superseded"][0]["superseded_by"]["run_id"],
+        json!(40)
     );
-    assert_eq!(
-        evidence["current_failures"][0]["ref_kind"],
-        json!("integration")
-    );
-    assert_eq!(evidence["outcome_hint"], json!("current_failures"));
-    assert_eq!(evidence["stale_or_superseded"], json!([]));
 }
 
 #[test]
-fn run_on_a_branch_no_scanned_head_matches_is_never_current() {
+fn latest_repository_wide_failure_is_current_even_when_its_ref_is_not_scanned() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
         .with_runs(vec![vec![
-            // Newest run in the repository, on a branch behind no open pull
-            // request. It can neither be filed nor supersede anything.
+            // Eligibility is workflow-wide, not branch-by-branch. Ref
+            // metadata can be absent without reviving the older run.
             run_on_branch(
                 50,
                 "ci",
@@ -258,25 +248,12 @@ fn run_on_a_branch_no_scanned_head_matches_is_never_current() {
         .collect();
     assert_eq!(
         current_ids,
-        [20],
-        "an untracked branch must neither be filed nor supersede: {evidence}"
+        [50],
+        "exactly the repository-wide latest workflow run must be current: {evidence}"
     );
-    assert_eq!(evidence["stale_or_superseded"], json!([]));
+    assert_eq!(evidence["current_failures"][0]["ref_kind"], json!("other"));
+    assert_eq!(evidence["stale_or_superseded"][0]["run_id"], json!(20));
     assert_eq!(evidence["in_flight"], json!([]));
-    assert_eq!(
-        evidence["truncation"]["runs_on_unscanned_branches"],
-        json!(1)
-    );
-    assert!(
-        evidence["truncation"]["notes"]
-            .as_array()
-            .expect("notes")
-            .iter()
-            .any(|note| note
-                .as_str()
-                .is_some_and(|note| note.contains("match no scanned head"))),
-        "skipped runs must be reported, not silently dropped: {evidence}"
-    );
 }
 
 #[test]
@@ -329,42 +306,49 @@ fn latest_in_flight_run_does_not_resurrect_an_older_failure() {
 }
 
 #[test]
-fn old_dependabot_failure_on_an_unscanned_branch_is_never_current() {
+fn old_dependabot_failure_is_superseded_by_newer_repository_wide_run() {
     // ORB-11146: an eleven-day-old Dependabot run kept being filed because its
-    // branch had not advanced. Once that pull request is closed the branch is
-    // not a scanned head, so the run is skipped outright rather than depending
-    // on a newer run of the same workflow existing somewhere in the repository.
+    // branch had not advanced. Repository-wide workflow selection suppresses
+    // it once any newer CI run exists, regardless of the newer run's ref.
     const DEPENDABOT_SHA: &str = "0f14f3f2ad2c863f902c0add969ff09d10e3f15c";
     const OLD_RUN_ID: u64 = 31_583_558_682;
 
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
-        .with_runs(vec![vec![run_on_branch(
-            OLD_RUN_ID,
-            "CI",
-            "dependabot/cargo/old",
-            DEPENDABOT_SHA,
-            "completed",
-            Some("failure"),
-            "2026-08-20T01:00:00Z",
-        )]]);
+        .with_runs(vec![vec![
+            run_on_branch(
+                40_000_000_000,
+                "CI",
+                "topic",
+                HEAD,
+                "completed",
+                Some("success"),
+                "2026-08-31T01:00:00Z",
+            ),
+            run_on_branch(
+                OLD_RUN_ID,
+                "CI",
+                "dependabot/cargo/old",
+                DEPENDABOT_SHA,
+                "completed",
+                Some("failure"),
+                "2026-08-20T01:00:00Z",
+            ),
+        ]]);
 
     let evidence = collect(&queries, &input()).expect("collect");
 
     assert_eq!(evidence["current_failures"], json!([]));
     assert_eq!(evidence["outcome_hint"], json!("no_current_failure"));
     assert_eq!(
-        evidence["truncation"]["runs_on_unscanned_branches"],
-        json!(1)
+        evidence["stale_or_superseded"][0]["run_id"],
+        json!(OLD_RUN_ID)
     );
 }
 
 #[test]
-fn open_pull_request_head_failure_is_current_for_its_own_head() {
-    // The converse of the case above: while the pull request is open its head
-    // is scanned, and its own latest run decides it. No run on another branch
-    // can clear it, and it clears no other branch.
+fn newer_cross_branch_success_suppresses_open_pull_request_failure() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
@@ -397,13 +381,9 @@ fn open_pull_request_head_failure_is_current_for_its_own_head() {
 
     let evidence = collect(&queries, &input()).expect("collect");
 
-    assert_eq!(evidence["current_failures"][0]["run_id"], json!(100));
-    assert_eq!(
-        evidence["current_failures"][0]["ref_kind"],
-        json!("pull_request")
-    );
-    assert_eq!(evidence["current_failures"][0]["pr_number"], json!(959));
-    assert_eq!(evidence["stale_or_superseded"], json!([]));
+    assert_eq!(evidence["current_failures"], json!([]));
+    assert_eq!(evidence["latest_runs"][0]["run_id"], json!(200));
+    assert_eq!(evidence["stale_or_superseded"][0]["run_id"], json!(100));
 }
 
 #[test]
@@ -487,9 +467,12 @@ fn derives_release_head_from_github_and_reports_every_bound_it_hit() {
     let truncation = &evidence["truncation"];
     // The reported bound is the repository-wide cap that was actually applied.
     assert_eq!(truncation["max_runs"], json!(100));
-    assert_eq!(truncation["runs_on_unscanned_branches"], json!(0));
     assert_eq!(truncation["current_failures_discovered"], json!(2));
-    assert_eq!(truncation["current_failures_investigated"], json!(1));
+    assert_eq!(
+        truncation["current_failures_investigation_attempted"],
+        json!(1)
+    );
+    assert_eq!(truncation["current_failures_investigated"], json!(0));
     assert!(
         truncation["notes"]
             .as_array()
@@ -500,7 +483,10 @@ fn derives_release_head_from_github_and_reports_every_bound_it_hit() {
                 .is_some_and(|note| note.contains("not investigated"))),
         "truncation must be reported explicitly: {truncation}"
     );
-    assert_eq!(evidence["current_failures"][0]["investigated"], json!(true));
+    assert_eq!(
+        evidence["current_failures"][0]["investigated"],
+        json!(false)
+    );
     assert_eq!(
         evidence["current_failures"][1]["investigated"],
         json!(false)
@@ -518,7 +504,7 @@ fn integration_and_release_on_the_same_branch_are_scanned_once() {
 }
 
 #[test]
-fn empty_failed_step_log_is_recorded_in_query_errors() {
+fn empty_failed_step_log_is_an_explicit_retryable_investigation_error() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
@@ -538,15 +524,159 @@ fn empty_failed_step_log_is_recorded_in_query_errors() {
     let evidence = collect(&queries, &input()).expect("collect");
     let failure = &evidence["current_failures"][0];
     assert_eq!(failure["log_excerpt"], json!(""));
-    let errors = evidence["query_errors"].as_array().expect("query_errors");
+    let errors = evidence["retryable_errors"]
+        .as_array()
+        .expect("retryable_errors");
     assert!(
         errors.iter().any(|error| {
-            error["query"] == json!("run_logs")
-                && error["run_id"] == json!("10")
-                && error["error"]
+            error["operation"] == json!("run_logs")
+                && error["run_id"] == json!(10)
+                && error["retryable"] == json!(true)
+                && error["message"]
                     .as_str()
-                    .is_some_and(|text| text.contains("no log text"))
+                    .is_some_and(|text| text.contains("no failed-step log text"))
         }),
-        "empty failed-step log must be a query error, got {errors:?}"
+        "empty failed-step log must be retryable, got {errors:?}"
     );
+    assert_eq!(failure["investigated"], json!(false));
+    assert_eq!(evidence["outcome_hint"], json!("retryable_error"));
+}
+
+#[test]
+fn discovery_failure_is_bounded_redacted_and_retryable() {
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_repository_runs_error(
+            "token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 could not list workflow runs",
+        );
+
+    let evidence = collect(&queries, &input()).expect("collect retryable evidence");
+
+    assert_eq!(evidence["outcome_hint"], json!("retryable_error"));
+    assert_eq!(evidence["summary"]["retryable_errors"], json!(1));
+    let error = &evidence["retryable_errors"][0];
+    assert_eq!(error["stage"], json!("discovery"));
+    assert_eq!(error["operation"], json!("run_list"));
+    assert_eq!(error["retryable"], json!(true));
+    assert!(
+        !error["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890")
+    );
+}
+
+#[test]
+fn investigation_failure_keeps_the_current_run_visible_and_retryable() {
+    let queries = FakeQueries::authenticated()
+        .with_head("agent-main", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run_on_branch(
+            33_358_160_088,
+            "CI",
+            "agent-main",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-31T04:00:00Z",
+        )]])
+        .with_run_view_error("33358160088", "temporary GitHub job-view failure")
+        .with_log_error("33358160088", false, "temporary GitHub log failure")
+        .with_log_error("33358160088", true, "temporary GitHub full-log failure");
+
+    let evidence = collect(
+        &queries,
+        &json!({"integration_branch": "agent-main", "max_checkout_log_reads": 1}),
+    )
+    .expect("collect retryable evidence");
+
+    assert_eq!(evidence["outcome_hint"], json!("retryable_error"));
+    assert_eq!(
+        evidence["current_failures"][0]["run_id"],
+        json!(33_358_160_088_u64)
+    );
+    assert_eq!(
+        evidence["current_failures"][0]["investigated"],
+        json!(false)
+    );
+    assert_eq!(evidence["summary"]["current_failures"], json!(1));
+    assert_eq!(evidence["summary"]["investigated_failures"], json!(0));
+    assert!(
+        evidence["summary"]["retryable_errors"]
+            .as_u64()
+            .is_some_and(|count| count >= 3)
+    );
+}
+
+#[test]
+fn live_failure_fixture_is_latest_current_and_evidence_complete() {
+    const EVENT_SHA: &str = "2a4cb4e4631a856552d901b6b062fa6596475cc0";
+    let queries = FakeQueries::authenticated()
+        .with_head("agent-main", EVENT_SHA)
+        .with_head("main", OLD)
+        .with_runs(vec![vec![run_on_branch(
+            33_358_160_088,
+            "CI",
+            "agent-main",
+            EVENT_SHA,
+            "completed",
+            Some("failure"),
+            "2026-08-31T04:00:00Z",
+        )]])
+        .with_run_view(
+            "33358160088",
+            json!({"failed_jobs": [{
+                "job_id": 99_384_177_985_u64,
+                "name": "Rust tests",
+                "conclusion": "failure",
+                "url": "https://github.com/danieljhkim/orbit/actions/runs/33358160088/job/99384177985",
+                "failed_steps": [{"name": "Run Rust tests", "conclusion": "failure"}],
+            }]}),
+        )
+        .with_log(
+            "33358160088",
+            false,
+            "CI\tRust tests\tRun Rust tests orbit-cli::routine_root::routine_commands_honor_orbit_root_and_mutate_only_the_selected_root\nCI\tRust tests\tcrates/orbit-cli/tests/routine_root.rs:218 routine command touched isolated HOME at /tmp/.tmpgNchET/empty-home\n",
+        )
+        .with_log(
+            "33358160088",
+            true,
+            "CI\tCheckout\tHEAD is now at 2a4cb4e4631a856552d901b6b062fa6596475cc0\n",
+        );
+
+    let evidence = collect(
+        &queries,
+        &json!({"integration_branch": "agent-main", "max_checkout_log_reads": 1}),
+    )
+    .expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert_eq!(failure["run_id"], json!(33_358_160_088_u64));
+    assert_eq!(
+        failure["failed_jobs"][0]["job_id"],
+        json!(99_384_177_985_u64)
+    );
+    assert_eq!(failure["event_reported_head_sha"], json!(EVENT_SHA));
+    assert_eq!(failure["current_ref_head_sha"], json!(EVENT_SHA));
+    assert_eq!(failure["actual_checkout_shas"], json!([EVENT_SHA]));
+    assert!(
+        failure["log_excerpt"]
+            .as_str()
+            .is_some_and(|log| log.contains("routine command touched isolated HOME"))
+    );
+    assert_eq!(failure["investigated"], json!(true));
+    assert_eq!(
+        evidence["summary"]["latest_run_ids"],
+        json!([33_358_160_088_u64])
+    );
+    assert_eq!(
+        evidence["summary"]["current_failure_run_ids"],
+        json!([33_358_160_088_u64])
+    );
+    assert_eq!(
+        evidence["summary"]["investigated_failure_run_ids"],
+        json!([33_358_160_088_u64])
+    );
+    assert_eq!(evidence["summary"]["retryable_errors"], json!(0));
 }

@@ -21,7 +21,13 @@ spec:
     `capability_unavailable` and files nothing, a snapshot with no current
     failure reports `no_current_failure` and files nothing, and anything else
     reports `current_failures` with what it filed, skipped as already open, or
-    left unfiled at the `max_tasks` cap.
+    left unfiled at the `max_tasks` cap. Discovery, investigation,
+    registration, dedupe lookup, or task-creation failures fail the activity
+    with a bounded `retryable_error` payload; a current failure is never
+    converted to `no_current_failure` merely because its handoff failed. Every
+    successful output includes an `audit` object with counts and identities for
+    latest runs, current and investigated failures, created tasks, and existing
+    dedupe owners.
   input_schema_json:
     type: object
     required: [ci_evidence]
@@ -40,7 +46,7 @@ spec:
           in `skipped_over_cap` rather than dropped silently.
   output_schema_json:
     type: object
-    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_over_cap]
+    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_over_cap, audit]
     properties:
       outcome:
         type: string
@@ -111,5 +117,7 @@ spec:
               type: array
               items:
                 type: string
+      audit:
+        type: object
   action: file_ci_failure_tasks
   config: {}

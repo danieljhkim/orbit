@@ -12,10 +12,11 @@ spec:
     rather than assuming branch names; separates the event-reported SHA, the
     ref's current head, and the commit the runner actually checked out; and
     reports every bound it hit in `truncation` rather than silently returning
-    less. Workflow runs are listed repository-wide in one query but evaluated
-    per head: only a newer run of the same workflow on the same branch
-    supersedes an older failure, and a run on a branch that matches no scanned
-    head is never reported as a current failure. When no GitHub client is
+    less. Workflow runs are listed repository-wide in one query and exactly
+    the latest run of each workflow is authoritative, ordered by creation time
+    then run ID. Discovery or investigation failures are bounded, redacted,
+    and emitted in `retryable_errors`; the filing step rejects such a snapshot
+    so it cannot be mistaken for a clean result. When no GitHub client is
     available or authenticated the snapshot carries `collected: false` and
     gathers nothing further, so a caller can never mistake it for a clean CI
     result.
@@ -68,14 +69,18 @@ spec:
             type: object
           heads:
             type: array
+          latest_runs:
+            type: array
           current_failures:
             type: array
           stale_or_superseded:
             type: array
           in_flight:
             type: array
-          query_errors:
+          retryable_errors:
             type: array
+          summary:
+            type: object
           truncation:
             type: object
           collected_at:

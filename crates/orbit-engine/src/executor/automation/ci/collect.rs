@@ -6,9 +6,9 @@
 //! the commit the runner actually checked out as separate fields, and the
 //! stale/superseding evidence that says which failures are still real.
 //!
-//! "Still real" is decided per head. Runs are listed repository-wide in one
-//! query, but a run only supersedes an older one on the same branch, and a run
-//! on a branch this workspace does not track is evaluated not at all.
+//! "Still real" is decided per workflow. Runs are listed repository-wide and
+//! exactly the newest run of each workflow is authoritative, regardless of
+//! which branch or SHA an older run used.
 //!
 //! Losing the agent's ability to ask a follow-up question mid-diagnosis is the
 //! accepted cost of that boundary. The compensation is that the snapshot is
@@ -17,12 +17,13 @@
 //! "we stopped looking".
 
 use orbit_common::OrbitError;
+use orbit_common::security::redaction::redact_all;
 use serde_json::{Value, json};
 
 use super::query::{CiQueries, LogScope};
 use super::{
     OUTCOME_CAPABILITY_UNAVAILABLE, OUTCOME_CURRENT_FAILURES, OUTCOME_NO_CURRENT_FAILURE,
-    bounded_u64, optional_input_string, unsuccessful_conclusion,
+    OUTCOME_RETRYABLE_ERROR, bounded_u64, optional_input_string, unsuccessful_conclusion,
 };
 
 /// Snapshot schema version. Bump when a consumer would misread an older
@@ -45,6 +46,7 @@ const MAX_LOG_MAX_BYTES: u64 = 262_144;
 /// Cap on full-log reads taken purely to evidence a checkout commit. The
 /// failed-step log usually lacks it, and a full log can be tens of megabytes.
 const DEFAULT_MAX_CHECKOUT_LOG_READS: u64 = 3;
+const MAX_RETRYABLE_ERROR_CHARS: usize = 500;
 
 /// Which of the workspace's heads a run belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,7 +133,20 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
         }));
     }
 
-    let repository = queries.repo_view()?;
+    let mut retryable_errors: Vec<Value> = Vec::new();
+    let repository = match queries.repo_view() {
+        Ok(repository) => repository,
+        Err(error) => {
+            push_retryable_error(
+                &mut retryable_errors,
+                "discovery",
+                "repo_view",
+                None,
+                &error.to_string(),
+            );
+            json!({})
+        }
+    };
     let default_branch = repository
         .get("default_branch")
         .and_then(Value::as_str)
@@ -140,65 +155,75 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
         .map(ToOwned::to_owned);
 
     let mut notes: Vec<String> = Vec::new();
-    let mut query_errors: Vec<Value> = Vec::new();
-
     let refs = derive_refs(
         queries,
         input,
         default_branch.as_deref(),
         &bounds,
         &mut notes,
-        &mut query_errors,
+        &mut retryable_errors,
     )?;
 
+    let mut latest: Vec<Value> = Vec::new();
     let mut current: Vec<Value> = Vec::new();
     let mut stale: Vec<Value> = Vec::new();
     let mut in_flight: Vec<Value> = Vec::new();
     // One repository-wide query rather than one per ref: a single list is what
     // lets a newer run of a workflow supersede an older one without asking the
-    // ref it ran on whether it has advanced. The listing is repository-wide;
-    // the *evaluation* is not — `partition_runs` still answers per scanned ref.
+    // ref it ran on whether it has advanced. Selection is repository-wide too:
+    // exactly one latest run per workflow is authoritative.
     let runs = match queries.repository_runs(bounds.max_runs) {
         Ok(runs) => runs,
         Err(error) => {
-            query_errors.push(json!({
-                "query": "run_list",
-                "error": error.to_string(),
-            }));
+            push_retryable_error(
+                &mut retryable_errors,
+                "discovery",
+                "run_list",
+                None,
+                &error.to_string(),
+            );
             Vec::new()
         }
     };
     let runs_listed = runs.len();
     if runs_listed as u64 == bounds.max_runs {
         notes.push(format!(
-            "repository-wide workflow runs were listed at the cap ({}); a head whose runs \
-             are older than the newest {} in this repository may be absent entirely",
+            "repository-wide workflow runs were listed at the cap ({}); a workflow whose latest \
+             run is older than the newest {} runs in this repository may be absent entirely",
             bounds.max_runs, bounds.max_runs
         ));
     }
-    let runs_on_unscanned_branches =
-        partition_runs(&refs, &runs, &mut current, &mut stale, &mut in_flight);
-    if runs_on_unscanned_branches > 0 {
-        notes.push(format!(
-            "{runs_on_unscanned_branches} of {runs_listed} listed runs were on branches that \
-             match no scanned head and were not evaluated; this workspace tracks the \
-             integration head, the release head, and open pull-request heads only"
-        ));
-    }
+    partition_runs(
+        &refs,
+        &runs,
+        &mut latest,
+        &mut current,
+        &mut stale,
+        &mut in_flight,
+    );
 
     sort_current_failures(&mut current);
     let discovered = current.len();
-    let investigated = discovered.min(bounds.max_investigated_runs);
-    if discovered > investigated {
+    let attempted = discovered.min(bounds.max_investigated_runs);
+    if discovered > attempted {
         notes.push(format!(
             "{} of {discovered} current failures were listed but not investigated \
-             (max_investigated_runs={investigated}); their run URLs are still present",
-            discovered - investigated
+             (max_investigated_runs={attempted}); their run URLs are still present",
+            discovered - attempted
         ));
+        for failure in current.iter().skip(attempted) {
+            push_retryable_error(
+                &mut retryable_errors,
+                "investigation",
+                "investigation_budget",
+                failure.get("run_id"),
+                "current failure was not investigated because max_investigated_runs was exhausted",
+            );
+        }
     }
     let mut checkout_log_reads = 0usize;
     for (index, failure) in current.iter_mut().enumerate() {
-        if index >= investigated {
+        if index >= attempted {
             failure["investigated"] = json!(false);
             continue;
         }
@@ -207,33 +232,64 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
             failure,
             &bounds,
             &mut checkout_log_reads,
-            &mut query_errors,
+            &mut retryable_errors,
         );
     }
+    let investigated_ids = current
+        .iter()
+        .filter(|failure| failure.get("investigated").and_then(Value::as_bool) == Some(true))
+        .filter_map(|failure| failure.get("run_id").cloned())
+        .collect::<Vec<_>>();
+    let latest_ids = latest
+        .iter()
+        .filter_map(|run| run.get("run_id").cloned())
+        .collect::<Vec<_>>();
+    let current_ids = current
+        .iter()
+        .filter_map(|run| run.get("run_id").cloned())
+        .collect::<Vec<_>>();
+    let investigated_count = investigated_ids.len();
+    let retryable_error_count = retryable_errors.len();
 
     Ok(json!({
         "schema_version": CI_EVIDENCE_SCHEMA_VERSION,
         "collected": true,
-        "outcome_hint": if current.is_empty() { OUTCOME_NO_CURRENT_FAILURE } else { OUTCOME_CURRENT_FAILURES },
+        "outcome_hint": if retryable_error_count > 0 {
+            OUTCOME_RETRYABLE_ERROR
+        } else if current.is_empty() {
+            OUTCOME_NO_CURRENT_FAILURE
+        } else {
+            OUTCOME_CURRENT_FAILURES
+        },
         "capability": auth.to_json(),
         "repository": repository,
         "heads": refs.iter().map(head_json).collect::<Vec<_>>(),
+        "latest_runs": latest,
         "current_failures": current,
         "stale_or_superseded": stale,
         "in_flight": in_flight,
-        "query_errors": query_errors,
+        "retryable_errors": retryable_errors,
+        "summary": {
+            "latest_runs_discovered": latest_ids.len(),
+            "latest_run_ids": latest_ids,
+            "current_failures": current_ids.len(),
+            "current_failure_run_ids": current_ids,
+            "investigated_failures": investigated_count,
+            "investigated_failure_run_ids": investigated_ids,
+            "retryable_errors": retryable_error_count,
+        },
         "truncation": json!({
             "refs_scanned": refs.len(),
             "runs_listed": runs_listed,
             "max_runs": bounds.max_runs,
-            "runs_on_unscanned_branches": runs_on_unscanned_branches,
             "pull_requests_scanned": refs
                 .iter()
                 .filter(|scanned| scanned.kind == RefKind::PullRequest)
                 .count(),
             "max_pull_requests": bounds.max_pull_requests,
             "current_failures_discovered": discovered,
-            "current_failures_investigated": investigated,
+            "current_failures_investigation_attempted": attempted,
+            "current_failures_investigated": investigated_count,
             "log_max_bytes": bounds.log_max_bytes,
             "checkout_log_reads": checkout_log_reads,
             "max_checkout_log_reads": bounds.max_checkout_log_reads,
@@ -255,7 +311,7 @@ fn derive_refs<Q: CiQueries + ?Sized>(
     default_branch: Option<&str>,
     bounds: &Bounds,
     notes: &mut Vec<String>,
-    query_errors: &mut Vec<Value>,
+    retryable_errors: &mut Vec<Value>,
 ) -> Result<Vec<ScannedRef>, OrbitError> {
     let integration = optional_input_string(input, "integration_branch")
         .or_else(|| optional_input_string(input, "base_branch"))
@@ -279,11 +335,13 @@ fn derive_refs<Q: CiQueries + ?Sized>(
         let head_sha = match queries.remote_branch_head(&branch) {
             Ok(head) => head,
             Err(error) => {
-                query_errors.push(json!({
-                    "query": "remote_branch_head",
-                    "branch": branch,
-                    "error": error.to_string(),
-                }));
+                push_retryable_error(
+                    retryable_errors,
+                    "discovery",
+                    "remote_branch_head",
+                    None,
+                    &format!("branch {branch}: {error}"),
+                );
                 None
             }
         };
@@ -340,10 +398,13 @@ fn derive_refs<Q: CiQueries + ?Sized>(
             }
         }
         Err(error) => {
-            query_errors.push(json!({
-                "query": "pr_list",
-                "error": error.to_string(),
-            }));
+            push_retryable_error(
+                retryable_errors,
+                "discovery",
+                "pr_list",
+                None,
+                &error.to_string(),
+            );
             notes.push(
                 "open pull requests could not be listed; no pull-request head was scanned"
                     .to_string(),
@@ -364,63 +425,45 @@ fn head_json(scanned: &ScannedRef) -> Value {
     })
 }
 
-/// Evaluate the latest run of each workflow **on each scanned head**.
+/// Evaluate exactly the latest repository-wide run for each workflow.
 ///
-/// Grouping by workflow alone makes supersession branch-blind, and in a
-/// repository where one workflow runs both on pushes to the integration branch
-/// and on every pull request that is not a detail: the first pull-request run
-/// to finish after a broken integration push buries the integration failure,
-/// which is the head that actually gates delivery. So a run only ever speaks
-/// for the branch it ran on, and the newest run on that branch decides it —
-/// regardless of SHA, status, or conclusion, which is what keeps an unchanged
-/// old head from holding an obsolete failure open forever.
-///
-/// A run whose `head_branch` matches no scanned head speaks for nothing this
-/// workspace tracks — an abandoned feature branch, a closed pull request, an
-/// unmerged Dependabot branch. It cannot be current and it cannot supersede;
-/// it is counted, and the count is reported, so that "not tracked" never reads
-/// as "not seen". Returns how many such runs were skipped.
+/// Older unsuccessful runs remain useful evidence, but can never become
+/// current merely because the ref they ran on has not advanced. The latest run
+/// supersedes them regardless of branch, SHA, status, or conclusion. This is
+/// the repository-wide workflow invariant established by ORB-11147.
 fn partition_runs(
     refs: &[ScannedRef],
     runs: &[Value],
+    latest_runs: &mut Vec<Value>,
     current: &mut Vec<Value>,
     stale: &mut Vec<Value>,
     in_flight: &mut Vec<Value>,
-) -> usize {
-    let mut unscanned = 0usize;
-    // Keyed by (workflow, branch) so the map iterates in a stable order and
-    // the snapshot is byte-identical for identical GitHub state.
-    let mut heads = std::collections::BTreeMap::<(String, String), Vec<&Value>>::new();
+) {
+    let mut workflows = std::collections::BTreeMap::<String, Vec<&Value>>::new();
     for run in runs {
-        let Some(scanned) = ref_for_run(refs, run) else {
-            unscanned += 1;
-            continue;
-        };
         let workflow = run
             .get("workflow")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        heads
-            .entry((workflow, scanned.branch.clone()))
-            .or_default()
-            .push(run);
+        workflows.entry(workflow).or_default().push(run);
     }
 
-    for head_runs in heads.values_mut() {
-        head_runs.sort_by_key(|run| std::cmp::Reverse(run_order(run)));
-        let Some(latest) = head_runs.first().copied() else {
+    for workflow_runs in workflows.values_mut() {
+        workflow_runs.sort_by_key(|run| std::cmp::Reverse(run_order(run)));
+        let Some(latest) = workflow_runs.first().copied() else {
             continue;
         };
+        latest_runs.push(run_summary(ref_for_run(refs, latest), latest));
 
-        for older in head_runs.iter().skip(1).copied() {
+        for older in workflow_runs.iter().skip(1).copied() {
             let completed = older.get("status").and_then(Value::as_str) == Some("completed");
             let conclusion = older.get("conclusion").and_then(Value::as_str);
             if completed && unsuccessful_conclusion(conclusion) {
                 let mut entry = run_summary(ref_for_run(refs, older), older);
                 entry["reason"] = json!("superseded_by_newer_workflow_run");
                 entry["evidence"] = json!(format!(
-                    "newer run {} on the same branch at {} is {} with conclusion {}",
+                    "newer repository-wide run {} at {} is {} with conclusion {}",
                     latest
                         .get("run_id")
                         .and_then(Value::as_u64)
@@ -457,8 +500,6 @@ fn partition_runs(
             current.push(summary);
         }
     }
-
-    unscanned
 }
 
 /// Sortable position of a run: creation time first, run id as the tiebreak.
@@ -524,24 +565,46 @@ fn investigate<Q: CiQueries + ?Sized>(
     failure: &mut Value,
     bounds: &Bounds,
     checkout_log_reads: &mut usize,
-    query_errors: &mut Vec<Value>,
+    retryable_errors: &mut Vec<Value>,
 ) {
     let Some(run_id) = failure
         .get("run_id")
         .and_then(Value::as_u64)
         .map(|id| id.to_string())
     else {
+        push_retryable_error(
+            retryable_errors,
+            "registration",
+            "run_identity",
+            None,
+            "current failure has no numeric run_id",
+        );
         return;
     };
-    failure["investigated"] = json!(true);
+    let errors_before = retryable_errors.len();
 
     match queries.run_view(&run_id) {
         Ok(view) => {
-            failure["failed_jobs"] = view.get("failed_jobs").cloned().unwrap_or(json!([]));
+            let failed_jobs = view.get("failed_jobs").cloned().unwrap_or(json!([]));
+            if failed_jobs.as_array().is_none_or(Vec::is_empty) {
+                push_retryable_error(
+                    retryable_errors,
+                    "registration",
+                    "run_view",
+                    failure.get("run_id"),
+                    "failed run returned no failed jobs",
+                );
+            }
+            failure["failed_jobs"] = failed_jobs;
         }
         Err(error) => {
-            query_errors
-                .push(json!({"query": "run_view", "run_id": run_id, "error": error.to_string()}));
+            push_retryable_error(
+                retryable_errors,
+                "investigation",
+                "run_view",
+                failure.get("run_id"),
+                &error.to_string(),
+            );
         }
     }
 
@@ -559,16 +622,23 @@ fn investigate<Q: CiQueries + ?Sized>(
             // (retention). That is not a captured excerpt; record it so the
             // filed task can say why the block is empty.
             if log.text.trim().is_empty() {
-                query_errors.push(json!({
-                    "query": "run_logs",
-                    "run_id": run_id,
-                    "error": "query returned no log text",
-                }));
+                push_retryable_error(
+                    retryable_errors,
+                    "investigation",
+                    "run_logs",
+                    failure.get("run_id"),
+                    "query returned no failed-step log text",
+                );
             }
         }
         Err(error) => {
-            query_errors
-                .push(json!({"query": "run_logs", "run_id": run_id, "error": error.to_string()}));
+            push_retryable_error(
+                retryable_errors,
+                "investigation",
+                "run_logs",
+                failure.get("run_id"),
+                &error.to_string(),
+            );
         }
     }
 
@@ -581,10 +651,19 @@ fn investigate<Q: CiQueries + ?Sized>(
         .and_then(Value::as_array)
         .is_none_or(Vec::is_empty);
     if !needs_checkout {
+        failure["investigated"] = json!(retryable_errors.len() == errors_before);
         return;
     }
     if *checkout_log_reads >= bounds.max_checkout_log_reads {
         failure["checkout_evidence_scope"] = json!("skipped_budget_exhausted");
+        push_retryable_error(
+            retryable_errors,
+            "investigation",
+            "checkout_evidence_budget",
+            failure.get("run_id"),
+            "actual checkout SHA was not collected because max_checkout_log_reads was exhausted",
+        );
+        failure["investigated"] = json!(false);
         return;
     }
     *checkout_log_reads += 1;
@@ -593,12 +672,48 @@ fn investigate<Q: CiQueries + ?Sized>(
             failure["actual_checkout_shas"] = json!(log.checkout_commits);
             failure["checkout_evidence"] = json!(log.checkout_evidence);
             failure["checkout_evidence_scope"] = json!("all");
+            if failure
+                .get("actual_checkout_shas")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            {
+                push_retryable_error(
+                    retryable_errors,
+                    "registration",
+                    "checkout_evidence",
+                    failure.get("run_id"),
+                    "run logs contained no actual checkout SHA",
+                );
+            }
         }
         Err(error) => {
             failure["checkout_evidence_scope"] = json!("unavailable");
-            query_errors.push(
-                json!({"query": "run_logs_all", "run_id": run_id, "error": error.to_string()}),
+            push_retryable_error(
+                retryable_errors,
+                "investigation",
+                "run_logs_all",
+                failure.get("run_id"),
+                &error.to_string(),
             );
         }
     }
+    failure["investigated"] = json!(retryable_errors.len() == errors_before);
+}
+
+fn push_retryable_error(
+    errors: &mut Vec<Value>,
+    stage: &str,
+    operation: &str,
+    run_id: Option<&Value>,
+    message: &str,
+) {
+    let redacted = redact_all(message);
+    let bounded: String = redacted.chars().take(MAX_RETRYABLE_ERROR_CHARS).collect();
+    errors.push(json!({
+        "stage": stage,
+        "operation": operation,
+        "run_id": run_id.cloned().unwrap_or(Value::Null),
+        "retryable": true,
+        "message": bounded,
+    }));
 }
