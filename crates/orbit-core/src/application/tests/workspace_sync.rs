@@ -203,6 +203,93 @@ fn real_template_refresh_uses_recorded_binding_and_second_run_is_a_no_op() {
     );
 }
 
+/// A workspace seeded before routines recorded provenance has no routine
+/// manifest, and its routines are customized by design. Sync must adopt them
+/// instead of reporting a collision on every run, and the adoption must leave
+/// the family reconcilable when a shipped template later changes [ORB-11154].
+#[test]
+fn manifestless_customized_routines_are_adopted_and_stay_reconcilable() {
+    let root = tempdir().expect("create tempdir");
+    let (global, workspace) = initialized_roots(root.path());
+    let manifest_path = routine_manifest(&workspace);
+    std::fs::remove_file(&manifest_path).expect("drop the pre-provenance routine manifest");
+    let customized = workspace.join("routines/task_triage.yaml");
+    let edited = std::fs::read_to_string(&customized)
+        .expect("read seeded routine")
+        .replace("enabled: false", "enabled: true");
+    std::fs::write(&customized, &edited).expect("customize the seeded routine");
+
+    let checked = reconcile_workspace_managed_artifacts(
+        &global,
+        &workspace,
+        Some("host-a"),
+        Some("repo"),
+        true,
+    )
+    .expect("check a pre-provenance workspace");
+    assert!(
+        !checked.actions.iter().any(|action| {
+            action.kind == "routine" && action.outcome == ManagedArtifactOutcome::Preserved
+        }),
+        "customized routines must not be reported as collisions: {:?}",
+        checked.actions
+    );
+    assert!(
+        !manifest_path.exists(),
+        "--check must not write the manifest"
+    );
+
+    let applied = reconcile_workspace_managed_artifacts(
+        &global,
+        &workspace,
+        Some("host-a"),
+        Some("repo"),
+        false,
+    )
+    .expect("adopt a pre-provenance workspace");
+    assert!(!applied.actions.iter().any(|action| {
+        action.kind == "routine" && action.outcome == ManagedArtifactOutcome::Preserved
+    }));
+    assert!(applied.actions.iter().any(|action| {
+        action.name == "task_triage" && action.outcome == ManagedArtifactOutcome::Migrated
+    }));
+    assert_eq!(
+        std::fs::read_to_string(&customized).expect("reread routine"),
+        edited,
+        "adoption must not rewrite the operator's routine"
+    );
+    let mut manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).expect("read manifest"))
+            .expect("parse adopted manifest");
+    let entry = &manifest["routineProvenance"]["task_triage"];
+    assert_eq!(entry["renderedDigest"], Value::from(sha256(&edited)));
+    assert_eq!(entry["binding"]["hosts"][0], "host-a");
+
+    // Provenance now exists, so a later shipped-template change reconciles
+    // rather than repeating a collision report forever.
+    manifest["routineProvenance"]["task_triage"]["templateDigest"] =
+        Value::String("digest-from-previous-shipped-template".to_string());
+    std::fs::write(
+        &manifest_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&manifest).expect("serialize stale provenance")
+        ),
+    )
+    .expect("write stale template identity");
+    let refreshed = reconcile_workspace_managed_artifacts(
+        &global,
+        &workspace,
+        Some("host-a"),
+        Some("repo"),
+        false,
+    )
+    .expect("refresh the adopted routine");
+    assert!(refreshed.actions.iter().any(|action| {
+        action.name == "task_triage" && action.outcome == ManagedArtifactOutcome::Refreshed
+    }));
+}
+
 #[test]
 fn sync_refreshes_only_provenance_clean_non_routine_assets_and_retires_safely() {
     let root = tempdir().expect("create tempdir");

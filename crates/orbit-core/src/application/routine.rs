@@ -394,7 +394,43 @@ pub(crate) fn reconcile_default_routines(
                     path.display()
                 ))
             })?;
-            if sha256_hex(existing.as_bytes()) != rendered_digest {
+            let existing_digest = sha256_hex(existing.as_bytes());
+            if existing_digest != rendered_digest {
+                // A routines directory with no manifest at all predates managed
+                // provenance, so content alone cannot separate a routine Orbit
+                // seeded and the operator then customized — flipping `enabled`
+                // and pinning a host is the documented lifecycle — from a file
+                // the operator wrote from scratch. Adopt the on-disk instance's
+                // own binding so a later shipped-template change can be
+                // reconciled, and reserve the collision warning for a directory
+                // Orbit already tracks, where a shipped name missing from the
+                // manifest really is user-authored. Mirrors the guard in
+                // `reconcile_managed_assets`. Adoption records the bytes now on
+                // disk as Orbit's own, so a later shipped-template change
+                // refreshes them onto the adopted binding; an edit made after
+                // adoption is detected and preserved as usual.
+                if previous.is_none()
+                    && let Some(binding) = adoptable_binding(name, template, &existing)
+                {
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Migrated,
+                        detail: Some(
+                            "adopted a pre-provenance routine using the binding parsed from that exact instance".to_string(),
+                        ),
+                    });
+                    next_assets.insert((*name).to_string(), existing_digest.clone());
+                    next_provenance.insert(
+                        (*name).to_string(),
+                        RoutineAssetProvenance {
+                            template_digest,
+                            rendered_digest: existing_digest,
+                            binding,
+                        },
+                    );
+                    continue;
+                }
                 let detail = format!(
                     "user-authored routine '{}' collides with bundled default `{name}` and was preserved; move or rename it, then rerun `orbit workspace sync`",
                     path.display()
@@ -455,6 +491,29 @@ pub(crate) fn reconcile_default_routines(
         })?;
     }
     Ok(result)
+}
+
+/// Recover the materialization binding of an on-disk routine that predates
+/// routine provenance, so it can be adopted instead of reported as a
+/// collision forever.
+///
+/// `None` means the file is not one Orbit can manage from this template:
+/// either it does not parse as a routine, or its recorded binding could not be
+/// re-rendered later (routines v1 pins exactly one host). Refusing those keeps
+/// a future reconcile from hard-failing the whole workspace sync on a binding
+/// Orbit adopted but cannot use.
+fn adoptable_binding(
+    file_stem: &str,
+    template: &str,
+    existing: &str,
+) -> Option<RoutineMaterializationBinding> {
+    let definition = parse_routine_yaml(existing).ok()?;
+    let binding = RoutineMaterializationBinding {
+        name: definition.name,
+        hosts: definition.hosts,
+    };
+    render_routine_template(file_stem, template, &binding).ok()?;
+    Some(binding)
 }
 
 fn render_routine_template(
@@ -753,6 +812,156 @@ mod tests {
             ignoring_enabled(&rendered),
             ignoring_enabled(include_str!("../../../../.orbit/routines/task_pilot.yaml")),
             "dogfood task-pilot routine must stay aligned with the seeded template outside `enabled`"
+        );
+    }
+
+    /// A routines directory seeded before routines carried managed-asset
+    /// provenance has no manifest at all. Customizing a seeded routine —
+    /// `enabled: true` plus the host pin — is the documented lifecycle, so it
+    /// must be adopted into provenance rather than accused of colliding with
+    /// the bundled default it came from [ORB-11154].
+    #[test]
+    fn manifestless_customized_routines_are_adopted_rather_than_called_collisions() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("seed a pre-provenance workspace");
+        let manifest_path = routines_dir.join(MANAGED_ASSET_MANIFEST_FILE);
+        std::fs::remove_file(&manifest_path).expect("drop the manifest to predate provenance");
+
+        let customized = routines_dir.join("task_triage.yaml");
+        let edited = std::fs::read_to_string(&customized)
+            .expect("read seeded routine")
+            .replace("enabled: false", "enabled: true");
+        assert!(
+            edited.contains("enabled: true"),
+            "fixture must opt the routine in"
+        );
+        std::fs::write(&customized, &edited).expect("simulate the documented customization");
+
+        let adopted = seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("reconcile the pre-provenance directory");
+        assert!(
+            adopted.warnings.is_empty(),
+            "customizing a seeded routine must not warn: {:?}",
+            adopted.warnings
+        );
+        assert!(
+            !adopted
+                .actions
+                .iter()
+                .any(|action| action.outcome == ManagedAssetOutcome::Preserved),
+            "no routine may be reported as a user-authored collision: {:?}",
+            adopted.actions
+        );
+        assert!(adopted.actions.iter().any(|action| {
+            action.name == "task_triage" && action.outcome == ManagedAssetOutcome::Migrated
+        }));
+        assert_eq!(
+            std::fs::read_to_string(&customized).expect("reread routine"),
+            edited,
+            "adoption must not rewrite the operator's routine"
+        );
+
+        let manifest =
+            load_managed_asset_manifest(&manifest_path, "routine", ManagedAssetLayout::YamlStem)
+                .expect("load adopted manifest")
+                .expect("adoption records a manifest");
+        let provenance = manifest
+            .routine_provenance
+            .get("task_triage")
+            .expect("the customized routine gains provenance");
+        assert_eq!(provenance.rendered_digest, sha256_hex(edited.as_bytes()));
+        assert_eq!(provenance.binding.hosts, vec!["host-a".to_string()]);
+        assert_eq!(provenance.binding.name, "task-triage-workspace");
+
+        // Provenance now owns the file, so convergence is a no-op instead of
+        // repeating the same complaint on every run.
+        let second = seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("second reconcile");
+        assert!(second.warnings.is_empty());
+        assert_eq!(second.refreshed, 0);
+        assert!(second.actions.iter().any(|action| {
+            action.name == "task_triage" && action.outcome == ManagedAssetOutcome::Unchanged
+        }));
+    }
+
+    /// The distinguishing condition: once Orbit tracks the directory, a shipped
+    /// name that the manifest does not claim really is user-authored, and is
+    /// still reported [ORB-11154].
+    #[test]
+    fn user_authored_collision_is_still_reported_when_the_manifest_tracks_the_directory() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("seed default routines");
+        let manifest_path = routines_dir.join(MANAGED_ASSET_MANIFEST_FILE);
+        let mut manifest =
+            load_managed_asset_manifest(&manifest_path, "routine", ManagedAssetLayout::YamlStem)
+                .expect("load manifest")
+                .expect("seeding records a manifest");
+        manifest.assets.remove("task_triage");
+        manifest.routine_provenance.remove("task_triage");
+        std::fs::write(
+            &manifest_path,
+            encode_managed_asset_manifest(&manifest).expect("encode manifest"),
+        )
+        .expect("write a manifest that never claimed this name");
+
+        let user_authored = routines_dir.join("task_triage.yaml");
+        let content = std::fs::read_to_string(&user_authored)
+            .expect("read routine")
+            .replace("task-triage-workspace", "my-own-triage");
+        std::fs::write(&user_authored, &content).expect("write a user-authored routine");
+
+        let reconciled = seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("reconcile a tracked directory");
+        assert!(
+            reconciled
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("collides with bundled default")),
+            "a tracked directory must still report a user-authored collision: {:?}",
+            reconciled.warnings
+        );
+        assert!(reconciled.actions.iter().any(|action| {
+            action.name == "task_triage" && action.outcome == ManagedAssetOutcome::Preserved
+        }));
+        assert_eq!(
+            std::fs::read_to_string(&user_authored).expect("reread routine"),
+            content
+        );
+    }
+
+    /// Adoption needs a binding Orbit can re-render later. A file that does not
+    /// parse as a routine yields none, so it stays a reported collision even in
+    /// a manifest-less directory [ORB-11154].
+    #[test]
+    fn manifestless_unparseable_collision_is_still_reported() {
+        let root = tempdir().expect("create tempdir");
+        let routines_dir = root.path().join("routines");
+        std::fs::create_dir_all(&routines_dir).expect("create routines dir");
+        let path = routines_dir.join("task_triage.yaml");
+        std::fs::write(
+            &path,
+            "not: a routine
+",
+        )
+        .expect("write an unmanageable file");
+
+        let reconciled = seed_default_routines(&routines_dir, "host-a", Some("workspace"), false)
+            .expect("reconcile a manifest-less directory");
+        assert!(
+            reconciled
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("collides with bundled default")),
+            "{:?}",
+            reconciled.warnings
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("reread file"),
+            "not: a routine\n"
         );
     }
 
