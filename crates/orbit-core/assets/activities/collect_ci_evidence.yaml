@@ -12,9 +12,13 @@ spec:
     rather than assuming branch names; separates the event-reported SHA, the
     ref's current head, and the commit the runner actually checked out; and
     reports every bound it hit in `truncation` rather than silently returning
-    less. When no GitHub client is available or authenticated the snapshot
-    carries `collected: false` and gathers nothing further, so a caller can
-    never mistake it for a clean CI result.
+    less. Workflow runs are listed repository-wide in one query but evaluated
+    per head: only a newer run of the same workflow on the same branch
+    supersedes an older failure, and a run on a branch that matches no scanned
+    head is never reported as a current failure. When no GitHub client is
+    available or authenticated the snapshot carries `collected: false` and
+    gathers nothing further, so a caller can never mistake it for a clean CI
+    result.
   input_schema_json:
     type: object
     properties:
@@ -27,8 +31,13 @@ spec:
           to the repository's GitHub default branch.
       base_branch:
         type: string
-      runs_per_ref:
+      max_runs:
         type: number
+        description: >
+          Cap on the single repository-wide workflow-run listing. This is a
+          whole-repository budget, not a per-head one; it must stay deep enough
+          that the integration head's newest run survives the pull-request runs
+          that outnumber it. Defaults to 100, maximum 300.
       max_pull_requests:
         type: number
       max_investigated_runs:
