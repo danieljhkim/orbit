@@ -29,6 +29,7 @@ CLI behavior, state layout, or recovery semantics change.
 | [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across agent plugins, Cargo, GitHub artifacts, Homebrew, and npm. |
 | [Inventory and Protect Orbit State](./runbooks/state-and-backup.md) | Locate Orbit state and perform WAL-safe backups, explicit task publication, restores, and task migrations. |
 | [Recover Stuck Job Runs](./runbooks/stuck-job-runs.md) | Diagnose, cancel, resume, or replay pending and running Orbit job runs. |
+| [Publish Orbit Tasks to a Dedicated Repository](./runbooks/task-publication.md) | Bind, authenticate, publish, verify, inspect, and recover an Orbit task-publication repository. |
 | [Upgrade Orbit Safely](./runbooks/upgrades.md) | Review, apply, and verify Orbit workspace-layout and store-schema migrations safely. |
 
 Authoring rules live in [runbook conventions](./runbooks/CONVENTIONS.md).
