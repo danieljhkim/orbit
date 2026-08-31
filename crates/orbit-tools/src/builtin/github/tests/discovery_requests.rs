@@ -41,6 +41,33 @@ fn dependabot_alert_request_is_bounded_and_projects_compact_evidence() {
 }
 
 #[test]
+fn dependabot_pull_request_discovery_requests_and_projects_the_head_branch() {
+    let req = dependabot_alerts::build_open_pull_requests_request(&json!({
+        "repo": "openai/orbit",
+    }))
+    .expect("request");
+    assert!(
+        req.args
+            .windows(2)
+            .any(|pair| pair == ["--json", "number,title,url,body,author,headRefName"])
+    );
+
+    let projected = dependabot_alerts::project_pull_request(&json!({
+        "number": 4,
+        "title": "Bump time from 1.0.0 to 1.2.3",
+        "url": "https://github.test/pr/4",
+        "body": "Bumps time from 1.0.0 to 1.2.3.",
+        "author": {"login": "app/dependabot"},
+        "headRefName": "dependabot/cargo/time-1.2.3",
+    }));
+    assert_eq!(
+        projected["head_branch"],
+        json!("dependabot/cargo/time-1.2.3")
+    );
+    assert_eq!(projected["author"], json!("app/dependabot"));
+}
+
+#[test]
 fn dependabot_alert_request_rejects_repository_path_injection() {
     let error = dependabot_alerts::build_exec_request(&json!({"repo": "acme/repo?per_page=999"}))
         .expect_err("invalid repo must fail");

@@ -128,9 +128,9 @@ pub(crate) fn file_dependabot_alert_tasks(
                 continue;
             }
             if skip_pr
-                && let Some(pull_request) = pull_requests
-                    .iter()
-                    .find(|pull_request| pull_request_mentions_package(pull_request, &package))
+                && let Some(pull_request) = pull_requests.iter().find(|pull_request| {
+                    pull_request_bumps_package(pull_request, &ecosystem, &package)
+                })
             {
                 skipped_dependabot_pr.push(json!({
                     "family": "dependabot", "key": key, "ecosystem": ecosystem,
@@ -583,14 +583,62 @@ fn repository_name(snapshot: &Value) -> &str {
         .unwrap_or("unknown repository")
 }
 
-fn pull_request_mentions_package(pull_request: &Value, package: &str) -> bool {
+/// Match a candidate open Dependabot PR against an alert cluster using
+/// identifiers the PR actually asserts — the bumped package parsed from its
+/// title, and the package/ecosystem encoded in its `dependabot/<ecosystem>/…`
+/// head ref — rather than a free-text substring search over the title and
+/// body. A free-text search matched unrelated packages that merely appeared
+/// in another package's changelog prose.
+fn pull_request_bumps_package(pull_request: &Value, ecosystem: &str, package: &str) -> bool {
     let package = package.to_ascii_lowercase();
-    ["title", "body"].iter().any(|key| {
-        pull_request
-            .get(*key)
-            .and_then(Value::as_str)
-            .is_some_and(|text| text.to_ascii_lowercase().contains(&package))
-    })
+    if dependabot_title_package(&field(pull_request, "title"))
+        .is_some_and(|title_package| title_package == package)
+    {
+        return true;
+    }
+    dependabot_branch_names_package(&field(pull_request, "head_branch"), ecosystem, &package)
+}
+
+/// Parse the package a Dependabot PR title bumps, e.g. `Bump serde from 1.0.0
+/// to 1.0.1`. Grouped-update titles (`Bump the aws-sdk group with 3 updates`)
+/// name no single package and intentionally yield `None`.
+fn dependabot_title_package(title: &str) -> Option<String> {
+    let mut tokens = title.split_whitespace();
+    if !tokens.next()?.eq_ignore_ascii_case("Bump") {
+        return None;
+    }
+    let package = tokens.next()?;
+    if package.eq_ignore_ascii_case("the") {
+        return None;
+    }
+    let next = tokens.next()?;
+    if next.eq_ignore_ascii_case("from") || next.eq_ignore_ascii_case("to") {
+        Some(package.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// Dependabot head refs follow `dependabot/<ecosystem>/<manifest path…>/<package>-<version>`.
+/// Require the ecosystem segment to agree and the final path segment to name
+/// the package, so a package whose name is a substring of a sibling
+/// package's branch (e.g. `time` inside `runtime`) cannot match.
+fn dependabot_branch_names_package(head_branch: &str, ecosystem: &str, package: &str) -> bool {
+    let mut segments = head_branch.split('/');
+    if segments.next() != Some("dependabot") {
+        return false;
+    }
+    let Some(branch_ecosystem) = segments.next() else {
+        return false;
+    };
+    if !branch_ecosystem.eq_ignore_ascii_case(ecosystem) {
+        return false;
+    }
+    let Some(last) = segments.next_back() else {
+        return false;
+    };
+    let last = last.to_ascii_lowercase();
+    last == package || last.starts_with(&format!("{package}-"))
 }
 
 fn open_task_for_key(

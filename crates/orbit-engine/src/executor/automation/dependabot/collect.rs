@@ -338,6 +338,7 @@ fn bound_pull_request(mut pull_request: Value) -> Value {
         bound_field(object, "body", 1_000);
         bound_field(object, "url", 500);
         bound_field(object, "author", 100);
+        bound_field(object, "head_branch", 200);
     }
     pull_request
 }
