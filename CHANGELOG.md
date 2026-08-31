@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.1
+
+### Highlights
+
+- **Managed workspace convergence**: `orbit workspace sync` safely refreshes shipped routines and other managed artifacts while preserving local edits, identity, registration, and automation choices. ([ORB-11149])
+- **Security finding automation**: the disabled-by-default security sweep can collect Dependabot, Code scanning, and secret scanning findings into deduplicated, evidence-complete remediation tasks without exposing credentials to agent sandboxes. ([ORB-11124])
+- **Corrective work prioritized automatically**: bounded `run ship` and `run auto` discovery now selects critical, bug, code-review, and security-review tasks ahead of ordinary feature work. ([ORB-11141])
+- **Actionable friction triage**: the dashboard defaults to active frictions, adds status filtering, and provides keyboard-operable responsive detail views. ([ORB-11136])
+
 ## 0.17.0
 
 ### Breaking Changes
