@@ -31,6 +31,70 @@ fn snapshot(alerts: Vec<Value>, pull_requests: Vec<Value>) -> Value {
     })
 }
 
+fn expanded_snapshot(
+    dependabot: Vec<Value>,
+    code_scanning: Vec<Value>,
+    secret_scanning: Vec<Value>,
+) -> Value {
+    json!({
+        "schema_version": 2,
+        "collected": true,
+        "collection_status": "fully_collected",
+        "outcome_hint": if dependabot.is_empty() { "no_open_alerts" } else { "open_alerts" },
+        "capability": {"available": true, "authenticated": true, "detail": "authenticated"},
+        "repository": {"full_name": "acme/orbit"},
+        "open_alerts": dependabot,
+        "open_dependabot_pull_requests": [],
+        "query_errors": [],
+        "truncation": {"alerts_limit": 100, "alerts_at_cap": false},
+        "code_scanning": {
+            "collected": true,
+            "collection_status": "fully_collected",
+            "outcome_hint": if code_scanning.is_empty() { "no_open_alerts" } else { "open_alerts" },
+            "capability": {"available": true, "authenticated": true},
+            "open_alerts": code_scanning,
+            "query_errors": [],
+            "truncation": {"alerts_limit": 100, "alerts_at_cap": false}
+        },
+        "secret_scanning": {
+            "collected": true,
+            "collection_status": "fully_collected",
+            "outcome_hint": if secret_scanning.is_empty() { "no_open_alerts" } else { "open_alerts" },
+            "capability": {"available": true, "authenticated": true},
+            "open_alerts": secret_scanning,
+            "query_errors": [],
+            "truncation": {"alerts_limit": 100, "alerts_at_cap": false, "locations_limit_per_alert": 20}
+        },
+        "collected_at": "2026-08-31T00:00:00Z"
+    })
+}
+
+fn code_alert(number: u64, severity: &str) -> Value {
+    json!({
+        "number": number, "state": "open", "rule_id": "rust/sql-injection",
+        "rule_name": "SQL injection", "rule_description": "Untrusted input reaches SQL",
+        "security_severity": severity, "tool_name": "CodeQL", "tool_guid": "codeql-guid",
+        "tool_version": "2.20", "message": "User-controlled value reaches query",
+        "ref": "refs/heads/main", "commit_sha": "abc123", "path": "src/db.rs",
+        "start_line": 17, "end_line": 19, "start_column": 4, "end_column": 20,
+        "created_at": "2026-08-30T00:00:00Z", "updated_at": "2026-08-31T00:00:00Z",
+        "html_url": format!("https://github.test/code/{number}")
+    })
+}
+
+fn secret_alert(number: u64, validity: &str) -> Value {
+    json!({
+        "number": number, "state": "open", "secret_type": "example_token",
+        "secret_type_display_name": "Example token", "validity": validity,
+        "publicly_leaked": true, "multi_repo": false,
+        "created_at": "2026-08-30T00:00:00Z", "updated_at": "2026-08-31T00:00:00Z",
+        "html_url": format!("https://github.test/secret/{number}"),
+        "locations": [{"type": "commit", "path": "config/dev.env", "start_line": 3,
+            "end_line": 3, "commit_sha": "def456", "commit_url": "https://github.test/commit/def456"}],
+        "locations_at_cap": false
+    })
+}
+
 fn file(runtime: &OrbitRuntime, snapshot: Value, extra: Value) -> Value {
     let mut input = json!({"dependabot_snapshot": snapshot});
     if let (Some(target), Some(source)) = (input.as_object_mut(), extra.as_object()) {
@@ -195,4 +259,174 @@ fn filing_succeeds_without_a_system_crew() {
     assert_eq!(output["filed_count"], json!(1));
     let task_id = output["filed"][0]["task_id"].as_str().expect("task id");
     assert_eq!(runtime.get_task(task_id).expect("task").crew, None);
+}
+
+#[test]
+fn code_and_secret_alerts_file_evidence_complete_deduplicated_tasks() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let snapshot = expanded_snapshot(
+        Vec::new(),
+        vec![code_alert(8, "high")],
+        vec![secret_alert(9, "active")],
+    );
+    let first = file(&runtime, snapshot.clone(), json!({}));
+    assert_eq!(first["filed_count"], json!(2));
+    assert_eq!(first["outcome"], "open_alerts");
+    assert_eq!(first["collection_outcome"], "fully_collected");
+
+    let code_id = first["filed"]
+        .as_array()
+        .expect("filed")
+        .iter()
+        .find(|entry| entry["family"] == "code_scanning")
+        .and_then(|entry| entry["task_id"].as_str())
+        .expect("code task id");
+    let code = runtime.get_task(code_id).expect("code task");
+    assert!(code.title.starts_with("[code-scanning-sweep] "));
+    assert_eq!(code.status, TaskStatus::Backlog);
+    assert_eq!(code.priority, TaskPriority::High);
+    assert!(code.required_tools.is_empty());
+    for evidence in [
+        "rust/sql-injection",
+        "CodeQL",
+        "User-controlled value reaches query",
+        "refs/heads/main",
+        "abc123",
+        "src/db.rs",
+        "lines 17-19",
+        "https://github.test/code/8",
+    ] {
+        assert!(code.description.contains(evidence), "missing {evidence}");
+    }
+    assert!(
+        code.acceptance_criteria
+            .iter()
+            .any(|criterion| criterion.contains("do not suppress"))
+    );
+
+    let secret_id = first["filed"]
+        .as_array()
+        .expect("filed")
+        .iter()
+        .find(|entry| entry["family"] == "secret_scanning")
+        .and_then(|entry| entry["task_id"].as_str())
+        .expect("secret task id");
+    let secret = runtime.get_task(secret_id).expect("secret task");
+    assert!(secret.title.starts_with("[secret-scanning-sweep] "));
+    assert_eq!(secret.priority, TaskPriority::Critical);
+    assert!(secret.required_tools.is_empty());
+    assert!(secret.description.contains("config/dev.env"));
+    assert!(
+        secret
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| criterion.contains("Rotate or revoke"))
+    );
+
+    let second = file(&runtime, snapshot, json!({}));
+    assert_eq!(second["filed_count"], json!(0));
+    assert_eq!(
+        second["skipped_existing"]
+            .as_array()
+            .expect("existing")
+            .len(),
+        2
+    );
+    assert!(
+        second["skipped_existing"]
+            .as_array()
+            .expect("existing")
+            .iter()
+            .all(|entry| entry.get("family").is_some())
+    );
+}
+
+#[test]
+fn max_tasks_is_one_deterministic_bound_across_all_families() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let output = file(
+        &runtime,
+        expanded_snapshot(
+            vec![alert(1, "high", "< 1.2.3", "GHSA-first")],
+            vec![code_alert(2, "critical")],
+            vec![secret_alert(3, "active")],
+        ),
+        json!({"max_tasks": 1}),
+    );
+    assert_eq!(output["filed_count"], json!(1));
+    assert_eq!(output["filed"][0]["family"], "dependabot");
+    let skipped = output["skipped_over_cap"].as_array().expect("over cap");
+    assert_eq!(skipped.len(), 2);
+    assert_eq!(skipped[0]["family"], "code_scanning");
+    assert_eq!(skipped[1]["family"], "secret_scanning");
+}
+
+#[test]
+fn sentinel_credential_never_reaches_snapshot_output_or_persisted_task_fields() {
+    const SENTINEL: &str = "orbit-sentinel-credential-2ce944";
+    let projected = orbit_tools::github_cli::project_secret_scanning_alert(&json!({
+        "number": 77, "state": "open", "secret_type": "example_token",
+        "secret_type_display_name": "Example token", "secret": SENTINEL,
+        "validity": "active", "publicly_leaked": false, "multi_repo": false,
+        "created_at": "2026-08-30T00:00:00Z", "updated_at": "2026-08-31T00:00:00Z",
+        "html_url": "https://github.test/secret/77"
+    }));
+    let mut projected = projected;
+    projected["locations"] = json!([{
+        "type": "commit", "path": "config/dev.env", "start_line": 3,
+        "end_line": 3, "commit_sha": "def456", "commit_url": "https://github.test/commit/def456"
+    }]);
+    projected["locations_at_cap"] = json!(false);
+    let snapshot = expanded_snapshot(Vec::new(), Vec::new(), vec![projected]);
+    assert!(
+        !serde_json::to_string(&snapshot)
+            .expect("snapshot")
+            .contains(SENTINEL)
+    );
+
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let output = file(&runtime, snapshot, json!({}));
+    assert!(
+        !serde_json::to_string(&output)
+            .expect("output")
+            .contains(SENTINEL)
+    );
+    let task_id = output["filed"][0]["task_id"].as_str().expect("task id");
+    let task = runtime.get_task(task_id).expect("task");
+    let persisted = json!({
+        "title": task.title,
+        "description": task.description,
+        "acceptance_criteria": task.acceptance_criteria,
+        "tags": task.tags,
+        "required_tools": task.required_tools,
+        "error": null,
+        "artifacts": [],
+        "captured_logs": [],
+    });
+    assert!(
+        !serde_json::to_string(&persisted)
+            .expect("persisted")
+            .contains(SENTINEL)
+    );
+}
+
+#[test]
+fn unavailable_family_does_not_hide_findings_from_collected_family() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let mut snapshot = expanded_snapshot(Vec::new(), vec![code_alert(15, "moderate")], Vec::new());
+    snapshot["collection_status"] = json!("partially_collected");
+    snapshot["secret_scanning"] = json!({
+        "collected": false,
+        "collection_status": "capability_unavailable",
+        "outcome_hint": "capability_unavailable",
+        "capability": {"available": false, "authenticated": true, "detail": "permission unavailable"}
+    });
+    let output = file(&runtime, snapshot, json!({}));
+    assert_eq!(output["filed_count"], json!(1));
+    assert_eq!(output["filed"][0]["family"], "code_scanning");
+    assert_eq!(output["collection_outcome"], "partially_collected");
+    assert_eq!(
+        output["family_outcomes"]["secret_scanning"]["outcome"],
+        "capability_unavailable"
+    );
 }

@@ -18,6 +18,22 @@ pub(super) trait DependabotQueries {
     fn auth_status(&self) -> AuthStatus;
     fn repo_view(&self, repo: Option<&str>) -> Result<Value, OrbitError>;
     fn open_alerts(&self, repo: Option<&str>, limit: u64) -> Result<AlertQuery, OrbitError>;
+    fn open_code_scanning_alerts(
+        &self,
+        repo: Option<&str>,
+        limit: u64,
+    ) -> Result<AlertQuery, OrbitError>;
+    fn open_secret_scanning_alerts(
+        &self,
+        repo: Option<&str>,
+        limit: u64,
+    ) -> Result<AlertQuery, OrbitError>;
+    fn secret_scanning_locations(
+        &self,
+        repo: Option<&str>,
+        alert_number: u64,
+        limit: u64,
+    ) -> Result<Vec<Value>, OrbitError>;
     fn open_dependabot_pull_requests(
         &self,
         repo: Option<&str>,
@@ -45,6 +61,29 @@ impl HostDependabotQueries {
         let result = run_process(&request, &NoSandbox)?;
         check_exec_result(&result, label)?;
         Ok(result.stdout)
+    }
+
+    fn query_alert_family(
+        &self,
+        mut request: orbit_exec::ExecRequest,
+        family: &str,
+        project: fn(&Value) -> Value,
+    ) -> Result<AlertQuery, OrbitError> {
+        request.current_dir = Some(self.repo_root.to_string_lossy().into_owned());
+        let result = run_process(&request, &NoSandbox)?;
+        if !result.success {
+            return Ok(AlertQuery::CapabilityUnavailable(classify_alert_failure(
+                family,
+                &result.stderr,
+            )));
+        }
+        let parsed = github_cli::parse_gh_json(&result.stdout, family)?;
+        let entries = parsed.as_array().ok_or_else(|| {
+            OrbitError::Execution(format!(
+                "{family} returned a non-array response; refusing to report no open alerts"
+            ))
+        })?;
+        Ok(AlertQuery::Alerts(entries.iter().map(project).collect()))
     }
 }
 
@@ -99,24 +138,58 @@ impl DependabotQueries for HostDependabotQueries {
 
     fn open_alerts(&self, repo: Option<&str>, limit: u64) -> Result<AlertQuery, OrbitError> {
         let input = json!({"repo": repo, "limit": limit});
-        let mut request = github_cli::dependabot_alerts_request(&input)?;
-        request.current_dir = Some(self.repo_root.to_string_lossy().into_owned());
-        let result = run_process(&request, &NoSandbox)?;
-        if !result.success {
-            return classify_alert_failure(&result.stderr).map(AlertQuery::CapabilityUnavailable);
-        }
-        let parsed = github_cli::parse_gh_json(&result.stdout, "gh api Dependabot alerts")?;
+        self.query_alert_family(
+            github_cli::dependabot_alerts_request(&input)?,
+            "gh api Dependabot alerts",
+            github_cli::project_dependabot_alert,
+        )
+    }
+
+    fn open_code_scanning_alerts(
+        &self,
+        repo: Option<&str>,
+        limit: u64,
+    ) -> Result<AlertQuery, OrbitError> {
+        let input = json!({"repo": repo, "limit": limit});
+        self.query_alert_family(
+            github_cli::code_scanning_alerts_request(&input)?,
+            "gh api Code scanning alerts",
+            github_cli::project_code_scanning_alert,
+        )
+    }
+
+    fn open_secret_scanning_alerts(
+        &self,
+        repo: Option<&str>,
+        limit: u64,
+    ) -> Result<AlertQuery, OrbitError> {
+        let input = json!({"repo": repo, "limit": limit});
+        self.query_alert_family(
+            github_cli::secret_scanning_alerts_request(&input)?,
+            "gh api secret scanning alerts",
+            github_cli::project_secret_scanning_alert,
+        )
+    }
+
+    fn secret_scanning_locations(
+        &self,
+        repo: Option<&str>,
+        alert_number: u64,
+        limit: u64,
+    ) -> Result<Vec<Value>, OrbitError> {
+        let input = json!({"repo": repo, "alert_number": alert_number, "limit": limit});
+        let request = github_cli::secret_scanning_locations_request(&input)?;
+        let stdout = self.run_gh(request, "gh api secret scanning alert locations")?;
+        let parsed = github_cli::parse_gh_json(&stdout, "gh api secret scanning alert locations")?;
         let entries = parsed.as_array().ok_or_else(|| {
             OrbitError::Execution(
-                "gh api Dependabot alerts returned a non-array response; refusing to report no open alerts"
-                    .to_string(),
+                "gh api secret scanning alert locations returned a non-array response".to_string(),
             )
         })?;
-        let alerts = entries
+        Ok(entries
             .iter()
-            .map(github_cli::project_dependabot_alert)
-            .collect();
-        Ok(AlertQuery::Alerts(alerts))
+            .map(github_cli::project_secret_location)
+            .collect())
     }
 
     fn open_dependabot_pull_requests(
@@ -140,20 +213,18 @@ impl DependabotQueries for HostDependabotQueries {
     }
 }
 
-pub(super) fn classify_alert_failure(stderr: &str) -> Result<String, OrbitError> {
+pub(super) fn classify_alert_failure(family: &str, stderr: &str) -> String {
     let detail = redact_all(stderr.trim());
     let lower = detail.to_ascii_lowercase();
     if lower.contains("403") {
-        return Ok(format!(
-            "GitHub returned HTTP 403 for Dependabot alerts; the host token lacks the security_events scope: {detail}"
-        ));
+        return format!(
+            "GitHub returned HTTP 403 for {family}; the host token lacks the required repository security permission: {detail}"
+        );
     }
     if lower.contains("404") {
-        return Ok(format!(
-            "GitHub returned HTTP 404 for Dependabot alerts; alerts are disabled or unavailable for this repository: {detail}"
-        ));
+        return format!(
+            "GitHub returned HTTP 404 for {family}; the feature is disabled or unavailable for this repository: {detail}"
+        );
     }
-    Err(OrbitError::Execution(format!(
-        "gh api Dependabot alerts failed: {detail}"
-    )))
+    format!("{family} could not be queried; refusing to report zero findings: {detail}")
 }
