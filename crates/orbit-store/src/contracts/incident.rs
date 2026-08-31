@@ -139,7 +139,8 @@ pub struct IncidentEventRef {
     pub run_id: Option<String>,
     pub task_id: Option<String>,
     pub activity_id: Option<String>,
-    /// Tool name when the row had one; `None` for job-run lifecycle events.
+    /// Tool name when the row had one; `None` for direct CLI and legacy
+    /// job-run lifecycle events.
     pub tool_name: Option<String>,
     pub message: Option<String>,
 }
@@ -190,8 +191,8 @@ pub struct FailureIncident {
     /// propagation chain. Unbounded so expansion can show the full evidence
     /// set; [`Self::sample_events`] stays the bounded root preview.
     pub events: Vec<IncidentEventRef>,
-    /// False when the root row had no tool identity — a job-run lifecycle
-    /// failure, not a tool named `unknown`.
+    /// False when the root row had no tool identity — either a direct CLI
+    /// command or a job-run lifecycle failure, never a tool named `unknown`.
     pub has_tool_identity: bool,
     /// Downstream failures collapsed beneath the root, in occurrence order.
     pub propagation: Vec<PropagationLink>,
@@ -225,9 +226,12 @@ pub const JOB_RUN_LIFECYCLE_CATEGORY: &str = "job_run_lifecycle";
 /// Operator-facing label for [`JOB_RUN_LIFECYCLE_CATEGORY`].
 pub const JOB_RUN_LIFECYCLE_LABEL: &str = "job-run lifecycle";
 
-/// Named lifecycle audit surfaces that are emitted only when an abnormal path
-/// occurs. Unlike callable tools, they cannot have a healthy-call denominator.
+/// Lifecycle audit surfaces that are emitted only when an abnormal path
+/// occurs. Unlike callable tools and direct CLI commands, they cannot have a
+/// healthy-call denominator. `Start` is the legacy no-tool job-start record;
+/// the remaining surfaces carry their identity in `tool_name`.
 pub const FAILURE_ONLY_DIAGNOSTIC_SURFACES: &[&str] = &[
+    "Start",
     "pipeline.run.terminal_conflict",
     "pipeline.worker.exit",
     "pipeline.worker.startup",
@@ -371,8 +375,8 @@ pub fn classify(event: &AuditEvent) -> FailureClass {
     FailureClass::Unexpected
 }
 
-/// True for a failure-only named diagnostic surface. Callers use the same
-/// predicate when excluding those rows from callable-tool rate rankings.
+/// True for a failure-only diagnostic surface. Callers use the same predicate
+/// when excluding named rows from callable-tool rate rankings.
 pub fn is_failure_only_diagnostic_surface(name: &str) -> bool {
     let name = name.trim();
     FAILURE_ONLY_DIAGNOSTIC_SURFACES.contains(&name)
@@ -381,15 +385,12 @@ pub fn is_failure_only_diagnostic_surface(name: &str) -> bool {
 /// True when an audit row is a lifecycle diagnostic rather than a call whose
 /// success and failure populations can be compared.
 pub fn is_lifecycle_diagnostic(event: &AuditEvent) -> bool {
-    !has_tool_identity(event)
-        || event
-            .tool_name
-            .as_deref()
-            .is_some_and(is_failure_only_diagnostic_surface)
+    is_failure_only_diagnostic_surface(&surface_of(event))
 }
 
-/// True when the row names a real tool. Empty/`NULL` tool names are job-run
-/// lifecycle events, not a tool called `unknown`.
+/// True when the row names a real tool. Direct CLI and legacy job-run
+/// lifecycle rows have empty/`NULL` tool names; neither is a tool called
+/// `unknown`.
 pub fn has_tool_identity(event: &AuditEvent) -> bool {
     event
         .tool_name
