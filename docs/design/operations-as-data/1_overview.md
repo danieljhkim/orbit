@@ -2,14 +2,14 @@
 title: Operations as Data — Overview
 owner: claude
 last_updated: 2026-07-26
-last_validated: 2026-08-08
+last_validated: 2026-08-31
 status: Accepted
 feature: operations-as-data
 doc_role: overview
 type: design
 summary: Declaring each verb of a noun once as data so CLI, MCP, dashboard, and runtime handlers are derived adapters instead of four hand-copied layers.
 tags: [operations-as-data, architecture, adr-0209]
-paths: ["crates/orbit-common/src/operation.rs", "crates/orbit-common/src/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
+paths: ["crates/orbit-common/src/governance/operation.rs", "crates/orbit-common/src/governance/friction/**", "crates/orbit-tools/src/builtin/orbit/operation.rs", "crates/orbit-cli/src/command/operation_args.rs"]
 related_features: [operations-as-data, orbit-core]
 related_artifacts: [ORB-10358]
 ---
@@ -17,7 +17,7 @@ related_artifacts: [ORB-10358]
 # Operations as Data — Overview
 
 Orbit exposes the same underlying operations through four surfaces: the CLI, MCP,
-the web dashboard, and the in-runtime tool host. Historically each surface
+the web dashboard (`orbit-web`), and the in-runtime tool host. Historically each surface
 restated every verb by hand — its name, its parameters, its help text, its
 field-to-JSON mapping — so a noun with seven verbs was written out four times and
 drifted four ways. **Operations as data** replaces that with one declaration per
@@ -59,14 +59,14 @@ exactly why it accumulated.
 
 | Concern | File | Task |
 |---------|------|------|
-| The kernel: spec, parameter, and exposure vocabulary | [crates/orbit-common/src/operation.rs](../../../crates/orbit-common/src/operation.rs) | [ORB-10358] |
-| The friction registry (single declaration site) | [crates/orbit-common/src/friction/operations.rs](../../../crates/orbit-common/src/friction/operations.rs) | [ORB-10358] |
+| The kernel: spec, parameter, and exposure vocabulary | [crates/orbit-common/src/governance/operation.rs](../../../crates/orbit-common/src/governance/operation.rs) | [ORB-10358] |
+| The friction registry (single declaration site) | [crates/orbit-common/src/governance/friction/operations.rs](../../../crates/orbit-common/src/governance/friction/operations.rs) | [ORB-10358] |
 | MCP adapter: spec → `ToolSchema` + optional workspace scope | [crates/orbit-tools/src/builtin/orbit/operation.rs](../../../crates/orbit-tools/src/builtin/orbit/operation.rs) | [ORB-10358] |
 | Friction MCP tools, derived | [crates/orbit-tools/src/builtin/orbit/friction/mod.rs](../../../crates/orbit-tools/src/builtin/orbit/friction/mod.rs) | [ORB-10358] |
 | CLI adapter: spec → `clap::Command` + tool input | [crates/orbit-cli/src/command/operation_args.rs](../../../crates/orbit-cli/src/command/operation_args.rs) | [ORB-10358] |
 | Friction CLI, derived (renderers only) | [crates/orbit-cli/src/command/friction.rs](../../../crates/orbit-cli/src/command/friction.rs) | [ORB-10358] |
 | Web handlers over registry field names | [crates/orbit-web/src/api/frictions.rs](../../../crates/orbit-web/src/api/frictions.rs) | [ORB-10358] |
-| Handler table, keyed on `FrictionVerb` | [crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs](../../../crates/orbit-core/src/runtime/orbit_tool_host/friction_tools.rs) | [ORB-10358] |
+| Handler table, keyed on `FrictionVerb` | [crates/orbit-core/src/adapter/tool_host/friction_tools.rs](../../../crates/orbit-core/src/adapter/tool_host/friction_tools.rs) | [ORB-10358] |
 | Migration cookbook | [references/cookbook.md](references/cookbook.md) | [ORB-10358] |
 
 ## Task References
