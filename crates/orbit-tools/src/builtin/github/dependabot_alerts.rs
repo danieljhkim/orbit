@@ -108,7 +108,7 @@ pub fn build_open_pull_requests_request(input: &Value) -> Result<ExecRequest, Or
         "--limit".to_string(),
         limit.to_string(),
         "--json".to_string(),
-        "number,title,url,body,author".to_string(),
+        "number,title,url,body,author,headRefName".to_string(),
     ]);
     Ok(super::gh_exec_request(args, None, TIMEOUT_DEFAULT_MS))
 }
@@ -142,6 +142,7 @@ pub fn project_pull_request(pr: &Value) -> Value {
         "url": pr["url"],
         "body": pr["body"],
         "author": pr["author"]["login"],
+        "head_branch": pr["headRefName"],
     })
 }
 

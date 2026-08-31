@@ -246,6 +246,82 @@ fn severity_floor_is_reported_and_dependabot_pr_skip_is_switchable() {
 }
 
 #[test]
+fn open_pr_for_an_unrelated_package_does_not_suppress_filing() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    // `time` is a bare substring of both the PR title's release-notes prose
+    // and this changelog-flavored body, but the PR bumps `tokio`, not `time`.
+    let pr = json!({
+        "number": 5,
+        "title": "Bump tokio from 1.28.0 to 1.28.1",
+        "body": "Bumps tokio. Release notes mention improvements to runtime scheduling and the time crate.",
+        "url": "https://github.test/pr/5",
+        "author": "app/dependabot",
+        "head_branch": "dependabot/cargo/tokio-1.28.1",
+    });
+    let output = file(
+        &runtime,
+        snapshot(vec![alert(1, "high", "< 1.2.3", "GHSA-time")], vec![pr]),
+        json!({}),
+    );
+    assert_eq!(output["filed_count"], json!(1));
+    assert_eq!(output["skipped_dependabot_pr"], json!([]));
+}
+
+#[test]
+fn open_pr_that_bumps_the_alerting_package_still_suppresses_filing() {
+    let (_root, runtime, _repo) = runtime_with_workspace_layout();
+    let by_title = json!({
+        "number": 6,
+        "title": "Bump time from 1.0.0 to 1.2.3",
+        "body": "Bumps time.",
+        "url": "https://github.test/pr/6",
+        "author": "app/dependabot",
+        "head_branch": "",
+    });
+    let title_match = file(
+        &runtime,
+        snapshot(
+            vec![alert(1, "high", "< 1.2.3", "GHSA-title")],
+            vec![by_title],
+        ),
+        json!({}),
+    );
+    assert_eq!(title_match["filed_count"], json!(0));
+    assert_eq!(
+        title_match["skipped_dependabot_pr"]
+            .as_array()
+            .expect("PR skips")
+            .len(),
+        1
+    );
+
+    let by_branch = json!({
+        "number": 7,
+        "title": "Bump the cargo group with 2 updates",
+        "body": "Bumps time and another package.",
+        "url": "https://github.test/pr/7",
+        "author": "app/dependabot",
+        "head_branch": "dependabot/cargo/time-1.2.3",
+    });
+    let branch_match = file(
+        &runtime,
+        snapshot(
+            vec![alert(2, "high", "< 1.2.3", "GHSA-branch")],
+            vec![by_branch],
+        ),
+        json!({}),
+    );
+    assert_eq!(branch_match["filed_count"], json!(0));
+    assert_eq!(
+        branch_match["skipped_dependabot_pr"]
+            .as_array()
+            .expect("PR skips")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn filing_succeeds_without_a_system_crew() {
     let (_root, runtime) = runtime_without_system_crew();
     let output = file(
