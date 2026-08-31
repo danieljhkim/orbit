@@ -16,13 +16,21 @@
 //! `[routines] role = "source"`; they exist so a fresh workspace gets
 //! reviewable, opt-in schedules without silently enabling unattended work.
 
-use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 
 use orbit_common::OrbitError;
 use orbit_common::protocol::yaml::parse_routine_yaml;
 
-use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_assets};
+use super::{
+    MANAGED_ASSET_MANIFEST_FILE, ManagedAssetAction, ManagedAssetLayout, ManagedAssetManifest,
+    ManagedAssetOutcome, ManagedAssetReconcileMode, ManagedAssetReconciliation,
+    ROUTINE_MANAGED_ASSET_MANIFEST_SCHEMA_VERSION, RoutineAssetProvenance,
+    RoutineMaterializationBinding, encode_managed_asset_manifest, load_managed_asset_manifest,
+    preserve_modified_retired_asset, sha256_hex,
+};
+use orbit_common::fs::io::{atomic_write_text, write_text_with_parent};
 
 /// Shippable default routine assets, seeded under
 /// `<workspace>/.orbit/routines/<file>.yaml` on `orbit init`. Every entry
@@ -79,39 +87,402 @@ const ROUTINE_NAME_PLACEHOLDER: &str = "__ORBIT_ROUTINE_NAME__";
 // explicit host pinning and host-unique names.
 // ADR-0366: the recorded digest covers the rendered document, so a
 // placeholder-substituting asset still gets honest provenance.
+#[cfg(test)]
 pub(crate) fn seed_default_routines(
     routines_dir: &Path,
     host_id: &str,
     workspace_slug: Option<&str>,
     overwrite: bool,
 ) -> Result<ManagedAssetReconciliation, OrbitError> {
+    reconcile_default_routines(
+        routines_dir,
+        host_id,
+        workspace_slug,
+        overwrite,
+        ManagedAssetReconcileMode::Apply,
+    )
+}
+
+pub(crate) fn reconcile_default_routines(
+    routines_dir: &Path,
+    host_id: &str,
+    workspace_slug: Option<&str>,
+    overwrite_bindings: bool,
+    mode: ManagedAssetReconcileMode,
+) -> Result<ManagedAssetReconciliation, OrbitError> {
     let host_id = host_id.trim();
     if host_id.is_empty() {
         return Err(OrbitError::InvalidInput(
-            "cannot seed default routines without a host id".to_string(),
+            "cannot reconcile default routines without a host id".to_string(),
         ));
     }
-    reconcile_managed_assets(
-        routines_dir,
-        "routine",
-        ManagedAssetLayout::YamlStem,
-        DEFAULT_ROUTINE_FILES,
-        overwrite,
-        |file_stem, template| {
-            let routine_name = routine_name_for(file_stem, workspace_slug);
-            let rendered = template
-                .replace(ROUTINE_NAME_PLACEHOLDER, &routine_name)
-                .replace(HOST_ID_PLACEHOLDER, host_id);
-            // Fail-closed: never seed a file the routine loader would reject.
-            parse_routine_yaml(&rendered).map_err(|error| {
-                OrbitError::InvalidInput(format!(
-                    "default routine `{file_stem}` failed validation after placeholder \
-                     substitution (host `{host_id}`, name `{routine_name}`): {error}"
+
+    let manifest_path = routines_dir.join(MANAGED_ASSET_MANIFEST_FILE);
+    let previous =
+        load_managed_asset_manifest(&manifest_path, "routine", ManagedAssetLayout::YamlStem)?;
+    let shipped: BTreeSet<&str> = DEFAULT_ROUTINE_FILES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    let mut next_assets = BTreeMap::new();
+    let mut next_provenance = BTreeMap::new();
+    let mut result = ManagedAssetReconciliation::default();
+
+    if let Some(previous) = &previous {
+        for (name, rendered_digest) in &previous.assets {
+            if shipped.contains(name.as_str()) {
+                continue;
+            }
+            let path = routines_dir.join(format!("{name}.yaml"));
+            if path.exists() {
+                let existing = fs::read_to_string(&path).map_err(|error| {
+                    OrbitError::Io(format!(
+                        "read retired managed routine '{}': {error}",
+                        path.display()
+                    ))
+                })?;
+                if sha256_hex(existing.as_bytes()) == *rendered_digest {
+                    if mode == ManagedAssetReconcileMode::Apply {
+                        fs::remove_file(&path).map_err(|error| {
+                            OrbitError::Io(format!(
+                                "retire managed routine '{}': {error}",
+                                path.display()
+                            ))
+                        })?;
+                    }
+                } else {
+                    let detail = format!(
+                        "retired managed routine '{}' was locally modified; move or rename it before rerunning `orbit workspace sync`",
+                        path.display()
+                    );
+                    if mode == ManagedAssetReconcileMode::Apply {
+                        let preserved = preserve_modified_retired_asset(
+                            routines_dir,
+                            "routine",
+                            ManagedAssetLayout::YamlStem,
+                            name,
+                            &path,
+                        )?;
+                        result.warnings.push(format!(
+                            "{detail}; Orbit preserved it at '{}'",
+                            preserved.display()
+                        ));
+                    } else {
+                        result.warnings.push(detail.clone());
+                    }
+                    result.actions.push(ManagedAssetAction {
+                        name: name.clone(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Preserved,
+                        detail: Some(detail),
+                    });
+                }
+            }
+            result.actions.push(ManagedAssetAction {
+                name: name.clone(),
+                path,
+                outcome: ManagedAssetOutcome::Retired,
+                detail: None,
+            });
+            result.retired += 1;
+        }
+    }
+
+    for (name, template) in DEFAULT_ROUTINE_FILES {
+        let path = routines_dir.join(format!("{name}.yaml"));
+        let requested_binding = RoutineMaterializationBinding {
+            name: routine_name_for(name, workspace_slug),
+            hosts: vec![host_id.to_string()],
+        };
+        let template_digest = sha256_hex(template.as_bytes());
+        let previous_digest = previous.as_ref().and_then(|value| value.assets.get(*name));
+        let previous_provenance = previous
+            .as_ref()
+            .and_then(|value| value.routine_provenance.get(*name));
+
+        if let Some(provenance) = previous_provenance {
+            let binding = if overwrite_bindings {
+                requested_binding.clone()
+            } else {
+                provenance.binding.clone()
+            };
+            let rendered = render_routine_template(name, template, &binding)?;
+            let rendered_digest = sha256_hex(rendered.as_bytes());
+            if path.exists() {
+                let existing = fs::read_to_string(&path).map_err(|error| {
+                    OrbitError::Io(format!(
+                        "read managed routine '{}': {error}",
+                        path.display()
+                    ))
+                })?;
+                if sha256_hex(existing.as_bytes()) != provenance.rendered_digest
+                    && !overwrite_bindings
+                {
+                    let detail = format!(
+                        "locally modified managed routine '{}' was preserved; restore the Orbit-written bytes or move/rename the file, then rerun `orbit workspace sync`",
+                        path.display()
+                    );
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Preserved,
+                        detail: Some(detail),
+                    });
+                    next_assets.insert((*name).to_string(), provenance.rendered_digest.clone());
+                    next_provenance.insert((*name).to_string(), provenance.clone());
+                    continue;
+                }
+                if !overwrite_bindings && provenance.binding != requested_binding {
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::BindingDrift,
+                        detail: Some(format!(
+                            "current host/workspace binding would render name '{}' and hosts {:?}; preserving recorded name '{}' and hosts {:?}",
+                            requested_binding.name,
+                            requested_binding.hosts,
+                            provenance.binding.name,
+                            provenance.binding.hosts
+                        )),
+                    });
+                }
+                if provenance.template_digest == template_digest && provenance.binding == binding {
+                    result.actions.push(ManagedAssetAction {
+                        name: (*name).to_string(),
+                        path: path.clone(),
+                        outcome: ManagedAssetOutcome::Unchanged,
+                        detail: None,
+                    });
+                    next_assets.insert((*name).to_string(), provenance.rendered_digest.clone());
+                    next_provenance.insert((*name).to_string(), provenance.clone());
+                    continue;
+                }
+                if mode == ManagedAssetReconcileMode::Apply {
+                    write_text_with_parent(&path, &rendered)?;
+                }
+                result.refreshed += 1;
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Refreshed,
+                    detail: Some("shipped routine template changed; preserved the recorded materialization binding".to_string()),
+                });
+            } else {
+                if mode == ManagedAssetReconcileMode::Apply {
+                    write_text_with_parent(&path, &rendered)?;
+                }
+                result.refreshed += 1;
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Created,
+                    detail: Some(
+                        "recreated a missing managed routine with its recorded binding".to_string(),
+                    ),
+                });
+            }
+            next_assets.insert((*name).to_string(), rendered_digest.clone());
+            next_provenance.insert(
+                (*name).to_string(),
+                RoutineAssetProvenance {
+                    template_digest,
+                    rendered_digest,
+                    binding,
+                },
+            );
+            continue;
+        }
+
+        if let Some(legacy_digest) = previous_digest {
+            if !path.exists() {
+                let rendered = render_routine_template(name, template, &requested_binding)?;
+                let rendered_digest = sha256_hex(rendered.as_bytes());
+                if mode == ManagedAssetReconcileMode::Apply {
+                    write_text_with_parent(&path, &rendered)?;
+                }
+                result.refreshed += 1;
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Created,
+                    detail: None,
+                });
+                next_assets.insert((*name).to_string(), rendered_digest.clone());
+                next_provenance.insert(
+                    (*name).to_string(),
+                    RoutineAssetProvenance {
+                        template_digest,
+                        rendered_digest,
+                        binding: requested_binding,
+                    },
+                );
+                continue;
+            }
+            let existing = fs::read_to_string(&path).map_err(|error| {
+                OrbitError::Io(format!(
+                    "read legacy managed routine '{}': {error}",
+                    path.display()
                 ))
             })?;
-            Ok(Cow::Owned(rendered))
-        },
-    )
+            if sha256_hex(existing.as_bytes()) != *legacy_digest {
+                let detail = format!(
+                    "legacy managed routine '{}' no longer matches Orbit's recorded digest and was preserved; restore the recorded bytes or move/rename it, then rerun `orbit workspace sync`",
+                    path.display()
+                );
+                result.warnings.push(detail.clone());
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Preserved,
+                    detail: Some(detail),
+                });
+                next_assets.insert((*name).to_string(), legacy_digest.clone());
+                continue;
+            }
+            let definition = parse_routine_yaml(&existing).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "legacy managed routine '{}' matches its manifest but cannot be parsed to recover its recorded binding: {error}",
+                    path.display()
+                ))
+            })?;
+            let binding = RoutineMaterializationBinding {
+                name: definition.name,
+                hosts: definition.hosts,
+            };
+            let rendered = render_routine_template(name, template, &binding)?;
+            let rendered_digest = sha256_hex(rendered.as_bytes());
+            let changed = rendered_digest != *legacy_digest;
+            if changed && mode == ManagedAssetReconcileMode::Apply {
+                write_text_with_parent(&path, &rendered)?;
+            }
+            if changed {
+                result.refreshed += 1;
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Refreshed,
+                    detail: Some("refreshed a legacy Orbit-written routine using the binding parsed from that exact instance".to_string()),
+                });
+            }
+            result.actions.push(ManagedAssetAction {
+                name: (*name).to_string(),
+                path: path.clone(),
+                outcome: ManagedAssetOutcome::Migrated,
+                detail: Some(
+                    "migrated legacy rendered-only provenance using the exact on-disk instance"
+                        .to_string(),
+                ),
+            });
+            next_assets.insert((*name).to_string(), rendered_digest.clone());
+            next_provenance.insert(
+                (*name).to_string(),
+                RoutineAssetProvenance {
+                    template_digest,
+                    rendered_digest,
+                    binding,
+                },
+            );
+            continue;
+        }
+
+        let rendered = render_routine_template(name, template, &requested_binding)?;
+        let rendered_digest = sha256_hex(rendered.as_bytes());
+        if path.exists() {
+            let existing = fs::read_to_string(&path).map_err(|error| {
+                OrbitError::Io(format!(
+                    "read colliding routine '{}': {error}",
+                    path.display()
+                ))
+            })?;
+            if sha256_hex(existing.as_bytes()) != rendered_digest {
+                let detail = format!(
+                    "user-authored routine '{}' collides with bundled default `{name}` and was preserved; move or rename it, then rerun `orbit workspace sync`",
+                    path.display()
+                );
+                result.warnings.push(detail.clone());
+                result.actions.push(ManagedAssetAction {
+                    name: (*name).to_string(),
+                    path: path.clone(),
+                    outcome: ManagedAssetOutcome::Preserved,
+                    detail: Some(detail),
+                });
+                continue;
+            }
+            result.actions.push(ManagedAssetAction {
+                name: (*name).to_string(),
+                path: path.clone(),
+                outcome: ManagedAssetOutcome::Migrated,
+                detail: Some(
+                    "recorded provenance for an exact existing shipped routine".to_string(),
+                ),
+            });
+        } else {
+            if mode == ManagedAssetReconcileMode::Apply {
+                write_text_with_parent(&path, &rendered)?;
+            }
+            result.refreshed += 1;
+            result.actions.push(ManagedAssetAction {
+                name: (*name).to_string(),
+                path: path.clone(),
+                outcome: ManagedAssetOutcome::Created,
+                detail: None,
+            });
+        }
+        next_assets.insert((*name).to_string(), rendered_digest.clone());
+        next_provenance.insert(
+            (*name).to_string(),
+            RoutineAssetProvenance {
+                template_digest,
+                rendered_digest,
+                binding: requested_binding,
+            },
+        );
+    }
+
+    let next = ManagedAssetManifest {
+        schema_version: ROUTINE_MANAGED_ASSET_MANIFEST_SCHEMA_VERSION,
+        asset_kind: "routine".to_string(),
+        assets: next_assets,
+        routine_provenance: next_provenance,
+    };
+    if mode == ManagedAssetReconcileMode::Apply && previous.as_ref() != Some(&next) {
+        let encoded = encode_managed_asset_manifest(&next)?;
+        atomic_write_text(&manifest_path, &encoded).map_err(|error| {
+            OrbitError::Io(format!(
+                "write managed routine asset manifest '{}': {error}",
+                manifest_path.display()
+            ))
+        })?;
+    }
+    Ok(result)
+}
+
+fn render_routine_template(
+    file_stem: &str,
+    template: &str,
+    binding: &RoutineMaterializationBinding,
+) -> Result<String, OrbitError> {
+    let [host_id] = binding.hosts.as_slice() else {
+        return Err(OrbitError::InvalidInput(format!(
+            "managed routine `{file_stem}` has a recorded hosts binding {:?}; shipped routine templates require exactly one host",
+            binding.hosts
+        )));
+    };
+    let rendered = template
+        .replace(ROUTINE_NAME_PLACEHOLDER, &binding.name)
+        .replace(HOST_ID_PLACEHOLDER, host_id);
+    let definition = parse_routine_yaml(&rendered).map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "default routine `{file_stem}` failed validation with recorded name '{}' and hosts {:?}: {error}",
+            binding.name, binding.hosts
+        ))
+    })?;
+    if definition.name != binding.name || definition.hosts != binding.hosts {
+        return Err(OrbitError::InvalidInput(format!(
+            "default routine `{file_stem}` did not reproduce its recorded materialization binding"
+        )));
+    }
+    Ok(rendered)
 }
 
 /// Compose a per-workspace routine name: `<stem>-<workspace-slug>`, using

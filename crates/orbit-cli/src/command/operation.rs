@@ -211,6 +211,7 @@ impl Commands {
                 use super::workspace::WorkspaceSubcommand;
                 let (subcommand, runtime_need, governed) = match &command.command {
                     WorkspaceSubcommand::Init(_) => ("init", RuntimeNeed::Forbidden, false),
+                    WorkspaceSubcommand::Sync(_) => ("sync", RuntimeNeed::Forbidden, false),
                     WorkspaceSubcommand::List(_) => ("list", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Show(_) => ("show", RuntimeNeed::Required, false),
                     WorkspaceSubcommand::Role(_) => ("role", RuntimeNeed::Required, false),
@@ -909,6 +910,9 @@ fn dispatch_workspace(command: Commands, context: DispatchContext<'_>) -> Comman
     match command {
         Commands::Workspace(WorkspaceCommand {
             command: WorkspaceSubcommand::Init(args),
+        }) => args.execute_without_runtime(context.root_override),
+        Commands::Workspace(WorkspaceCommand {
+            command: WorkspaceSubcommand::Sync(args),
         }) => args.execute_without_runtime(context.root_override),
         Commands::Workspace(command) => command.execute(context.runtime()?),
         _ => dispatch_mismatch("Workspace"),
