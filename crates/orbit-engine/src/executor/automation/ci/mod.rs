@@ -22,6 +22,8 @@
 mod collect;
 mod query;
 
+pub(in crate::executor::automation) use query::AuthStatus;
+
 use std::path::PathBuf;
 
 use orbit_common::OrbitError;

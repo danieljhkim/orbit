@@ -39,6 +39,10 @@ pub(crate) const DEFAULT_ROUTINE_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/routines/ci_failure_sweep.yaml"),
     ),
     (
+        "dependabot_alert_sweep",
+        include_str!("../../assets/routines/dependabot_alert_sweep.yaml"),
+    ),
+    (
         "task_triage",
         include_str!("../../assets/routines/task_triage.yaml"),
     ),
@@ -155,6 +159,7 @@ mod tests {
         for (stem, target) in [
             ("auto_task_scheduler", "auto_task_scheduler_pipeline"),
             ("ci_failure_sweep", "ci_failure_sweep_pipeline"),
+            ("dependabot_alert_sweep", "dependabot_alert_sweep_pipeline"),
             ("task_triage", "task_triage_pipeline"),
             ("task_pilot", "task_pilot_pipeline"),
             ("ship_sweep", "workspace_ship_pipeline"),
@@ -228,6 +233,17 @@ mod tests {
         );
         assert_eq!(sweep.policy.overlap, OverlapPolicy::Forbid);
         parse_cron(&sweep.trigger.cron).expect("CI-failure sweep cron parses");
+
+        let dependabot = std::fs::read_to_string(routines_dir.join("dependabot_alert_sweep.yaml"))
+            .expect("read Dependabot sweep routine");
+        let dependabot = parse_routine_yaml(&dependabot).expect("Dependabot sweep routine parses");
+        assert!(!dependabot.enabled);
+        assert_eq!(dependabot.trigger.cron, "25 3 * * *");
+        assert_eq!(dependabot.policy.overlap, OverlapPolicy::Forbid);
+        for occupied in ["5 * * * *", "15 * * * *", "35 * * * *", "*/20 * * * *"] {
+            assert_ne!(dependabot.trigger.cron, occupied);
+        }
+        parse_cron(&dependabot.trigger.cron).expect("Dependabot sweep cron parses");
     }
 
     #[test]

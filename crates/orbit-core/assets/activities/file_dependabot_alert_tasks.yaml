@@ -1,0 +1,51 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: file_dependabot_alert_tasks
+spec:
+  type: deterministic
+  description: >
+    Cluster a host-collected Dependabot snapshot by ecosystem, package, and
+    manifest path; report alerts below the severity floor; skip clusters with
+    an open Dependabot-authored pull request by default; dedupe against open
+    tasks using a digest of that stable triple; and file bounded evidence-complete
+    backlog tasks with no required tools.
+  input_schema_json:
+    type: object
+    required: [dependabot_snapshot]
+    properties:
+      dependabot_snapshot:
+        type: object
+      min_severity:
+        type: string
+        enum: [low, moderate, high, critical]
+        default: high
+      skip_when_dependabot_pr_open:
+        type: boolean
+        default: true
+      max_tasks:
+        type: number
+        minimum: 1
+        maximum: 50
+  output_schema_json:
+    type: object
+    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_dependabot_pr, excluded_below_min_severity]
+    properties:
+      outcome:
+        type: string
+      clusters:
+        type: number
+      filed_count:
+        type: number
+      filed:
+        type: array
+      skipped_existing:
+        type: array
+      skipped_dependabot_pr:
+        type: array
+      skipped_over_cap:
+        type: array
+      excluded_below_min_severity:
+        type: array
+  action: file_dependabot_alert_tasks
+  config: {}
