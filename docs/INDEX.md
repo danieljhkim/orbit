@@ -60,7 +60,7 @@ a conservative title/status fallback.
 | [Orbit Core](./design/orbit-core/1_overview.md) | Directional application, runtime, adapter, bootstrap, and composition boundaries inside orbit-core. | Accepted | codex |
 | [Orbit Docs](./design/orbit-docs/1_overview.md) | Orbit Docs — the human-authored workspace corpus and how operators and agents retrieve from it. | Draft | claude |
 | [Orbit Docs Plugin](./design/orbit-docs-plugin/1_scope.md) | Scope: extract docs + search into a plugin-style feature crate | Draft | — |
-| [Semantic Search](./design/orbit-search/1_overview.md) | Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts (phase 1) and, eventually, the knowledge-graph corpus (phase 2). | Draft | claude |
+| [Semantic Search](./design/orbit-search/1_overview.md) | Semantic search is a local, offline-first retrieval layer over Orbit's task artifacts and explicitly indexed docs. | Draft | claude |
 | [Policy & Sandboxing](./design/policy-sandbox/1_overview.md) | Policy & Sandboxing is Orbit's safety surface for filesystem access and process execution. | Draft | claude |
 | [Project Learnings](./design/project-learnings/4_decisions.md) | Project Learnings — Decisions | Superseded | claude |
 | [Remote Access](./design/remote-access/1_overview.md) | Multi-workspace Orbit Web serving and loopback-safe remote access over an SSH local forward. | Accepted | codex |

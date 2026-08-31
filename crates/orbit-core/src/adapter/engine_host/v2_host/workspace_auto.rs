@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use crate::OrbitRuntime;
 
 use super::backlog_exclusion::{
-    EpicFamilyMembership, epic_family_membership, list_backlog_tasks, sort_tasks_by_priority_age,
+    EpicFamilyMembership, epic_family_membership, list_backlog_tasks,
+    sort_tasks_for_automatic_dispatch,
 };
 
 /// The job that supervises one epic root. `classify_workspace_auto_tasks`
@@ -183,7 +184,7 @@ fn next_admissible_epic_root(
                 && task_dependencies_ready(task, &status_by_id)
         })
         .collect::<Vec<_>>();
-    sort_tasks_by_priority_age(&mut backlog_epics);
+    sort_tasks_for_automatic_dispatch(&mut backlog_epics);
     Ok(backlog_epics.into_iter().next().map(|epic| epic.id))
 }
 
@@ -367,7 +368,7 @@ pub(super) fn list_epic_descendants(
                 ),
             });
         }
-        sort_tasks_by_priority_age(&mut ready);
+        sort_tasks_for_automatic_dispatch(&mut ready);
         for task in ready {
             remaining.remove(&task.id);
             ordered.push(task.id);
