@@ -61,6 +61,8 @@ const FRICTION_LIMIT = positiveIntParam("frictions", 100);
 
 const FRICTION_STATUSES = ["open", "triaged", "resolved"];
 const DEFAULT_FRICTION_STATUS_FILTER = "active";
+const FRICTION_ACCORDION_QUERY = "(max-width: 1000px)";
+const frictionAccordionMedia = window.matchMedia(FRICTION_ACCORDION_QUERY);
 
 const $ = (id) => document.getElementById(id);
 
@@ -424,6 +426,7 @@ function renderFrictions(payload) {
   if (!body) return;
   const items = Array.isArray(payload && payload.items) ? payload.items : [];
   const stats = (payload && payload.stats) || {};
+  const accordion = frictionAccordionMedia.matches;
   renderFrictionStats(stats);
   const available = frictionAvailableCount(stats);
   const count = $("knowledge-count");
@@ -431,7 +434,7 @@ function renderFrictions(payload) {
   count.title = `Showing ${items.length} of ${available} ${frictionFilterLabel()} frictions`;
 
   if (items.length > 0 && !items.some((item) => item.id === activeFrictionId)) {
-    activeFrictionId = items[0].id;
+    activeFrictionId = accordion ? null : items[0].id;
   }
   if (items.length === 0) activeFrictionId = null;
 
@@ -449,11 +452,14 @@ function renderFrictions(payload) {
 
   for (const friction of items) {
     const title = friction.title || friction.id;
+    const expanded = activeFrictionId === friction.id;
+    const detailId = `friction-accordion-${friction.id}`;
     const row = el("div", { class: "knowledge-row friction-row", title }, [
       el("div", { class: "top" }, [
         el("span", { class: "id", text: friction.id, title: friction.id }),
         el("span", { class: "spacer" }),
         el("span", { class: "when", text: fmtTimestamp(friction.created_at), title: fmtAbsTime(friction.created_at) }),
+        accordion ? el("span", { class: "friction-row-toggle", text: expanded ? "▾" : "▸" }) : null,
       ]),
       el("div", { class: "title", text: title }),
       el("div", { class: "summary", text: truncate(friction.body || title, 180) }),
@@ -468,23 +474,43 @@ function renderFrictions(payload) {
       ]),
     ]);
     row.dataset.key = `friction-${friction.id}`;
-    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${activeFrictionId === friction.id}`;
-    if (activeFrictionId === friction.id) row.classList.add("active");
-    row.addEventListener("click", () => {
-      activeFrictionId = friction.id;
+    row.dataset.hash = `${friction.id}-${friction.status}-${(friction.tags || []).join(",")}-${friction.created_at}-${accordion}-${expanded}`;
+    if (expanded) row.classList.add("active");
+    const toggle = () => {
+      activeFrictionId = accordion && expanded ? null : friction.id;
       renderFrictions(lastFrictionPayload);
-    });
+    };
+    row.addEventListener("click", toggle);
+    if (accordion) {
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-expanded", String(expanded));
+      row.setAttribute("aria-controls", detailId);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggle();
+      });
+    }
     frag.appendChild(row);
+    if (accordion && expanded) {
+      const inlineDetail = el("section", { class: "friction-accordion-detail" });
+      inlineDetail.id = detailId;
+      inlineDetail.dataset.key = `friction-detail-${friction.id}`;
+      inlineDetail.dataset.hash = JSON.stringify({ friction, tags: lastFrictionPayload.tags });
+      inlineDetail.setAttribute("aria-label", `Details for ${friction.id}`);
+      renderFrictionDetail(friction, inlineDetail);
+      frag.appendChild(inlineDetail);
+    }
   }
 
   syncNodes(body, Array.from(frag.children));
-  renderFrictionDetail(items.find((item) => item.id === activeFrictionId) || items[0]);
+  renderFrictionDetail(accordion ? null : items.find((item) => item.id === activeFrictionId) || items[0]);
 }
 
-function renderFrictionDetail(friction) {
-  const detail = $("friction-detail");
+function renderFrictionDetail(friction, detail = $("friction-detail")) {
   if (!detail) return;
-  const count = $("friction-detail-count");
+  const count = detail.id === "friction-detail" ? $("friction-detail-count") : null;
   if (!friction) {
     if (count) count.textContent = "-";
     syncNodes(detail, [el("div", { class: "empty-state" }, [
@@ -701,6 +727,12 @@ function wireFrictionStatusFilter() {
     frictionStatusFilter = e.target.value;
     activeFrictionId = null;
     if (activeTab === "knowledge") fetchAndRenderFrictions().catch(console.error);
+  });
+}
+
+function wireFrictionResponsiveDetail() {
+  frictionAccordionMedia.addEventListener("change", () => {
+    renderFrictions(lastFrictionPayload);
   });
 }
 
@@ -1349,6 +1381,7 @@ buildChips(tasksContext);
 wireSearch(tasksContext);
 wireFrictionSearch();
 wireFrictionStatusFilter();
+wireFrictionResponsiveDetail();
 wireGlobalTaskResolver();
 buildAuditChips(auditContext());
 wireAuditSearch(auditContext());
