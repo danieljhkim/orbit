@@ -163,6 +163,10 @@ fn parse_cli() -> (command::Cli, Option<FormatArg>, bool) {
 }
 
 fn main() {
+    // Must be the first operation: a Tier 2 acceptance bearer arrives in the
+    // initial process environment, so even logging setup is intentionally
+    // downstream of the Linux metadata boundary [ORB-11134].
+    command::mcp::seal_ssh_acceptance_environment();
     orbit_common::observability::logging::init_default_subscriber("warn");
     output::pipe::install_handler();
 

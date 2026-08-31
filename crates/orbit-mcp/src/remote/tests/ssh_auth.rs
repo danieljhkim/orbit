@@ -1,7 +1,7 @@
 use base64::Engine as _;
 
 use super::super::ssh_auth::{
-    FORCED_COMMAND_RESTRICTIONS, KeyObservation, ObservedKeys, SshAcceptance,
+    FORCED_COMMAND_RESTRICTIONS, KeyObservation, ObservedKeys, SSH_ACCEPTANCE_ENV, SshAcceptance,
     auth_info_fingerprints, fingerprint_defect, issue_ssh_acceptance, parse_public_key,
     verify_ssh_acceptance,
 };
@@ -50,10 +50,19 @@ fn the_rendered_line_forces_this_machines_own_argv() {
 
     assert!(
         line.starts_with(
-            "command=\"/usr/local/bin/orbit mcp serve --accept-ssh \
-             .orbit-ssh-destination-capability --caller hm_alpha --operator\","
+            "environment=\"ORBIT_MCP_SSH_ACCEPTANCE=.orbit-ssh-destination-capability\",\
+             command=\"/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha \
+             --operator\","
         ),
         "the destination composes the whole operator request, absolute path included: {line}"
+    );
+    assert_eq!(SSH_ACCEPTANCE_ENV, "ORBIT_MCP_SSH_ACCEPTANCE");
+    assert!(
+        !line
+            .split_once("command=\"")
+            .map_or(line.as_str(), |(_, command)| command)
+            .contains(".orbit-ssh-destination-capability"),
+        "the acceptance bearer must not appear in the forced command argv: {line}"
     );
     assert!(line.contains(FORCED_COMMAND_RESTRICTIONS), "{line}");
     assert!(line.contains("no-pty"), "{line}");
