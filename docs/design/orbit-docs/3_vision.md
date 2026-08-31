@@ -42,7 +42,7 @@ The third condition — explicit team agreement — is what makes this an open q
 [ORB-00169] is the design task. Three paths are named:
 
 1. **Fold completely.** orbit-docs indexes `.orbit/adrs/` by translating `adr.yaml` to orbit-docs frontmatter at index time. ADR storage stays put. Single search surface; orbit-docs gains complexity for a corpus with a stricter lifecycle than it understands.
-2. **Sibling indexes, unified search verb.** ADRs stay where they are with their own surface. The unified `orbit search` surface that landed in [ORB-00196] / [ORB-00202] already queries both via `--kind doc`, `--kind adr`, or `--kind all`. Clean separation; another surface to maintain.
+2. **Sibling indexes, unified search verb.** Feature decision logs stay in the docs corpus, while the unified `orbit search` surface queries the current task, doc, and friction corpora via `--kind task`, `--kind doc`, `--kind friction`, or `--kind all`. A separate ADR kind is no longer part of the current search surface. Clean separation; another surface to maintain.
 3. **Status quo.** Skills document the boundary clearly and nudge agents to query both for design context. Zero new code; agents won't reliably query both.
 
 The author's current bias is toward path 2 — keep the lifecycles separate, but provide a single retrieval entry point. But the choice should be made by [ORB-00169], not pre-committed here.
@@ -59,7 +59,7 @@ The remaining question is when hybrid ranking should become the default. A retri
 
 [ORB-00167] proposes a 2-doc cap (vs 3 for learnings) and gates the lookup behind `[hook].surface_docs = true`. The unanswered question: what's the actual latency budget?
 
-The learning hook today walks `.orbit/learnings/` per Edit / Read / Write tool call and scores against scope-globs. With a few dozen learnings, that's ~5ms. Adding a parallel docs walk over 100 docs is another ~10-20ms (rough estimate). At ~30ms total per hook call, hook-fatigue starts to show up in agent flow.
+The former learning hook walked `.orbit/learnings/` per Edit / Read / Write tool call and scored against scope-globs; that native learning subsystem is now retired. A future docs walk over 100 docs would add roughly ~10-20ms (rough estimate), but there is no current additive hook path to benchmark. The latency budget remains an open question for any future hook integration.
 
 The right answer is probably (a) share the walk between learning and doc lookup, and (b) cache the walked corpus for the duration of an `ORBIT_EXECUTION_ID`. Neither is in v1; both are noted in [ORB-00167].
 
@@ -77,7 +77,7 @@ The tradeoff is straightforward: stability of cross-references vs. human-authore
 
 ### 2.1 Orbit project learnings
 
-[docs/design/project-learnings/](../project-learnings/) is the closest internal sibling. Both surfaces aim to elevate knowledge above per-agent memory into a shared queryable artifact. Learnings are push-first; Orbit Docs supports pull retrieval plus task-time context injection, while hook-time injection remains future work. They differ on:
+[docs/design/project-learnings/](../project-learnings/) is the closest historical internal sibling. Both surfaces aimed to elevate knowledge above per-agent memory into a shared queryable artifact. The native learning subsystem is retired; Orbit Docs supports pull retrieval plus task-time context injection, while hook-time injection remains future work. They differ on:
 
 | Dimension | Learnings | Orbit Docs |
 |-----------|-----------|------------|
@@ -92,7 +92,7 @@ The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearin
 
 ### 2.2 Orbit ADRs
 
-[.orbit/adrs/](../../../.orbit/adrs/) is the ADR artifact store. ADRs share with docs the "PR-reviewed Markdown" property but differ on lifecycle: ADRs have `proposed → accepted → superseded` and are tool-managed via `orbit.adr.add`. The locating principle ([`.orbit/` for tool-managed artifacts; `docs/` for human-authored content](./4_decisions.md#orbit-for-tool-managed-artifacts-docs-for-human-authored-content)) puts them under `.orbit/adrs/`. Whether to fold them into orbit-docs is [ORB-00169].
+Feature decision logs live in each feature's `docs/design/<feature>/4_decisions.md` and share the docs corpus's PR-reviewed Markdown lifecycle. The retired `.orbit/adrs/` store is historical context rather than a current search surface. Whether a future tool-managed decision artifact should be folded into orbit-docs is [ORB-00169].
 
 ### 2.3 Semantic search
 
@@ -151,8 +151,8 @@ The strict / tolerant split lets the corpus be queryable on day one (tolerant in
 - [2_design.md](./2_design.md) — schema, walker, search, the six verbs
 - [4_decisions.md](./4_decisions.md) — accepted ADRs
 - [docs/design/project-learnings/](../project-learnings/) — sibling knowledge surface; rule-with-failure-mode shape
-- [.orbit/adrs/](../../../.orbit/adrs/) — ADR artifact store; tool-managed lifecycle
-- [docs/design/orbit-search/](../orbit-search/) — embeddings infrastructure; v2 target for [ORB-00168]
+- [Feature decision logs](./4_decisions.md) — human-authored decision history in the docs corpus
+- [docs/design/orbit-search/](../orbit-search/) — embeddings infrastructure for task and doc search; [ORB-00206] shipped doc indexing
 
 ### 4.2 External
 
