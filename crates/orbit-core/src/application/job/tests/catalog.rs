@@ -268,6 +268,44 @@ fn dependabot_sweep_pipeline_is_two_deterministic_steps_and_single_flight() {
     );
     assert!(!yaml.contains("agent_loop"));
     assert!(!yaml.contains("worktree_setup"));
+    for expected in [
+        "max_alerts: 100",
+        "max_pull_requests: 100",
+        "max_code_scanning_alerts: 100",
+        "max_secret_scanning_alerts: 100",
+        "max_secret_locations: 20",
+        "max_tasks: 10",
+        "min_severity: high",
+        "skip_when_dependabot_pr_open: true",
+    ] {
+        assert!(yaml.contains(expected), "missing default {expected}");
+    }
+
+    let collect = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "collect_dependabot_alerts").then_some(*yaml))
+        .expect("collect activity default exists");
+    for field in [
+        "max_code_scanning_alerts:",
+        "max_secret_scanning_alerts:",
+        "max_secret_locations:",
+        "code_scanning:",
+        "secret_scanning:",
+        "collection_status:",
+    ] {
+        assert!(collect.contains(field), "collect schema missing {field}");
+    }
+    let file = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "file_dependabot_alert_tasks").then_some(*yaml))
+        .expect("file activity default exists");
+    for field in [
+        "collection_outcome:",
+        "family_outcomes:",
+        "skipped_over_cap:",
+    ] {
+        assert!(file.contains(field), "file schema missing {field}");
+    }
 }
 
 #[test]

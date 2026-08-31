@@ -5,11 +5,11 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Query open Dependabot vulnerability alerts and open app/dependabot pull
-    requests on the engine-private host boundary using NoSandbox, then emit one
-    bounded and redacted snapshot. Missing gh, missing credentials, a 403
-    security_events-scope response, and a 404 unavailable-alerts response are
-    capability outcomes and never a clean no-alert result.
+    Query open Dependabot, Code scanning, and secret scanning alerts plus open
+    app/dependabot pull requests on the engine-private host boundary using
+    NoSandbox, then emit one bounded and redacted snapshot. Each security
+    family reports collection and capability independently. Secret values are
+    structurally excluded before the snapshot is encoded.
   input_schema_json:
     type: object
     properties:
@@ -22,6 +22,18 @@ spec:
         minimum: 1
         maximum: 100
       max_pull_requests:
+        type: number
+        minimum: 1
+        maximum: 100
+      max_code_scanning_alerts:
+        type: number
+        minimum: 1
+        maximum: 100
+      max_secret_scanning_alerts:
+        type: number
+        minimum: 1
+        maximum: 100
+      max_secret_locations:
         type: number
         minimum: 1
         maximum: 100
@@ -43,6 +55,8 @@ spec:
             type: string
           capability:
             type: object
+          collection_status:
+            type: string
           repository:
             type: object
           open_alerts:
@@ -55,5 +69,11 @@ spec:
             type: object
           collected_at:
             type: string
+          code_scanning:
+            type: object
+            required: [collected, collection_status, capability, outcome_hint, open_alerts]
+          secret_scanning:
+            type: object
+            required: [collected, collection_status, capability, outcome_hint, open_alerts]
   action: collect_dependabot_alerts
   config: {}

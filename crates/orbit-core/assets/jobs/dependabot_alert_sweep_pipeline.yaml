@@ -9,6 +9,9 @@ spec:
   default_input:
     max_alerts: 100
     max_pull_requests: 100
+    max_code_scanning_alerts: 100
+    max_secret_scanning_alerts: 100
+    max_secret_locations: 20
     max_tasks: 10
     min_severity: high
     skip_when_dependabot_pr_open: true
@@ -18,6 +21,9 @@ spec:
       default_input:
         max_alerts: "{{ input.max_alerts }}"
         max_pull_requests: "{{ input.max_pull_requests }}"
+        max_code_scanning_alerts: "{{ input.max_code_scanning_alerts }}"
+        max_secret_scanning_alerts: "{{ input.max_secret_scanning_alerts }}"
+        max_secret_locations: "{{ input.max_secret_locations }}"
     - id: file
       target: activity:file_dependabot_alert_tasks
       default_input:

@@ -5,11 +5,11 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Cluster a host-collected Dependabot snapshot by ecosystem, package, and
-    manifest path; report alerts below the severity floor; skip clusters with
-    an open Dependabot-authored pull request by default; dedupe against open
-    tasks using a digest of that stable triple; and file bounded evidence-complete
-    backlog tasks with no required tools.
+    File bounded, evidence-complete backlog tasks from a host-collected
+    Dependabot, Code scanning, and secret scanning snapshot. Preserve
+    Dependabot clustering, severity filtering, and PR skips; dedupe the other
+    families by repository and alert number; and enforce one max_tasks bound
+    across all families. Filed tasks require no tools.
   input_schema_json:
     type: object
     required: [dependabot_snapshot]
@@ -29,10 +29,14 @@ spec:
         maximum: 50
   output_schema_json:
     type: object
-    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_dependabot_pr, excluded_below_min_severity]
+    required: [outcome, collection_outcome, family_outcomes, clusters, filed_count, filed, skipped_existing, skipped_dependabot_pr, skipped_over_cap, excluded_below_min_severity]
     properties:
       outcome:
         type: string
+      collection_outcome:
+        type: string
+      family_outcomes:
+        type: object
       clusters:
         type: number
       filed_count:
