@@ -72,22 +72,22 @@ fn separates_event_sha_current_head_and_actual_checkout_commit() {
 }
 
 #[test]
-fn latest_non_failing_run_supersedes_older_failures_across_refs_and_shas() {
+fn latest_non_failing_run_supersedes_older_failures_on_the_same_head() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
         .with_runs(vec![vec![
-            // The latest CI run is successful on the release branch and a
-            // different SHA. Both older CI failures are stale even though the
-            // old topic ref still points at one failure's SHA.
+            // Newer `ci` run on the same branch, at a different SHA: the older
+            // failure is stale even though the branch still points at the SHA
+            // that failure tested.
             run_on_branch(
-                30,
+                25,
                 "ci",
-                "main",
+                "topic",
                 OLD,
                 "completed",
                 Some("success"),
-                "2026-08-30T03:00:00Z",
+                "2026-08-30T02:30:00Z",
             ),
             run_on_branch(
                 20,
@@ -98,14 +98,16 @@ fn latest_non_failing_run_supersedes_older_failures_across_refs_and_shas() {
                 Some("failure"),
                 "2026-08-30T02:00:00Z",
             ),
+            // A `ci` run on the release head. It decides that head and nothing
+            // else, so it neither creates nor clears a failure on `topic`.
             run_on_branch(
-                10,
+                30,
                 "ci",
-                "old-pr",
+                "main",
                 OLD,
                 "completed",
-                Some("failure"),
-                "2026-08-30T01:00:00Z",
+                Some("success"),
+                "2026-08-30T03:00:00Z",
             ),
             // A completed non-failing conclusion has the same authority as a
             // success for another workflow.
@@ -142,7 +144,6 @@ fn latest_non_failing_run_supersedes_older_failures_across_refs_and_shas() {
         [
             "superseded_by_newer_workflow_run",
             "superseded_by_newer_workflow_run",
-            "superseded_by_newer_workflow_run",
         ]
     );
     let superseding_ids: Vec<u64> = evidence["stale_or_superseded"]
@@ -151,7 +152,131 @@ fn latest_non_failing_run_supersedes_older_failures_across_refs_and_shas() {
         .iter()
         .filter_map(|entry| entry["superseded_by"]["run_id"].as_u64())
         .collect();
-    assert_eq!(superseding_ids, [30, 30, 40]);
+    assert_eq!(superseding_ids, [25, 40]);
+}
+
+#[test]
+fn integration_failure_survives_a_later_non_failing_run_on_another_head() {
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_pull_request(json!({
+            "number": 12,
+            "url": "https://github.com/acme/orbit/pull/12",
+            "head_branch": "feature-x",
+            "reported_head_sha": OLD,
+        }))
+        .with_runs(vec![vec![
+            // The pull-request run of `ci` finishes after the integration
+            // push broke, and the release run after that. Neither ran the
+            // integration head's commit, so neither may clear its failure.
+            run_on_branch(
+                40,
+                "ci",
+                "feature-x",
+                OLD,
+                "completed",
+                Some("success"),
+                "2026-08-30T04:00:00Z",
+            ),
+            run_on_branch(
+                30,
+                "ci",
+                "main",
+                OLD,
+                "completed",
+                Some("success"),
+                "2026-08-30T03:00:00Z",
+            ),
+            run_on_branch(
+                20,
+                "ci",
+                "topic",
+                HEAD,
+                "completed",
+                Some("failure"),
+                "2026-08-30T02:00:00Z",
+            ),
+        ]]);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+
+    let current_ids: Vec<u64> = evidence["current_failures"]
+        .as_array()
+        .expect("current failures")
+        .iter()
+        .filter_map(|run| run["run_id"].as_u64())
+        .collect();
+    assert_eq!(
+        current_ids,
+        [20],
+        "a run on another head must not supersede the integration head: {evidence}"
+    );
+    assert_eq!(
+        evidence["current_failures"][0]["ref_kind"],
+        json!("integration")
+    );
+    assert_eq!(evidence["outcome_hint"], json!("current_failures"));
+    assert_eq!(evidence["stale_or_superseded"], json!([]));
+}
+
+#[test]
+fn run_on_a_branch_no_scanned_head_matches_is_never_current() {
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![
+            // Newest run in the repository, on a branch behind no open pull
+            // request. It can neither be filed nor supersede anything.
+            run_on_branch(
+                50,
+                "ci",
+                "abandoned/feature",
+                OLD,
+                "completed",
+                Some("failure"),
+                "2026-08-30T05:00:00Z",
+            ),
+            run_on_branch(
+                20,
+                "ci",
+                "topic",
+                HEAD,
+                "completed",
+                Some("failure"),
+                "2026-08-30T02:00:00Z",
+            ),
+        ]]);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+
+    let current_ids: Vec<u64> = evidence["current_failures"]
+        .as_array()
+        .expect("current failures")
+        .iter()
+        .filter_map(|run| run["run_id"].as_u64())
+        .collect();
+    assert_eq!(
+        current_ids,
+        [20],
+        "an untracked branch must neither be filed nor supersede: {evidence}"
+    );
+    assert_eq!(evidence["stale_or_superseded"], json!([]));
+    assert_eq!(evidence["in_flight"], json!([]));
+    assert_eq!(
+        evidence["truncation"]["runs_on_unscanned_branches"],
+        json!(1)
+    );
+    assert!(
+        evidence["truncation"]["notes"]
+            .as_array()
+            .expect("notes")
+            .iter()
+            .any(|note| note
+                .as_str()
+                .is_some_and(|note| note.contains("match no scanned head"))),
+        "skipped runs must be reported, not silently dropped: {evidence}"
+    );
 }
 
 #[test]
@@ -204,22 +329,54 @@ fn latest_in_flight_run_does_not_resurrect_an_older_failure() {
 }
 
 #[test]
-fn old_dependabot_failure_is_superseded_by_newer_repository_ci_run() {
+fn old_dependabot_failure_on_an_unscanned_branch_is_never_current() {
+    // ORB-11146: an eleven-day-old Dependabot run kept being filed because its
+    // branch had not advanced. Once that pull request is closed the branch is
+    // not a scanned head, so the run is skipped outright rather than depending
+    // on a newer run of the same workflow existing somewhere in the repository.
     const DEPENDABOT_SHA: &str = "0f14f3f2ad2c863f902c0add969ff09d10e3f15c";
     const OLD_RUN_ID: u64 = 31_583_558_682;
 
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)
         .with_head("main", HEAD)
+        .with_runs(vec![vec![run_on_branch(
+            OLD_RUN_ID,
+            "CI",
+            "dependabot/cargo/old",
+            DEPENDABOT_SHA,
+            "completed",
+            Some("failure"),
+            "2026-08-20T01:00:00Z",
+        )]]);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+
+    assert_eq!(evidence["current_failures"], json!([]));
+    assert_eq!(evidence["outcome_hint"], json!("no_current_failure"));
+    assert_eq!(
+        evidence["truncation"]["runs_on_unscanned_branches"],
+        json!(1)
+    );
+}
+
+#[test]
+fn open_pull_request_head_failure_is_current_for_its_own_head() {
+    // The converse of the case above: while the pull request is open its head
+    // is scanned, and its own latest run decides it. No run on another branch
+    // can clear it, and it clears no other branch.
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
         .with_pull_request(json!({
             "number": 959,
             "url": "https://github.com/acme/orbit/pull/959",
-            "head_branch": "dependabot/cargo/old",
-            "reported_head_sha": DEPENDABOT_SHA,
+            "head_branch": "dependabot/cargo/current",
+            "reported_head_sha": OLD,
         }))
         .with_runs(vec![vec![
             run_on_branch(
-                OLD_RUN_ID + 100,
+                200,
                 "CI",
                 "main",
                 HEAD,
@@ -228,33 +385,25 @@ fn old_dependabot_failure_is_superseded_by_newer_repository_ci_run() {
                 "2026-08-31T02:00:00Z",
             ),
             run_on_branch(
-                OLD_RUN_ID,
+                100,
                 "CI",
-                "dependabot/cargo/old",
-                DEPENDABOT_SHA,
+                "dependabot/cargo/current",
+                OLD,
                 "completed",
                 Some("failure"),
-                "2026-08-20T01:00:00Z",
+                "2026-08-31T01:00:00Z",
             ),
         ]]);
 
     let evidence = collect(&queries, &input()).expect("collect");
 
-    assert_eq!(evidence["current_failures"], json!([]));
-    assert_eq!(evidence["outcome_hint"], json!("no_current_failure"));
+    assert_eq!(evidence["current_failures"][0]["run_id"], json!(100));
     assert_eq!(
-        evidence["stale_or_superseded"][0]["run_id"],
-        json!(OLD_RUN_ID)
-    );
-    assert_eq!(
-        evidence["stale_or_superseded"][0]["ref_kind"],
+        evidence["current_failures"][0]["ref_kind"],
         json!("pull_request")
     );
-    assert_eq!(
-        evidence["stale_or_superseded"][0]["investigated"],
-        json!(false),
-        "a superseded run must never consume investigation or filing input: {evidence}"
-    );
+    assert_eq!(evidence["current_failures"][0]["pr_number"], json!(959));
+    assert_eq!(evidence["stale_or_superseded"], json!([]));
 }
 
 #[test]
@@ -336,6 +485,9 @@ fn derives_release_head_from_github_and_reports_every_bound_it_hit() {
     assert_eq!(heads[1]["current_head_sha"], json!(OLD));
 
     let truncation = &evidence["truncation"];
+    // The reported bound is the repository-wide cap that was actually applied.
+    assert_eq!(truncation["max_runs"], json!(100));
+    assert_eq!(truncation["runs_on_unscanned_branches"], json!(0));
     assert_eq!(truncation["current_failures_discovered"], json!(2));
     assert_eq!(truncation["current_failures_investigated"], json!(1));
     assert!(

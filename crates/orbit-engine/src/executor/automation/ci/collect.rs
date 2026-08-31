@@ -6,6 +6,10 @@
 //! the commit the runner actually checked out as separate fields, and the
 //! stale/superseding evidence that says which failures are still real.
 //!
+//! "Still real" is decided per head. Runs are listed repository-wide in one
+//! query, but a run only supersedes an older one on the same branch, and a run
+//! on a branch this workspace does not track is evaluated not at all.
+//!
 //! Losing the agent's ability to ask a follow-up question mid-diagnosis is the
 //! accepted cost of that boundary. The compensation is that the snapshot is
 //! generous and that every bound it hit is reported in `truncation` — a
@@ -25,8 +29,13 @@ use super::{
 /// snapshot; `file_ci_failure_tasks` reads this field before anything else.
 pub(super) const CI_EVIDENCE_SCHEMA_VERSION: u64 = 1;
 
-const DEFAULT_RUNS_PER_REF: u64 = 20;
-const MAX_RUNS_PER_REF: u64 = 100;
+/// Cap on the single repository-wide run listing. This is a whole-repository
+/// budget, not a per-ref one: it has to be deep enough that the integration
+/// head's most recent run is still in the page after the pull-request runs
+/// that outnumber it, which is why it is far larger than the per-ref bound it
+/// replaced.
+const DEFAULT_MAX_RUNS: u64 = 100;
+const MAX_MAX_RUNS: u64 = 300;
 const DEFAULT_MAX_PULL_REQUESTS: u64 = 10;
 const MAX_PULL_REQUESTS: u64 = 50;
 const DEFAULT_MAX_INVESTIGATED_RUNS: u64 = 6;
@@ -65,7 +74,7 @@ struct ScannedRef {
 }
 
 struct Bounds {
-    runs_per_ref: u64,
+    max_runs: u64,
     max_pull_requests: u64,
     max_investigated_runs: usize,
     log_max_bytes: usize,
@@ -74,12 +83,7 @@ struct Bounds {
 
 fn bounds_from_input(input: &Value) -> Result<Bounds, OrbitError> {
     Ok(Bounds {
-        runs_per_ref: bounded_u64(
-            input,
-            "runs_per_ref",
-            DEFAULT_RUNS_PER_REF,
-            MAX_RUNS_PER_REF,
-        )?,
+        max_runs: bounded_u64(input, "max_runs", DEFAULT_MAX_RUNS, MAX_MAX_RUNS)?,
         max_pull_requests: bounded_u64(
             input,
             "max_pull_requests",
@@ -150,11 +154,11 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
     let mut current: Vec<Value> = Vec::new();
     let mut stale: Vec<Value> = Vec::new();
     let mut in_flight: Vec<Value> = Vec::new();
-    // This query is deliberately repository-wide. Enumerating the integration,
-    // release, and open-PR refs separately lets an unchanged old ref keep an
-    // obsolete failure alive forever. One repository-wide list lets us choose
-    // exactly one latest run for every workflow represented in the snapshot.
-    let runs = match queries.repository_runs(bounds.runs_per_ref) {
+    // One repository-wide query rather than one per ref: a single list is what
+    // lets a newer run of a workflow supersede an older one without asking the
+    // ref it ran on whether it has advanced. The listing is repository-wide;
+    // the *evaluation* is not — `partition_runs` still answers per scanned ref.
+    let runs = match queries.repository_runs(bounds.max_runs) {
         Ok(runs) => runs,
         Err(error) => {
             query_errors.push(json!({
@@ -165,13 +169,22 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
         }
     };
     let runs_listed = runs.len();
-    if runs_listed as u64 == bounds.runs_per_ref {
+    if runs_listed as u64 == bounds.max_runs {
         notes.push(format!(
-            "repository-wide workflow runs were listed at the cap ({}); older workflows may be absent",
-            bounds.runs_per_ref
+            "repository-wide workflow runs were listed at the cap ({}); a head whose runs \
+             are older than the newest {} in this repository may be absent entirely",
+            bounds.max_runs, bounds.max_runs
         ));
     }
-    partition_runs(&refs, &runs, &mut current, &mut stale, &mut in_flight);
+    let runs_on_unscanned_branches =
+        partition_runs(&refs, &runs, &mut current, &mut stale, &mut in_flight);
+    if runs_on_unscanned_branches > 0 {
+        notes.push(format!(
+            "{runs_on_unscanned_branches} of {runs_listed} listed runs were on branches that \
+             match no scanned head and were not evaluated; this workspace tracks the \
+             integration head, the release head, and open pull-request heads only"
+        ));
+    }
 
     sort_current_failures(&mut current);
     let discovered = current.len();
@@ -212,7 +225,8 @@ pub(super) fn collect<Q: CiQueries + ?Sized>(
         "truncation": json!({
             "refs_scanned": refs.len(),
             "runs_listed": runs_listed,
-            "runs_per_ref": bounds.runs_per_ref,
+            "max_runs": bounds.max_runs,
+            "runs_on_unscanned_branches": runs_on_unscanned_branches,
             "pull_requests_scanned": refs
                 .iter()
                 .filter(|scanned| scanned.kind == RefKind::PullRequest)
@@ -350,42 +364,63 @@ fn head_json(scanned: &ScannedRef) -> Value {
     })
 }
 
-/// Evaluate exactly the latest repository-wide run for each workflow.
+/// Evaluate the latest run of each workflow **on each scanned head**.
 ///
-/// Older unsuccessful runs remain useful evidence, but they can never become
-/// current merely because the ref they ran on has not advanced. The latest run
-/// supersedes them regardless of branch, SHA, status, or conclusion.
+/// Grouping by workflow alone makes supersession branch-blind, and in a
+/// repository where one workflow runs both on pushes to the integration branch
+/// and on every pull request that is not a detail: the first pull-request run
+/// to finish after a broken integration push buries the integration failure,
+/// which is the head that actually gates delivery. So a run only ever speaks
+/// for the branch it ran on, and the newest run on that branch decides it —
+/// regardless of SHA, status, or conclusion, which is what keeps an unchanged
+/// old head from holding an obsolete failure open forever.
+///
+/// A run whose `head_branch` matches no scanned head speaks for nothing this
+/// workspace tracks — an abandoned feature branch, a closed pull request, an
+/// unmerged Dependabot branch. It cannot be current and it cannot supersede;
+/// it is counted, and the count is reported, so that "not tracked" never reads
+/// as "not seen". Returns how many such runs were skipped.
 fn partition_runs(
     refs: &[ScannedRef],
     runs: &[Value],
     current: &mut Vec<Value>,
     stale: &mut Vec<Value>,
     in_flight: &mut Vec<Value>,
-) {
-    let mut workflows = std::collections::BTreeMap::<String, Vec<&Value>>::new();
+) -> usize {
+    let mut unscanned = 0usize;
+    // Keyed by (workflow, branch) so the map iterates in a stable order and
+    // the snapshot is byte-identical for identical GitHub state.
+    let mut heads = std::collections::BTreeMap::<(String, String), Vec<&Value>>::new();
     for run in runs {
+        let Some(scanned) = ref_for_run(refs, run) else {
+            unscanned += 1;
+            continue;
+        };
         let workflow = run
             .get("workflow")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        workflows.entry(workflow).or_default().push(run);
+        heads
+            .entry((workflow, scanned.branch.clone()))
+            .or_default()
+            .push(run);
     }
 
-    for workflow_runs in workflows.values_mut() {
-        workflow_runs.sort_by_key(|run| std::cmp::Reverse(run_order(run)));
-        let Some(latest) = workflow_runs.first().copied() else {
+    for head_runs in heads.values_mut() {
+        head_runs.sort_by_key(|run| std::cmp::Reverse(run_order(run)));
+        let Some(latest) = head_runs.first().copied() else {
             continue;
         };
 
-        for older in workflow_runs.iter().skip(1).copied() {
+        for older in head_runs.iter().skip(1).copied() {
             let completed = older.get("status").and_then(Value::as_str) == Some("completed");
             let conclusion = older.get("conclusion").and_then(Value::as_str);
             if completed && unsuccessful_conclusion(conclusion) {
                 let mut entry = run_summary(ref_for_run(refs, older), older);
                 entry["reason"] = json!("superseded_by_newer_workflow_run");
                 entry["evidence"] = json!(format!(
-                    "newer run {} at {} is {} with conclusion {}",
+                    "newer run {} on the same branch at {} is {} with conclusion {}",
                     latest
                         .get("run_id")
                         .and_then(Value::as_u64)
@@ -422,6 +457,8 @@ fn partition_runs(
             current.push(summary);
         }
     }
+
+    unscanned
 }
 
 /// Sortable position of a run: creation time first, run id as the tiebreak.
