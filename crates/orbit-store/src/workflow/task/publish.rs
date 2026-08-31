@@ -38,7 +38,7 @@ use super::git::{
 use super::publication::{
     AttachmentPolicy, AttachmentSensitivityScanner, PUBLICATION_ENVELOPE_FILE_NAME,
     PUBLICATION_TASKS_DIR_NAME, PublicationEnvelope, PublicationSnapshotMetadata,
-    assert_envelope_parent_lineage, build_publication_snapshot,
+    assert_envelope_parent_lineage, build_publication_snapshot_from_task_workspace,
 };
 
 /// Error prefix and command label for every transport failure.
@@ -64,7 +64,10 @@ pub struct PublicationLastSuccess {
 /// Binding facts and commit metadata for one publication attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicationPublishRequest {
+    /// Logical workspace identity recorded in the publication envelope.
     pub workspace_id: String,
+    /// Existing task-registry partition to enumerate for this snapshot.
+    pub task_workspace_id: String,
     pub source_repository_fingerprint: String,
     pub publication_id: String,
     pub authority_machine_id: String,
@@ -189,6 +192,7 @@ pub fn publish_task_snapshot(
 
 struct ValidatedRequest {
     workspace_id: String,
+    task_workspace_id: String,
     source_repository_fingerprint: String,
     publication_id: String,
     authority_machine_id: String,
@@ -207,6 +211,8 @@ fn validate_request(request: PublicationPublishRequest) -> Result<ValidatedReque
         )));
     }
     validate_registry_identifier("workspace_id", &request.workspace_id).map_err(identity_error)?;
+    validate_registry_identifier("task_workspace_id", &request.task_workspace_id)
+        .map_err(identity_error)?;
     validate_registry_identifier("publication_id", &request.publication_id)
         .map_err(identity_error)?;
     validate_machine_id(&request.authority_machine_id).map_err(identity_error)?;
@@ -246,6 +252,7 @@ fn validate_request(request: PublicationPublishRequest) -> Result<ValidatedReque
     };
     Ok(ValidatedRequest {
         workspace_id: request.workspace_id,
+        task_workspace_id: request.task_workspace_id,
         source_repository_fingerprint: request.source_repository_fingerprint,
         publication_id: request.publication_id,
         authority_machine_id: request.authority_machine_id,
@@ -264,28 +271,28 @@ fn assert_registered_workspace(
     request: &ValidatedRequest,
 ) -> Result<(), OrbitError> {
     let binding = registry
-        .find_workspace_binding(&request.workspace_id)?
+        .find_workspace_binding(&request.task_workspace_id)?
         .ok_or_else(|| {
             publish_error(format!(
-                "workspace '{}' is not registered in the coordination registry",
-                request.workspace_id
+                "task workspace '{}' is not registered in the coordination registry",
+                request.task_workspace_id
             ))
         })?;
-    if binding.workspace_id != request.workspace_id {
+    if binding.workspace_id != request.task_workspace_id {
         return Err(publish_error(format!(
-            "workspace selector '{}' resolved to unexpected workspace '{}'",
-            request.workspace_id, binding.workspace_id
+            "task workspace selector '{}' resolved to unexpected workspace '{}'",
+            request.task_workspace_id, binding.workspace_id
         )));
     }
     match binding.repo_fingerprint.as_deref() {
         Some(fingerprint) if fingerprint == request.source_repository_fingerprint => Ok(()),
         Some(_) => Err(publish_error(format!(
-            "workspace '{}' publication fingerprint does not match its registered source remote",
-            request.workspace_id
+            "task workspace '{}' publication fingerprint does not match its registered source remote",
+            request.task_workspace_id
         ))),
         None => Err(publish_error(format!(
-            "workspace '{}' has no registered source-repository identity",
-            request.workspace_id
+            "task workspace '{}' has no registered source-repository identity",
+            request.task_workspace_id
         ))),
     }
 }
@@ -450,7 +457,7 @@ impl PublicationCache {
             .tempdir_in(&self.root)
             .map_err(|error| OrbitError::from_write_io(&self.root, error))?;
         let tree = temp.path().join("tree");
-        let outcome = build_publication_snapshot(
+        let outcome = build_publication_snapshot_from_task_workspace(
             registry,
             &tree,
             PublicationSnapshotMetadata {
@@ -462,6 +469,7 @@ impl PublicationCache {
                 published_at: request.published_at,
                 previous_publication,
             },
+            &request.task_workspace_id,
             policy,
             scanner,
         )?;

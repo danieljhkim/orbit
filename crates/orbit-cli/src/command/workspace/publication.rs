@@ -57,6 +57,7 @@ pub struct WorkspacePublicationBindArgs {
 impl WorkspacePublicationBindArgs {
     fn execute_bind(self, runtime: &OrbitRuntime, rebind: bool) -> CommandOut {
         let workspace_id = selected_workspace_id(runtime)?;
+        let task_workspace_id = selected_task_workspace_id(runtime)?;
         let global_root = runtime.global_root();
         let machine_id = load_host_identity(&global_root)?.machine_id;
         let registry_path = workspace_registry::registry_path_for(&global_root);
@@ -81,7 +82,7 @@ impl WorkspacePublicationBindArgs {
             )?
         };
         runtime.record_task_publication_source(
-            &binding.workspace_id,
+            &task_workspace_id,
             &binding.source_repository_fingerprint,
         )?;
         workspace_registry::save_registry_to(&registry, &registry_path)?;
@@ -175,6 +176,13 @@ impl Execute for WorkspacePublicationRemoveArgs {
 }
 
 fn selected_workspace_id(runtime: &OrbitRuntime) -> Result<String, orbit_core::OrbitError> {
+    runtime
+        .workspace_runtime_binding()
+        .map(|binding| binding.logical_workspace_id.clone())
+        .map_or_else(|| runtime.workspace_id(), Ok)
+}
+
+fn selected_task_workspace_id(runtime: &OrbitRuntime) -> Result<String, orbit_core::OrbitError> {
     runtime
         .workspace_runtime_binding()
         .map(|binding| binding.workspace_id.clone())
