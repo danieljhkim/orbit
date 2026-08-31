@@ -1,7 +1,7 @@
 ---
 type: design
 summary: Spec: Audit Event Schema
-last_validated: 2026-08-02
+last_validated: 2026-08-31
 ---
 
 # Spec: Audit Event Schema
@@ -43,7 +43,7 @@ Failure modes:
 
 ### V2 Activity/Job Audit Event
 
-Activity/job audit events are JSONL entries represented by `V2AuditEvent`.
+Activity/job audit events are represented by `V2AuditEvent` and persisted by the v2 audit store.
 
 Required invariants:
 
@@ -57,13 +57,13 @@ Required invariants:
 
 Failure modes:
 
-- If JSONL persistence fails, in-memory event capture remains the load-bearing smoke-verification path.
+- If v2 audit-store persistence fails, in-memory event capture remains the load-bearing smoke-verification path.
 - If a worker thread emits events, it must install the parent stack snapshot before emission.
-- If an activity/job run fails before writer construction, no v2 JSONL is expected.
+- If an activity/job run fails before writer construction, no v2 audit event is expected.
 
 ### Loop Audit Event
 
-Loop audit events are JSONL entries represented by `LoopAuditEvent`.
+Loop audit events are sink events represented by `LoopAuditEvent`; the durable runtime sink persists them as v2 audit rows.
 
 Required invariants:
 
