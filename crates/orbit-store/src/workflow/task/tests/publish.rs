@@ -167,6 +167,7 @@ fn request(
 ) -> PublicationPublishRequest {
     PublicationPublishRequest {
         workspace_id: fixture.workspace_id.clone(),
+        task_workspace_id: fixture.workspace_id.clone(),
         source_repository_fingerprint: FINGERPRINT.to_string(),
         publication_id: PUBLICATION_ID.to_string(),
         authority_machine_id: AUTHORITY.to_string(),
@@ -471,7 +472,7 @@ fn replica_callers_and_stale_owners_may_not_publish() {
     );
 
     let mut unregistered = request(&fixture, 1, None);
-    unregistered.workspace_id = "ws_unregistered".to_string();
+    unregistered.task_workspace_id = "ws_unregistered".to_string();
     let error = publish(&fixture, unregistered).unwrap_err().to_string();
     assert!(error.contains("not registered"), "{error}");
 

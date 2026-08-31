@@ -284,7 +284,30 @@ pub fn build_publication_snapshot(
     policy: &AttachmentPolicy,
     scanner: Option<&dyn AttachmentSensitivityScanner>,
 ) -> Result<PublicationSnapshotOutcome, OrbitError> {
+    let task_workspace_id = metadata.workspace_id.clone();
+    build_publication_snapshot_from_task_workspace(
+        registry,
+        destination,
+        metadata,
+        &task_workspace_id,
+        policy,
+        scanner,
+    )
+}
+
+/// Build a snapshot carrying logical publication metadata from a distinct
+/// canonical task-registry partition.
+pub(crate) fn build_publication_snapshot_from_task_workspace(
+    registry: &TaskRegistryStore,
+    destination: &Path,
+    metadata: PublicationSnapshotMetadata,
+    task_workspace_id: &str,
+    policy: &AttachmentPolicy,
+    scanner: Option<&dyn AttachmentSensitivityScanner>,
+) -> Result<PublicationSnapshotOutcome, OrbitError> {
     metadata.validate()?;
+    validate_registry_identifier("task_workspace_id", task_workspace_id)
+        .map_err(invalid_identity)?;
     policy.validate()?;
     if destination.exists() {
         return Err(OrbitError::InvalidInput(format!(
@@ -301,22 +324,21 @@ pub fn build_publication_snapshot(
     fs::create_dir_all(parent).map_err(|error| OrbitError::from_write_io(parent, error))?;
 
     let binding = registry
-        .find_workspace_binding(&metadata.workspace_id)?
+        .find_workspace_binding(task_workspace_id)?
         .ok_or_else(|| {
             OrbitError::InvalidInput(format!(
-                "workspace '{}' is not registered in the coordination registry",
-                metadata.workspace_id
+                "task workspace '{task_workspace_id}' is not registered in the coordination registry"
             ))
         })?;
-    if binding.workspace_id != metadata.workspace_id {
+    if binding.workspace_id != task_workspace_id {
         return Err(OrbitError::InvalidInput(format!(
-            "workspace selector '{}' resolved to unexpected workspace '{}'",
-            metadata.workspace_id, binding.workspace_id
+            "task workspace selector '{task_workspace_id}' resolved to unexpected workspace '{}'",
+            binding.workspace_id
         )));
     }
 
     let mut task_ids: Vec<String> = registry
-        .tasks_for_workspace(&metadata.workspace_id)?
+        .tasks_for_workspace(task_workspace_id)?
         .into_iter()
         .map(|task| task.task_id)
         .collect();
@@ -335,7 +357,7 @@ pub fn build_publication_snapshot(
     let mut included_attachment_bytes = 0u64;
     let mut omitted_attachment_bytes = 0u64;
     for task_id in &task_ids {
-        let source = registry.canonical_task_bundle_path(&metadata.workspace_id, task_id)?;
+        let source = registry.canonical_task_bundle_path(task_workspace_id, task_id)?;
         validate_jsonl_files(task_id, &source)?;
         let mut bundle = read_bundle_at(&source).map_err(|error| {
             OrbitError::Store(format!(
