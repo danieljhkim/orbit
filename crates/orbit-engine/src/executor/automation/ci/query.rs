@@ -25,18 +25,18 @@ use serde_json::{Value, json};
 /// to report *that*, and an error return would be indistinguishable from the
 /// query itself being broken.
 #[derive(Debug, Clone)]
-pub(super) struct AuthStatus {
-    pub(super) available: bool,
-    pub(super) authenticated: bool,
-    pub(super) detail: String,
+pub(in crate::executor::automation) struct AuthStatus {
+    pub(in crate::executor::automation) available: bool,
+    pub(in crate::executor::automation) authenticated: bool,
+    pub(in crate::executor::automation) detail: String,
 }
 
 impl AuthStatus {
-    pub(super) fn usable(&self) -> bool {
+    pub(in crate::executor::automation) fn usable(&self) -> bool {
         self.available && self.authenticated
     }
 
-    pub(super) fn to_json(&self) -> Value {
+    pub(in crate::executor::automation) fn to_json(&self) -> Value {
         json!({
             "available": self.available,
             "authenticated": self.authenticated,

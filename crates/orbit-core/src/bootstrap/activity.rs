@@ -37,12 +37,20 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/collect_ci_evidence.yaml"),
     ),
     (
+        "collect_dependabot_alerts",
+        include_str!("../../assets/activities/collect_dependabot_alerts.yaml"),
+    ),
+    (
         "drain_window",
         include_str!("../../assets/activities/drain_window.yaml"),
     ),
     (
         "file_ci_failure_tasks",
         include_str!("../../assets/activities/file_ci_failure_tasks.yaml"),
+    ),
+    (
+        "file_dependabot_alert_tasks",
+        include_str!("../../assets/activities/file_dependabot_alert_tasks.yaml"),
     ),
     (
         "epic_orchestrator",

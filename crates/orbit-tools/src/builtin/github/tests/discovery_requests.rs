@@ -4,7 +4,48 @@
 
 use serde_json::json;
 
-use crate::builtin::github::{pr_list, run_list, run_logs, run_view};
+use crate::builtin::github::{dependabot_alerts, pr_list, run_list, run_logs, run_view};
+
+#[test]
+fn dependabot_alert_request_is_bounded_and_projects_compact_evidence() {
+    let req = dependabot_alerts::build_exec_request(&json!({
+        "repo": "openai/orbit",
+        "limit": 500,
+    }))
+    .expect("request");
+    assert_eq!(
+        req.args,
+        [
+            "api",
+            "--method",
+            "GET",
+            "repos/openai/orbit/dependabot/alerts",
+            "-f",
+            "state=open",
+            "-F",
+            "per_page=100"
+        ]
+    );
+
+    let projected = dependabot_alerts::project_alert(&json!({
+        "number": 7, "state": "open",
+        "dependency": {"package": {"ecosystem": "cargo", "name": "time"}, "manifest_path": "Cargo.lock", "scope": "runtime"},
+        "security_advisory": {"severity": "high", "ghsa_id": "GHSA-1234", "cve_id": "CVE-2026-1", "summary": "A concise summary", "description": "long prose must not escape"},
+        "security_vulnerability": {"vulnerable_version_range": "< 1.2.3", "first_patched_version": {"identifier": "1.2.3"}},
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z",
+        "dismissed_at": null, "fixed_at": null, "html_url": "https://github.com/acme/repo/security/dependabot/7"
+    }));
+    assert_eq!(projected["package"], json!("time"));
+    assert_eq!(projected["first_patched_version"], json!("1.2.3"));
+    assert!(projected.get("description").is_none());
+}
+
+#[test]
+fn dependabot_alert_request_rejects_repository_path_injection() {
+    let error = dependabot_alerts::build_exec_request(&json!({"repo": "acme/repo?per_page=999"}))
+        .expect_err("invalid repo must fail");
+    assert!(error.to_string().contains("invalid `repo`"));
+}
 
 #[test]
 fn run_list_applies_every_filter_and_caps_the_limit() {

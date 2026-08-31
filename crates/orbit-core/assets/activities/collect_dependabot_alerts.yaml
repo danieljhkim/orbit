@@ -1,0 +1,59 @@
+schemaVersion: 2
+kind: Activity
+metadata:
+  name: collect_dependabot_alerts
+spec:
+  type: deterministic
+  description: >
+    Query open Dependabot vulnerability alerts and open app/dependabot pull
+    requests on the engine-private host boundary using NoSandbox, then emit one
+    bounded and redacted snapshot. Missing gh, missing credentials, a 403
+    security_events-scope response, and a 404 unavailable-alerts response are
+    capability outcomes and never a clean no-alert result.
+  input_schema_json:
+    type: object
+    properties:
+      workspace_path:
+        type: string
+      repo:
+        type: string
+      max_alerts:
+        type: number
+        minimum: 1
+        maximum: 100
+      max_pull_requests:
+        type: number
+        minimum: 1
+        maximum: 100
+  output_schema_json:
+    type: object
+    required: [phase, dependabot_snapshot]
+    properties:
+      phase:
+        type: string
+      dependabot_snapshot:
+        type: object
+        required: [schema_version, collected, capability, outcome_hint]
+        properties:
+          schema_version:
+            type: number
+          collected:
+            type: boolean
+          outcome_hint:
+            type: string
+          capability:
+            type: object
+          repository:
+            type: object
+          open_alerts:
+            type: array
+          open_dependabot_pull_requests:
+            type: array
+          query_errors:
+            type: array
+          truncation:
+            type: object
+          collected_at:
+            type: string
+  action: collect_dependabot_alerts
+  config: {}
