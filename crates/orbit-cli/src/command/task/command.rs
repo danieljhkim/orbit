@@ -7,6 +7,7 @@ use crate::command::{CommandOut, Execute};
 use super::add::TaskAddArgs;
 use super::artifact::TaskArtifactCommand;
 use super::export::TaskExportArgs;
+use super::flow::TaskFlowArgs;
 use super::import::TaskImportArgs;
 use super::lifecycle::{TaskArchiveArgs, TaskStartArgs};
 use super::lint::TaskLintArgs;
@@ -39,6 +40,8 @@ pub enum TaskSubcommand {
     Locks(LocksCommand),
     /// List tasks with optional filters
     List(TaskListArgs),
+    /// Show filed-vs-closed rates over time — whether the backlog is draining
+    Flow(TaskFlowArgs),
     /// Show detailed information about a task, found by ID in any registered
     /// workspace unless `--workspace` narrows the search
     Show(TaskShowArgs),
@@ -68,6 +71,7 @@ impl Execute for TaskSubcommand {
             TaskSubcommand::Artifact(cmd) => cmd.execute(runtime),
             TaskSubcommand::Locks(cmd) => cmd.execute(runtime),
             TaskSubcommand::List(args) => args.execute(runtime),
+            TaskSubcommand::Flow(args) => args.execute(runtime),
             TaskSubcommand::Show(args) => args.execute(runtime),
             TaskSubcommand::Lint(args) => args.execute(runtime),
             TaskSubcommand::Update(args) => args.execute(runtime),

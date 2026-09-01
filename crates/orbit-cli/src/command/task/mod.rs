@@ -3,6 +3,7 @@ pub(crate) mod artifact;
 pub mod artifacts;
 mod command;
 mod export;
+pub(crate) mod flow;
 mod import;
 mod lifecycle;
 mod lint;

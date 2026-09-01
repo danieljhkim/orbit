@@ -465,6 +465,7 @@ impl Commands {
                         ),
                     },
                     TaskSubcommand::List(_) => ("list", None, None),
+                    TaskSubcommand::Flow(_) => ("flow", None, None),
                     TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
                     TaskSubcommand::Lint(args) => ("lint", Some("task"), args.id.as_deref()),
                     TaskSubcommand::Update(args) => {
