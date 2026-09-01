@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, error::ErrorKind};
 
 use crate::command::{Cli, Commands};
 
@@ -98,4 +98,77 @@ fn task_update_rejects_required_tools() {
     };
 
     assert!(error.to_string().contains("--required-tools"), "{error}");
+}
+
+#[test]
+fn task_update_approve_parses_with_note_and_comment() {
+    let cli = Cli::try_parse_from([
+        "orbit",
+        "task",
+        "update",
+        "ORB-00001",
+        "--approve",
+        "--note",
+        "looks right",
+        "--comment",
+        "shipping it",
+    ])
+    .expect("parse task update --approve");
+
+    let Commands::Task(task) = cli.command else {
+        panic!("expected task command");
+    };
+    let TaskSubcommand::Update(args) = task.command else {
+        panic!("expected task update command");
+    };
+
+    assert!(args.approve);
+    assert_eq!(args.note.as_deref(), Some("looks right"));
+    assert_eq!(args.comment.as_deref(), Some("shipping it"));
+    assert!(args.status.is_none());
+}
+
+/// The transition `--approve` takes is derived from the task's current status,
+/// so pairing it with an explicit status or a field edit would be asking for
+/// two contradictory writes.
+#[test]
+fn task_update_approve_conflicts_with_status_and_field_edits() {
+    for args in [
+        vec![
+            "task",
+            "update",
+            "ORB-00001",
+            "--approve",
+            "--status",
+            "done",
+        ],
+        vec!["task", "update", "ORB-00001", "--approve", "--title", "New"],
+        vec!["task", "update", "ORB-00001", "--approve", "--tag", "chore"],
+        vec![
+            "task",
+            "update",
+            "ORB-00001",
+            "--approve",
+            "--context",
+            "file:src/lib.rs",
+        ],
+    ] {
+        let mut argv = vec!["orbit"];
+        argv.extend(args);
+        let err = match Cli::try_parse_from(&argv) {
+            Ok(_) => panic!("{argv:?} should conflict with --approve"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict, "{argv:?}");
+    }
+}
+
+/// A note only has somewhere to go on the approval's history entry.
+#[test]
+fn task_update_note_requires_approve() {
+    let err = match Cli::try_parse_from(["orbit", "task", "update", "ORB-00001", "--note", "hi"]) {
+        Ok(_) => panic!("--note without --approve should not parse"),
+        Err(err) => err,
+    };
+    assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
 }

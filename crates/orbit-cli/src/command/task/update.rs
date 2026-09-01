@@ -72,10 +72,45 @@ pub struct TaskUpdateArgs {
     /// Explicit agent model to persist on the task artifact
     #[arg(long)]
     pub model: Option<String>,
+    /// Take the task's next approval step: `proposed` -> `backlog`, or
+    /// `review` -> `done`. The transition is chosen from the current status,
+    /// so it cannot be combined with field edits or an explicit `--status`.
+    #[arg(long, conflicts_with_all = APPROVE_CONFLICTS)]
+    pub approve: bool,
+    /// Note recorded on the approval's status history entry (with `--approve`)
+    #[arg(long, requires = "approve")]
+    pub note: Option<String>,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
+
+/// Every field-mutation argument on this command. `--approve` performs a
+/// guarded transition the domain derives from the task's current status; an
+/// edit alongside it would be a second, differently-attributed write on the
+/// same invocation, and `--status` would be a direct contradiction of the
+/// transition being requested. Rejecting the combination in the parser keeps
+/// approval one write with one history entry.
+const APPROVE_CONFLICTS: [&str; 18] = [
+    "title",
+    "description",
+    "acceptance_criteria",
+    "dependencies",
+    "tags",
+    "plan",
+    "execution_summary",
+    "status",
+    "task_type",
+    "complexity",
+    "planned_by",
+    "implemented_by",
+    "pr_status",
+    "job_run_id",
+    "crew",
+    "orchestrator",
+    "context_files",
+    "artifacts",
+];
 
 impl Execute for TaskUpdateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
@@ -101,8 +136,21 @@ impl Execute for TaskUpdateArgs {
             context_files,
             artifacts,
             model,
+            approve,
+            note,
             json,
         } = self;
+
+        if approve {
+            let (agent, model) = super::mutation_identity(model);
+            let task = runtime.approve_task_with_identity(&id, note, comment, agent, model)?;
+            return if json {
+                Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
+            } else {
+                println!("Approved task '{}' -> {}", task.id, task.status);
+                Ok(CommandOutput::Silent)
+            };
+        }
 
         let pr_status = pr_status.map(|value| {
             if value.trim().is_empty() {

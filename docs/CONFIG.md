@@ -408,7 +408,7 @@ Three equivalent surfaces:
 | Surface | How |
 |---|---|
 | **Web dashboard** | The crew dropdown on each task card (the chevron next to `default: <crew>` in [`orbit web serve`](../README.md#quick-start)) — selecting a crew calls `orbit.task.update` under the hood. |
-| **CLI** | `orbit task add --crew <name> …` at creation, or `orbit task update <id> --crew <name>` later. Pass `--crew ""` to `task update` to clear the field. (`orbit task start --crew <name>` exists but only validates the name and logs it — it does **not** persist onto `task.crew` or affect later `orbit run ship` dispatch. Use `task update` if you want the choice to stick.) |
+| **CLI** | `orbit task add --crew <name> …` at creation, or `orbit task update <id> --crew <name>` later. Pass `--crew ""` to `task update` to clear the field. `task update` is the only surface that persists the choice — a per-run crew override validates the name and logs it without writing `task.crew`, so later `orbit run ship` dispatch does not see it. |
 | **MCP / agent** | `orbit.task.add` and `orbit.task.update` accept a `crew` parameter; an empty string on update clears it. Useful when an agent is filing or amending tasks programmatically. |
 
 The dropdown label `default: codex` in the dashboard means *the task has no `crew` set* and will inherit `[workflow].default_crew`. Picking a named crew writes it onto the task and the label updates accordingly.
