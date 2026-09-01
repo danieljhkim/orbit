@@ -310,11 +310,22 @@ where
         )
     })?;
 
+    // Create the parent before resolving, not after. `resolved_lock_path`
+    // canonicalizes through the parent and falls back to the literal path when
+    // the parent is missing, so resolving first made the key depend on whether
+    // this call happened to be the one that created the directory: an outer
+    // call keyed the literal path, created the parent, and the nested call then
+    // canonicalized to a different key, missed the lock it already held, and
+    // blocked on a second descriptor to the same file. Creating the parent
+    // first makes the parent always resolvable, so every call in a nest agrees
+    // on the key. Under a path that canonicalizes to itself the two orders are
+    // indistinguishable, which is why this only ever deadlocked where a symlink
+    // sat above the target.
+    create_private_dir_all(parent).map_err(|e| classify_lock_io(parent, e))?;
     let lock_path = resolved_lock_path(target_path)?;
     let Some(_held) = claim_lock_path(&lock_path) else {
         return op();
     };
-    create_private_dir_all(parent).map_err(|e| classify_lock_io(parent, e))?;
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true).truncate(false);
     apply_private_file_mode(&mut options);

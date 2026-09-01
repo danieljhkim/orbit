@@ -166,3 +166,44 @@ fn exclusive_lock_is_reentrant_across_a_symlinked_route() {
     .expect("the projected route must re-enter the canonical lock");
     assert!(reached);
 }
+
+/// The outer call is the one that creates the parent directory, so the key
+/// re-entrancy is tracked under must not depend on whether the parent existed
+/// when the call started. Reaching the target through a symlink is what makes
+/// the resolved and literal paths differ, and that difference used to leave a
+/// nested call unable to see the lock it already held — it opened a second
+/// descriptor to the same file and blocked forever.
+///
+/// The work runs on its own thread so a regression fails on the timeout rather
+/// than hanging the suite. macOS reproduces this without the explicit symlink,
+/// because its temp directories already sit under one; the symlink here is what
+/// makes the case reproduce on Linux too.
+#[cfg(unix)]
+#[test]
+fn exclusive_lock_re_enters_when_the_outer_call_creates_the_parent_under_a_symlink() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let temp = TempDir::new().expect("tempdir");
+    let real_root = temp.path().join("real");
+    std::fs::create_dir_all(&real_root).expect("real root");
+    let link_root = temp.path().join("link");
+    std::os::unix::fs::symlink(&real_root, &link_root).expect("symlink to the real root");
+
+    // `bundle` deliberately does not exist yet.
+    let target = link_root.join("bundle").join("task.yaml");
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let depth = with_exclusive_file_lock::<usize, io::Error, _>(&target, "outer", || {
+            with_exclusive_file_lock::<usize, io::Error, _>(&target, "inner", || Ok(2))
+        });
+        let _ = tx.send(depth);
+    });
+
+    let depth = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("nested lock deadlocked instead of re-entering")
+        .expect("nested locks must re-enter");
+    assert_eq!(depth, 2);
+}
