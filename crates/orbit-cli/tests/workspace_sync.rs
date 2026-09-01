@@ -50,7 +50,11 @@ fn workspace_sync_creates_missing_defaults_preserves_operator_content_and_is_ide
         .assert()
         .success();
 
-    let workspace_root = repo.path().join(".orbit");
+    // `workspace sync` reports each action's path as the process resolves it,
+    // so fixtures compared against those paths have to resolve the same way.
+    // A macOS temp dir arrives as `/var/...` and resolves to `/private/var/...`.
+    let repo_root = std::fs::canonicalize(repo.path()).expect("canonical workspace root");
+    let workspace_root = repo_root.join(".orbit");
     let auto_tasks = workspace_root.join("auto_tasks");
     let missing = auto_tasks.join("code-review.yaml");
     std::fs::remove_file(&missing).expect("remove a shipped auto-task");
