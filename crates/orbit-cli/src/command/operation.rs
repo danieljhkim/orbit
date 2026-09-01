@@ -458,6 +458,7 @@ impl Commands {
                     },
                     TaskSubcommand::Locks(command) => match &command.command {
                         LocksSubcommand::List(_) => ("locks-list", None, None),
+                        LocksSubcommand::Contention(_) => ("locks-contention", None, None),
                         LocksSubcommand::Release(args) => (
                             "locks-release",
                             Some("reservation"),

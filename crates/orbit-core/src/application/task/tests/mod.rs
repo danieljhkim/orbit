@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 mod add;
+mod contention;
 mod params;
 mod paths;
 mod records;
