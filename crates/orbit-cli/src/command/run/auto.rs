@@ -14,7 +14,12 @@ pub(super) const AUTO_WORKFLOW: &str = "auto";
 #[command(
     about = "Drain the workspace backlog for a window (loose leaves, plus one epic)",
     override_usage = "orbit run auto [OPTIONS]",
-    after_help = "Inspect submitted runs with `orbit run history -j workspace_auto_pipeline` and `orbit run show <RUN_ID>`."
+    after_help = "Examples:\n  orbit run auto\n  orbit run auto --for 4h\n  orbit run auto --for 4h --concurrency 8\n\n\
+                  The drain re-lists the whole backlog every pass and keeps `--concurrency`\n\
+                  tasks in flight, starting a replacement as each one finishes rather than\n\
+                  waiting for the batch. An epic root runs alongside the leaves, one at a time.\n\n\
+                  Inspect submitted runs with `orbit run history -j workspace_auto_pipeline` and\n\
+                  `orbit run show <RUN_ID>`."
 )]
 pub struct AutoCommand {
     /// How long to keep draining, e.g. `30m`, `2h`. Without it the run takes
@@ -22,6 +27,11 @@ pub struct AutoCommand {
     /// task already being shipped when it expires still finishes.
     #[arg(long = "for", value_name = "DURATION")]
     pub for_duration: Option<String>,
+    /// How many tasks may be in flight at once. The drain tops these slots up
+    /// from the whole backlog as each one frees, so this is the parallelism,
+    /// not a batch size. Defaults to 5.
+    #[arg(long, value_name = "N")]
+    pub concurrency: Option<u32>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -38,8 +48,12 @@ impl Execute for AutoCommand {
             .as_deref()
             .map(parse_duration_seconds)
             .transpose()?;
-        let invoke =
-            runtime.submit_workspace_auto_run(for_seconds, None, self.claim_token.as_deref())?;
+        let invoke = runtime.submit_workspace_auto_run(
+            for_seconds,
+            self.concurrency,
+            None,
+            self.claim_token.as_deref(),
+        )?;
         let run = WorkflowDispatchResult {
             workflow_alias: AUTO_WORKFLOW,
             job_id: invoke.job_name,

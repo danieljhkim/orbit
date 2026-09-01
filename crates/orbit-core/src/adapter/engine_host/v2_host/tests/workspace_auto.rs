@@ -11,14 +11,35 @@ use crate::adapter::engine_host::v2_host::test_support::{
 use crate::application::task::{TaskAddParams, TaskUpdateParams};
 
 fn classify(runtime: &OrbitRuntime) -> Value {
+    classify_with(runtime, json!({}))
+}
+
+fn classify_with(runtime: &OrbitRuntime, input: Value) -> Value {
     runtime
         .run_deterministic(
             "classify_workspace_auto_tasks",
             &json!({}),
-            &json!({}),
+            &input,
             ToolContext::default(),
         )
         .expect("classify workspace auto tasks")
+}
+
+/// A live `task_auto_pipeline` run carrying `task_ids`, as `invoke_detached`
+/// leaves one behind.
+fn seed_live_leaf_run(runtime: &OrbitRuntime, task_ids: &[&str]) -> String {
+    runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "task_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(json!({ "task_ids": task_ids })),
+            None,
+        )
+        .expect("insert live leaf run")
+        .run_id
 }
 
 fn drain_window(runtime: &OrbitRuntime, input: Value) -> Value {
@@ -308,17 +329,16 @@ fn two_loose_tasks_and_one_epic_root_are_admissible_together() {
     let first = classify(&runtime);
     assert_eq!(first["loose_task_ids"], json!([loose_one.id, loose_two.id]));
     assert_eq!(
-        first["loose_task_dispatches"].as_array().map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        first["loose_task_dispatches"][0]["task_ids"],
-        json!([loose_one.id, loose_two.id])
+        first["loose_task_dispatches"],
+        json!([
+            { "task_ids": [loose_one.id] },
+            { "task_ids": [loose_two.id] },
+        ])
     );
     assert_eq!(first["has_leaves"], true);
     assert_eq!(first["epic_task_id"], epic.id);
     assert_eq!(first["has_epic"], true);
-    assert_eq!(first["empty"], false);
+    assert_eq!(first["idle"], false);
 
     for loose in [&loose_one, &loose_two] {
         runtime
@@ -458,16 +478,24 @@ model = "gpt-5.6-terra"
         output["loose_task_ids"],
         json!([sol_high.id, terra.id, sol_low.id])
     );
+    // One task per dispatch, so a child is crew-homogeneous by construction
+    // rather than by partitioning. What still has to hold is that the child
+    // resolves the crew of the task it was handed — that resolution, not
+    // anything workspace-auto puts in the dispatch, is the fail-closed
+    // authority.
     assert_eq!(
         output["loose_task_dispatches"],
         json!([
-            { "crew": "sol", "task_ids": [sol_high.id, sol_low.id] },
-            { "crew": "terra", "task_ids": [terra.id] },
+            { "task_ids": [sol_high.id] },
+            { "task_ids": [terra.id] },
+            { "task_ids": [sol_low.id] },
         ])
     );
-    for dispatch in output["loose_task_dispatches"]
+    for (dispatch, expected_crew) in output["loose_task_dispatches"]
         .as_array()
-        .expect("dispatch partitions")
+        .expect("dispatches")
+        .iter()
+        .zip(["sol", "terra", "sol"])
     {
         let input = json!({ "task_ids": dispatch["task_ids"] });
         let run = runtime
@@ -490,7 +518,7 @@ model = "gpt-5.6-terra"
                 .expect("show homogeneous child")
                 .resolved_crew
                 .as_deref(),
-            dispatch["crew"].as_str()
+            Some(expected_crew)
         );
     }
 }
@@ -548,7 +576,7 @@ fn a_live_epic_excludes_only_the_leaves_that_overlap_its_reservation() {
     let admissible = classify(&runtime);
     assert_eq!(admissible["loose_task_ids"], json!([conflict_free.id]));
     assert_eq!(admissible["has_leaves"], true);
-    assert_eq!(admissible["empty"], false);
+    assert_eq!(admissible["idle"], false);
     assert!(
         !admissible["loose_task_ids"]
             .as_array()
@@ -562,14 +590,14 @@ fn a_live_epic_excludes_only_the_leaves_that_overlap_its_reservation() {
 fn an_empty_workspace_is_admissibly_empty() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
 
-    let empty = classify(&runtime);
+    let quiet = classify(&runtime);
 
-    assert_eq!(empty["loose_task_ids"], json!([]));
-    assert_eq!(empty["has_leaves"], false);
-    assert_eq!(empty["epic_task_id"], Value::Null);
-    assert_eq!(empty["has_epic"], false);
-    assert_eq!(empty["empty"], true);
-    assert_eq!(empty["active_epic_run_id"], Value::Null);
+    assert_eq!(quiet["loose_task_ids"], json!([]));
+    assert_eq!(quiet["has_leaves"], false);
+    assert_eq!(quiet["epic_task_id"], Value::Null);
+    assert_eq!(quiet["has_epic"], false);
+    assert_eq!(quiet["idle"], true);
+    assert_eq!(quiet["active_epic_run_id"], Value::Null);
 }
 
 #[test]
@@ -607,7 +635,7 @@ fn a_backlog_epic_root_waits_while_an_epic_run_is_live() {
     let admissible = classify(&runtime);
     assert_eq!(admissible["epic_task_id"], Value::Null);
     assert_eq!(admissible["has_epic"], false);
-    assert_eq!(admissible["empty"], true);
+    assert_eq!(admissible["idle"], true);
     assert_eq!(admissible["active_epic_run_id"], live.run_id);
     assert_eq!(admissible["active_epic_task_id"], "ORB-00001");
 }
@@ -671,4 +699,175 @@ fn a_drain_window_rejects_an_unparseable_deadline_or_an_oversize_request() {
             "expected {input} to be refused"
         );
     }
+}
+
+/// The drain no longer waits on its leaves, so the thing that bounds
+/// parallelism is the number of live children rather than the size of a batch.
+/// Only the free slots are offered, and they go to the front of the
+/// priority/age queue rather than to whichever tasks happen to sort last.
+#[test]
+fn leaves_are_offered_only_up_to_the_free_leaf_run_slots() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let seeded: Vec<_> = (0..4)
+        .map(|index| {
+            seed_list_backlog_task(
+                &runtime,
+                &format!("Loose {index}"),
+                TaskStatus::Backlog,
+                TaskPriority::Medium,
+                TaskType::Chore,
+                None,
+                vec![],
+            )
+        })
+        .collect();
+
+    let capped = classify_with(&runtime, json!({ "max_active_leaf_runs": 2 }));
+    assert_eq!(
+        capped["loose_task_ids"],
+        json!([seeded[0].id, seeded[1].id]),
+        "the two free slots go to the front of the queue"
+    );
+    assert_eq!(capped["free_slots"], 2);
+    assert_eq!(capped["active_leaf_runs"], 0);
+    assert_eq!(capped["pending_backlog"], 4);
+    assert_eq!(capped["idle"], false);
+
+    // One slot taken by a live child: one leaf offered, and never the task
+    // that child is already carrying.
+    seed_live_leaf_run(&runtime, &[seeded[0].id.as_str()]);
+    let partial = classify_with(&runtime, json!({ "max_active_leaf_runs": 2 }));
+    assert_eq!(partial["active_leaf_runs"], 1);
+    assert_eq!(partial["free_slots"], 1);
+    assert_eq!(partial["loose_task_ids"], json!([seeded[1].id]));
+    assert_eq!(partial["pending_backlog"], 3);
+}
+
+/// A leaf handed to a detached child stays `backlog` until that child moves it
+/// to `in-progress`. Without reading the child's own input, the very next
+/// iteration would hand the same task to a second child.
+#[test]
+fn tasks_carried_by_a_live_child_are_never_offered_again() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let claimed = seed_list_backlog_task(
+        &runtime,
+        "Already dispatched",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let fresh = seed_list_backlog_task(
+        &runtime,
+        "Still waiting",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    seed_live_leaf_run(&runtime, &[claimed.id.as_str()]);
+
+    let output = classify(&runtime);
+    assert_eq!(output["loose_task_ids"], json!([fresh.id]));
+    assert_eq!(
+        output["pending_backlog"], 1,
+        "the claimed task is not pending — it is running"
+    );
+    assert_eq!(
+        claimed.status,
+        TaskStatus::Backlog,
+        "and it is still backlog"
+    );
+}
+
+/// `idle` means "this iteration started nothing", which a saturated drain is
+/// even with a full backlog behind it. The wait that follows has to tell the
+/// two apart: a freed slot should be refilled in seconds, while an empty
+/// workspace has nothing to poll for.
+#[test]
+fn saturation_waits_the_short_poll_and_an_empty_workspace_waits_the_long_one() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let waiting = seed_list_backlog_task(
+        &runtime,
+        "Queued behind a full slot table",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    seed_live_leaf_run(&runtime, &["ORB-SOMETHING-ELSE"]);
+
+    let saturated = classify_with(
+        &runtime,
+        json!({
+            "max_active_leaf_runs": 1,
+            "poll_sleep_seconds": 7,
+            "idle_sleep_seconds": 900,
+        }),
+    );
+    assert_eq!(saturated["idle"], true, "nothing started");
+    assert_eq!(saturated["free_slots"], 0);
+    assert_eq!(saturated["pending_backlog"], 1, "but work is queued");
+    assert_eq!(saturated["sleep_seconds"], 7);
+
+    runtime
+        .update_task(
+            &waiting.id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .expect("drain the backlog");
+    let quiet = classify_with(
+        &runtime,
+        json!({
+            "max_active_leaf_runs": 1,
+            "poll_sleep_seconds": 7,
+            "idle_sleep_seconds": 900,
+        }),
+    );
+    assert_eq!(quiet["idle"], true);
+    assert_eq!(quiet["pending_backlog"], 0);
+    assert_eq!(quiet["sleep_seconds"], 900);
+}
+
+/// Every loop input reaches this action through the template engine, which
+/// renders a number as a string and an absent key as an empty one. Both must
+/// land on the same value the literal would.
+#[test]
+fn loop_inputs_survive_template_rendering_as_strings() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    for index in 0..3 {
+        seed_list_backlog_task(
+            &runtime,
+            &format!("Loose {index}"),
+            TaskStatus::Backlog,
+            TaskPriority::Medium,
+            TaskType::Chore,
+            None,
+            vec![],
+        );
+    }
+
+    let templated = classify_with(
+        &runtime,
+        json!({
+            "max_active_leaf_runs": "2",
+            "poll_sleep_seconds": "11",
+            "idle_sleep_seconds": "",
+        }),
+    );
+    assert_eq!(templated["free_slots"], 2);
+    assert_eq!(
+        templated["loose_task_dispatches"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(templated["sleep_seconds"], 11);
+
+    let empty_string_falls_back = classify_with(&runtime, json!({ "max_active_leaf_runs": "" }));
+    assert_eq!(empty_string_falls_back["free_slots"], 5);
 }
