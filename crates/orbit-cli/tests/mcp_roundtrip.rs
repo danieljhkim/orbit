@@ -1056,6 +1056,10 @@ fn generated_forced_command(workspace: &McpWorkspace) -> GeneratedForcedCommand 
 /// and the destination's callers row remains the grant ceiling. This executes
 /// the exact argv emitted into `authorized_keys`, through the real MCP stdio
 /// transport, for both sides of that intersection.
+// SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
+// serve without the generated isolated-account setup, so this asserts on a
+// capability that does not exist on other platforms.
+#[cfg(target_os = "linux")]
 #[test]
 fn the_generated_forced_command_obeys_the_matched_rows_operator_ceiling() {
     let workspace = McpWorkspace::init();
@@ -1196,6 +1200,10 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
 /// [ORB-11057] The public flag name is not proof that a destination generated
 /// the argv. Without the destination-issued value the old forged invocation is
 /// rejected before a caller row can be selected.
+// SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
+// serve without the generated isolated-account setup, so this asserts on a
+// capability that does not exist on other platforms.
+#[cfg(target_os = "linux")]
 #[test]
 fn caller_controlled_accept_ssh_flags_cannot_select_a_caller_row() {
     let workspace = McpWorkspace::init();
@@ -1245,6 +1253,10 @@ capabilities = ["agent"]
 /// The caller asks for operator in the only channel a forced command leaves it,
 /// and the file would grant operator. The session still holds agent alone,
 /// because the request comes from the argv *this machine* composed.
+// SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
+// serve without the generated isolated-account setup, so this asserts on a
+// capability that does not exist on other platforms.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_forced_command_ignores_the_command_the_caller_asked_for() {
     let workspace = McpWorkspace::init();
@@ -1332,6 +1344,10 @@ fn copied_fingerprint_flags_are_refused() {
 /// [ORB-11053] A pinned row is enforced where the key is observable, and a
 /// mismatch stops the session at establishment rather than serving it at a
 /// lower ceiling — which would be indistinguishable from a smaller grant.
+// SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
+// serve without the generated isolated-account setup, so this asserts on a
+// capability that does not exist on other platforms.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_key_mismatch_stops_the_server_before_it_serves() {
     let workspace = McpWorkspace::init();
@@ -1363,6 +1379,10 @@ ssh_key_fingerprint = "{OTHER_KEY_FINGERPRINT}"
 /// [ORB-11053] The matching key is served, and the trail says the identity was
 /// proved rather than claimed. Tier 2 is opt-in, so a reader who cannot tell
 /// the tiers apart in the audit row would have to assume which one ran.
+// SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
+// serve without the generated isolated-account setup, so this asserts on a
+// capability that does not exist on other platforms.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_key_bound_caller_is_served_and_audited_as_key_bound() {
     let workspace = McpWorkspace::init();
