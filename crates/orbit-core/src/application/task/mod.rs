@@ -1,6 +1,7 @@
 //! Task commands and coordinated record writes.
 
 mod add;
+pub(crate) mod contention;
 mod helpers;
 mod lint;
 mod params;
@@ -10,6 +11,7 @@ mod records;
 mod transitions;
 mod update;
 
+pub use contention::{LockContentionHotspot, LockContentionReport};
 pub use lint::{TaskLintFinding, TaskLintReport, TaskLintSeverity};
 pub(crate) use params::TaskRecordUpdateParams;
 pub use params::{TaskAddParams, TaskUpdateParams};
