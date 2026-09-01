@@ -35,8 +35,13 @@ fn non_interactive_init_against_non_global_root_leaves_home_skill_links_untouche
     let live_home = tempdir().expect("live home tempdir");
     let validation_home = tempdir().expect("validation home tempdir");
     let validation_root = tempdir().expect("validation root tempdir");
+    // Detection reads the real `PATH` otherwise, so the seeded crews below
+    // would depend on which agent CLIs this developer has installed.
+    let empty_path = tempdir().expect("empty PATH tempdir");
 
-    let env = EnvGuard::acquire().home(live_home.path());
+    let env = EnvGuard::acquire()
+        .home(live_home.path())
+        .path(empty_path.path());
     let (agents_link, agents_target) = seed_discovery_sentinel(live_home.path(), ".agents");
     let (claude_link, claude_target) = seed_discovery_sentinel(live_home.path(), ".claude");
 
