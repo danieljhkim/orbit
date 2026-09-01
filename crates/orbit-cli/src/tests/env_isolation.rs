@@ -54,6 +54,7 @@ pub(crate) struct EnvGuard {
     managed_run_context: Option<Option<OsString>>,
     run_id: Option<Option<OsString>>,
     cwd: Option<PathBuf>,
+    path: Option<Option<OsString>>,
     // Declared last so it drops last: the lock is held until every restoration
     // in `Drop` has run.
     _lock: MutexGuard<'static, ()>,
@@ -77,6 +78,7 @@ impl EnvGuard {
             managed_run_context: None,
             run_id: None,
             cwd: None,
+            path: None,
             _lock: lock,
         }
     }
@@ -148,6 +150,25 @@ impl EnvGuard {
         self
     }
 
+    /// Point `PATH` at `dir` alone, capturing the prior value the first time it
+    /// is set.
+    ///
+    /// `orbit init` probes `PATH` to decide which agent CLIs exist and seeds a
+    /// crew per provider it finds (`init::agent_detect`). A test that asserts
+    /// on the seeded crews therefore depends on which CLIs the developer
+    /// happens to have installed, and passes or fails by machine. Pointing
+    /// `PATH` at an empty fixture directory makes detection find nothing, which
+    /// is the same answer on every host.
+    pub(crate) fn path(mut self, dir: &Path) -> Self {
+        if self.path.is_none() {
+            self.path = Some(std::env::var_os("PATH"));
+        }
+        unsafe {
+            std::env::set_var("PATH", dir);
+        }
+        self
+    }
+
     /// Run `f` with `HOME`/`USERPROFILE` temporarily pointed at `home`,
     /// restoring the values this guard currently exposes afterward — even if
     /// `f` panics.
@@ -188,6 +209,9 @@ impl Drop for EnvGuard {
         }
         if let Some(previous) = self.managed_run_context.take() {
             restore_var("ORBIT_MANAGED_RUN_CONTEXT", previous);
+        }
+        if let Some(previous) = self.path.take() {
+            restore_var("PATH", previous);
         }
     }
 }

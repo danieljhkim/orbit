@@ -24,11 +24,16 @@ fn init_args(name: &str) -> WorkspaceInitArgs {
 #[test]
 fn shared_root_registers_each_checkout_and_show_resolves_by_repo_root() {
     let fixture = tempdir().expect("fixture");
-    let home = fixture.path().join("home");
-    let shared_root = fixture.path().join("shared-orbit");
-    let repo_alpha = fixture.path().join("repo-alpha");
-    let repo_beta = fixture.path().join("repo-beta");
-    let unregistered = fixture.path().join("repo-unregistered");
+    // The registry records checkout paths as the process resolves them, and
+    // `set_current_dir` below resolves symlinks. On macOS a temp dir arrives as
+    // `/var/...` but resolves to `/private/var/...`, so fixtures built from the
+    // unresolved path would never equal what the registry stored.
+    let fixture_root = std::fs::canonicalize(fixture.path()).expect("canonical fixture root");
+    let home = fixture_root.join("home");
+    let shared_root = fixture_root.join("shared-orbit");
+    let repo_alpha = fixture_root.join("repo-alpha");
+    let repo_beta = fixture_root.join("repo-beta");
+    let unregistered = fixture_root.join("repo-unregistered");
     for directory in [&home, &repo_alpha, &repo_beta, &unregistered] {
         std::fs::create_dir_all(directory).expect("fixture directory");
     }
