@@ -735,3 +735,42 @@ fn list_backlog_tasks_excludes_epic_roots_and_descendants_with_reasons() {
         assert_eq!(excluded_entry(&output, &child.id)["conflicts"], json!([]));
     }
 }
+
+/// `list_backlog_tasks` builds its candidate list by walking the task lookup,
+/// which iterates in task-ID order rather than the store's created-at order.
+/// That is only safe because the dispatch sort is a total order, so pin it:
+/// two permutations of the same population must sort to the same sequence.
+#[test]
+fn dispatch_order_is_independent_of_the_input_order() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+
+    let mut tasks = vec![
+        seed_task_with_dependencies(&runtime, "Chore alpha", TaskStatus::Backlog, Vec::new()),
+        seed_task_with_dependencies(&runtime, "Chore beta", TaskStatus::Backlog, Vec::new()),
+        seed_task_with_dependencies(&runtime, "Chore gamma", TaskStatus::Backlog, Vec::new()),
+        seed_task_with_dependencies(&runtime, "Chore delta", TaskStatus::Backlog, Vec::new()),
+    ];
+    // Vary the bands so the sort has real work to do rather than falling
+    // straight through to the ID tie-breaker.
+    tasks[0].priority = TaskPriority::Critical;
+    tasks[1].task_type = TaskType::Bug;
+    tasks[2].tags.push("code-review".to_string());
+    tasks[3].priority = TaskPriority::Low;
+
+    let mut forward = tasks.clone();
+    let mut reversed = tasks;
+    reversed.reverse();
+
+    sort_tasks_for_automatic_dispatch(&mut forward);
+    sort_tasks_for_automatic_dispatch(&mut reversed);
+
+    let ids = |tasks: &[Task]| tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
+    assert_eq!(
+        ids(&forward),
+        ids(&reversed),
+        "dispatch order must not depend on how the population was enumerated"
+    );
+    // The critical task still leads, so the assertion above is comparing a
+    // meaningful ordering rather than two identically-sorted no-ops.
+    assert_eq!(forward[0].priority, TaskPriority::Critical);
+}

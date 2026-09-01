@@ -103,16 +103,26 @@ pub(super) fn list_backlog_tasks(
         })
         .unwrap_or_default();
     let (mut tasks, excluded_entries) = if explicit_task_ids.is_empty() {
-        // FIXME: perf issue iterating over all tasks
-        let all_tasks = runtime.stores().tasks().list_tasks().map_err(|err| {
-            DispatchError::DeterministicActionFailed {
+        // The lookup must stay whole: an epic's lock set is the union over its
+        // descendants (`lock_context_files_for_task`), which is a downward walk
+        // that a status-filtered map would silently shorten — narrowing it
+        // would shrink lock coverage, not just the scan. Reducing the scan
+        // itself needs a persisted parent -> children index; until then the
+        // population is loaded once and the whole set is walked.
+        //
+        // What it must not do is materialize that population twice. Consume the
+        // list into the lookup, then clone only the backlog tasks that survive
+        // the filter — tens of clones on a large workspace instead of one per
+        // task, and one copy held rather than two.
+        let task_lookup: BTreeMap<String, Task> = runtime
+            .stores()
+            .tasks()
+            .list_tasks()
+            .map_err(|err| DispatchError::DeterministicActionFailed {
                 action: action.to_string(),
                 message: format!("list tasks: {err}"),
-            }
-        })?;
-        let task_lookup: BTreeMap<String, Task> = all_tasks
-            .iter()
-            .cloned()
+            })?
+            .into_iter()
             .map(|task| (task.id.clone(), task))
             .collect();
         let status_by_id = runtime.task_status_index().map_err(|err| {
@@ -123,11 +133,15 @@ pub(super) fn list_backlog_tasks(
         })?;
         let workspace_root = runtime.paths().repo_root.as_path();
         let lock_holders = active_task_lock_holders(&task_lookup, workspace_root);
-        let mut backlog: Vec<Task> = all_tasks
-            .into_iter()
+        // `task_lookup` iterates in task-ID order rather than the store's
+        // created-at order; `sort_tasks_for_automatic_dispatch` is a total
+        // order ending in the task ID, so the dispatch sequence is unchanged.
+        let mut backlog: Vec<Task> = task_lookup
+            .values()
             .filter(|task| {
                 task.status == TaskStatus::Backlog && task_dependencies_ready(task, &status_by_id)
             })
+            .cloned()
             .collect();
         sort_tasks_for_automatic_dispatch(&mut backlog);
         let mut excluded = Vec::new();
