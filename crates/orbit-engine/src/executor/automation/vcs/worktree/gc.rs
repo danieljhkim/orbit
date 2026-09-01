@@ -333,13 +333,32 @@ fn branch_name(worktree: &Path) -> Result<String, OrbitError> {
     Ok(branch.to_string())
 }
 
+/// Match on canonical paths, not raw strings. `git worktree list` reports the
+/// resolved path, while the caller holds whatever path it was handed. Where the
+/// two differ only by a symlink on the way down — on macOS `/var` and `/tmp`
+/// are symlinks into `/private`, so any worktree under them reports one path
+/// and is asked about under another — a literal comparison reads a registered
+/// worktree as unregistered and GC retains it forever.
+///
+/// The literal comparison is kept as the fast path, and a registered entry
+/// whose directory has already been removed simply fails to canonicalize and
+/// does not match, which is the same answer the literal comparison gave.
 fn is_registered_worktree(repo_root: &Path, path: &Path) -> Result<bool, OrbitError> {
     let list = git_output(repo_root, &["worktree", "list", "--porcelain"])?;
-    let expected = path.to_string_lossy();
+    let expected_literal = path.to_string_lossy();
+    let expected_canonical = fs::canonicalize(path).ok();
     Ok(list
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
-        .any(|registered| registered == expected))
+        .any(|registered| {
+            if registered == expected_literal {
+                return true;
+            }
+            match (&expected_canonical, fs::canonicalize(registered).ok()) {
+                (Some(expected), Some(registered)) => *expected == registered,
+                _ => false,
+            }
+        }))
 }
 
 fn branch_exists(repo_root: &Path, branch: &str) -> bool {

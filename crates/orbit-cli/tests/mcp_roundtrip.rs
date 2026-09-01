@@ -4042,7 +4042,10 @@ fn readonly_orbit_command(worktree: &Path, home: &Path, state_root: &Path) -> Co
     command
 }
 
-#[cfg(target_os = "linux")]
+// Not Linux-specific: this only asserts on exit status, and 14 call sites
+// outside any target gate depend on it. It picked up the gate from the
+// bubblewrap helpers it sits next to, which left this whole integration test
+// uncompilable anywhere but Linux.
 fn assert_command_succeeded(label: &str, output: &std::process::Output) {
     assert!(
         output.status.success(),
