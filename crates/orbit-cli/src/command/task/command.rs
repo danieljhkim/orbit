@@ -40,7 +40,7 @@ Tasks:
 Health:
   lint         Lint tasks for stale paths and vague acceptance criteria
   flow         Show filed-vs-closed rates over time — is the backlog draining?
-  locks        Inspect and release the file locks that gate dispatch
+  locks        Inspect, reserve, and release the file locks that gate dispatch
 
 Bundles:
   export       Export task bundles to a portable tar.zst archive
@@ -102,7 +102,7 @@ pub enum TaskSubcommand {
     Lint(TaskLintArgs),
     /// Show filed-vs-closed rates over time — whether the backlog is draining
     Flow(TaskFlowArgs),
-    /// Inspect and release task file locks
+    /// Inspect, reserve, and release task file locks
     Locks(LocksCommand),
     /// Export task bundles to a portable tar.zst archive
     Export(TaskExportArgs),

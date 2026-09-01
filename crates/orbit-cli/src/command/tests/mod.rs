@@ -6,6 +6,7 @@ mod doctor;
 mod friction;
 mod gc;
 mod init;
+mod locks;
 mod operation;
 mod operation_args;
 mod sweep;
