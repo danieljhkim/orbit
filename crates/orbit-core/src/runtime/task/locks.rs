@@ -51,11 +51,23 @@ pub(crate) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
         )
     });
 
-    let locked_files: BTreeSet<String> = tasks
-        .iter()
-        .flat_map(|task| {
-            lock_context_files_for_task(task, &task_lookup, runtime.paths().repo_root.as_path())
+    // Expand each task's lock surface once and reuse it for both projections
+    // below. The expansion prunes every declared selector against the
+    // filesystem and, for an epic root, unions the surface of every
+    // descendant — so computing it per projection doubled the syscalls and the
+    // descendant walk for a listing that has a single answer.
+    let repo_root = runtime.paths().repo_root.as_path();
+    let locked_surfaces: Vec<(Task, Vec<String>)> = tasks
+        .into_iter()
+        .map(|task| {
+            let files = lock_context_files_for_task(&task, &task_lookup, repo_root);
+            (task, files)
         })
+        .collect();
+
+    let locked_files: BTreeSet<String> = locked_surfaces
+        .iter()
+        .flat_map(|(_, files)| files.iter().cloned())
         .chain(
             reservation_result
                 .reservations
@@ -83,22 +95,13 @@ pub(crate) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
 
     Ok(json!({
         "locked_files": locked_files.iter().cloned().collect::<Vec<_>>(),
-        "by_task": tasks
+        "by_task": locked_surfaces
             .iter()
-            .map(|task| {
-                task_lock_to_json(
-                    task,
-                    lock_context_files_for_task(
-                        task,
-                        &task_lookup,
-                        runtime.paths().repo_root.as_path(),
-                    ),
-                )
-            })
+            .map(|(task, files)| task_lock_to_json(task, files.clone()))
             .collect::<Vec<_>>(),
         "by_reservation": by_reservation,
         "total_locked": locked_files.len(),
-        "total_tasks": tasks.len(),
+        "total_tasks": locked_surfaces.len(),
         "total_reservations": reservation_result.reservations.len(),
     }))
 }
