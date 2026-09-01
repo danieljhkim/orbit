@@ -8,11 +8,11 @@
   <em>The Orbit dashboard (<code>orbit web serve</code>) — task backlog, live audit log, per-agent scoreboard.</em>
 </p>
 
-**Orbit brings engineering rigor to AI-assisted coding. A durable task for every change, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch, and a searchable corpus built from the docs you already write — local-first.**
+**Orbit takes review off the critical path, so throughput and rigor stop trading against each other. A durable task for every change, structured audit of every tool call and provider exchange, conflict-aware parallel dispatch, and continuous review sweeps that file what they find straight back into the backlog — local-first.**
 
-You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap and enforces them by default: tasks before edits, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks, and your team's own design docs retrievable by the agents doing the work.
+You drive Claude Code, Codex, Grok Build, or Gemini CLI against real code, often in parallel. Agents make it easy to skip the disciplines that keep code maintainable — no plan, no record, no audit trail, just prompt-and-merge. Six months later you can't reconstruct why an agent wrote a given line. Orbit makes those disciplines cheap enough that keeping them costs you no velocity: tasks before edits, every tool call landing in a structured audit log, parallel runs sandboxed into worktrees with file-level locks, and your team's own design docs retrievable by the agents doing the work.
 
-The constraints are the point — they're what keep agent-assisted code shippable at volume. And because every commit carries its task ID, the history of how the code came to be stays reconstructable, by you and by the agents.
+Conventional practice buys safety with blocking gates: nothing merges until a review passes. That trade caps how many agents you can run at once, because every gate holds a lock on the files it touches while a human catches up. Orbit takes the other side — merge on a quick direction check, then let scheduled `code-review`, `qa-sweep`, and `security-review` passes read the merged window and file every confirmed finding back into the backlog as an ordinary task. Review is continuous instead of blocking, so it never sits between your agents and their next change. And because every commit carries its task ID, the history of how the code came to be stays reconstructable, by you and by the agents.
 
 ---
 
@@ -23,6 +23,8 @@ The constraints are the point — they're what keep agent-assisted code shippabl
 - **Structured audit log.** Every tool call, provider request/response, and task transition becomes a queryable event with agent identity attached — append-only, tamper-evident, exportable. → [docs/design/auditability/](docs/design/auditability/)
 
 - **Conflict-aware parallel execution.** For `orbit run ship`, each agent run lands in its own git worktree per task, and the gate pipeline reserves task `context_files` as locks before fanning out, rejecting overlapping reservations up front instead of producing merge conflicts later (see [merge throughput chart](docs/assets/merge-throughput.png)). → [docs/design/activity-job/](docs/design/activity-job/)
+
+- **Continuous review, not blocking review.** Shipped `code-review`, `qa-sweep`, and `security-review` auto-tasks run on their own schedule against what has already merged. Each reads the window since its last recorded cursor, verifies findings against live code, and files confirmed ones as durable tasks with `file:line` evidence — reviewing the window as a whole catches interactions between separately merged changes that per-diff review structurally cannot see. A clean window is a successful no-op. → [docs/design/auto-tasks](docs/design/auto-tasks/)
 
 - **Sandboxed-by-default execution.** Dispatched agent CLIs use a platform-specific OS boundary where supported. macOS uses `sandbox-exec`; Linux uses trusted `/usr/bin/bwrap` after a capability probe to enforce writes from the resolved policy. The Linux boundary leaves host filesystem reads and host network access available, so it does not provide worktree-only reads or policy-gated network egress. Windows and other unsupported platforms have no shipped OS-level backend, while in-process FS guards still cover HTTP tools. → [docs/design/policy-sandbox](docs/design/policy-sandbox/)
 
