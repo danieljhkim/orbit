@@ -8,8 +8,8 @@ use crate::OrbitRuntime;
 use crate::application::task::TaskAddParams;
 
 use super::super::locks::{
-    TaskLockReservationScope, parse_task_lock_reservation_scope, requested_task_files,
-    task_lock_conflicts,
+    TaskLockIndex, TaskLockReservationScope, parse_task_lock_reservation_scope,
+    requested_task_files_indexed, task_lock_conflicts_indexed,
 };
 use crate::adapter::tool_host::test_support::{
     create_context_task, invalid_input_message, run_tool_as_operator, test_runtime,
@@ -137,8 +137,10 @@ fn requested_task_files_prune_missing_context_entries() {
         &["docs/design/groundhog.md", "docs/design/missing.md"],
     );
 
+    let index = TaskLockIndex::load(&runtime).expect("index tasks");
     let requested =
-        requested_task_files(&runtime, &[task.id]).expect("collect requested task files");
+        requested_task_files_indexed(&index, &[task.id], runtime.paths().repo_root.as_path())
+            .expect("collect requested task files");
     assert_eq!(requested, vec!["file:docs/design/groundhog.md".to_string()]);
 }
 
@@ -180,8 +182,12 @@ fn active_epic_root_holds_union_of_descendant_context_files() {
     }
 
     assert_eq!(
-        requested_task_files(&runtime, std::slice::from_ref(&epic.id))
-            .expect("collect epic lock surface"),
+        requested_task_files_indexed(
+            &TaskLockIndex::load(&runtime).expect("index tasks"),
+            std::slice::from_ref(&epic.id),
+            runtime.paths().repo_root.as_path()
+        )
+        .expect("collect epic lock surface"),
         vec![
             "file:src/one.rs".to_string(),
             "file:src/root.rs".to_string(),
@@ -217,15 +223,15 @@ fn task_lock_conflicts_ignore_missing_held_context_entries() {
         &["docs/design/groundhog.md", "src/lib.rs"],
     );
 
-    let conflicts = task_lock_conflicts(
-        &runtime,
+    let conflicts = task_lock_conflicts_indexed(
+        &TaskLockIndex::load(&runtime).expect("index tasks"),
         &[],
         &[
             "docs/design/groundhog.md".to_string(),
             "src/lib.rs".to_string(),
         ],
-    )
-    .expect("compute task lock conflicts");
+        runtime.paths().repo_root.as_path(),
+    );
 
     assert_eq!(
         conflicts,
@@ -251,12 +257,12 @@ fn task_lock_conflicts_use_selector_anchor_overlap() {
         &["symbol:src/lib.rs#ok:function"],
     );
 
-    let conflicts = task_lock_conflicts(
-        &runtime,
+    let conflicts = task_lock_conflicts_indexed(
+        &TaskLockIndex::load(&runtime).expect("index tasks"),
         &[],
         &["file:src/lib.rs".to_string(), "dir:src".to_string()],
-    )
-    .expect("compute selector-aware task lock conflicts");
+        runtime.paths().repo_root.as_path(),
+    );
 
     assert_eq!(
         conflicts,
