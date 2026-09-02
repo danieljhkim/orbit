@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
-use orbit_common::fs::io::atomic_write_text;
+use orbit_common::fs::io::{atomic_write_text, with_exclusive_file_lock};
 pub use orbit_common::fs::path::global_orbit_dir;
 use orbit_types::workspace::WorkspaceRegistry;
 
@@ -21,6 +21,20 @@ pub fn registry_path_for(global_root: &Path) -> PathBuf {
 /// Load the machine-global workspace registry.
 pub fn load_registry() -> Result<WorkspaceRegistry, OrbitError> {
     load_registry_from(&registry_path()?)
+}
+
+/// Run `op` while holding the exclusive lock for the registry at `path`.
+///
+/// `load_registry_from` and `save_registry_to` are each atomic on their own,
+/// but a caller that loads, edits, and saves is not: two such callers (the
+/// scheduled sweep validating checkouts, `orbit workspace init` registering a
+/// new one) interleave, and the second save silently drops the first one's
+/// edit. Wrap the whole read-modify-write in this.
+pub fn with_registry_lock<T>(
+    path: &Path,
+    op: impl FnOnce() -> Result<T, OrbitError>,
+) -> Result<T, OrbitError> {
+    with_exclusive_file_lock(path, "workspace registry", op)
 }
 
 /// Load, migrate, and validate a registry from an explicit path.

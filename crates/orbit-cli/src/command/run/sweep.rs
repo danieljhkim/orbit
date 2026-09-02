@@ -109,9 +109,12 @@ impl ShipSweepCommand {
     pub fn execute_without_runtime(self) -> CommandOut {
         let global_root = workspace_registry::global_orbit_dir()?;
         let registry_path = workspace_registry::registry_path_for(&global_root);
-        let mut registry = workspace_registry::load_registry_from(&registry_path)?;
-        workspace_registry::validate_workspaces(&mut registry);
-        workspace_registry::save_registry_to(&registry, &registry_path)?;
+        let registry = workspace_registry::with_registry_lock(&registry_path, || {
+            let mut registry = workspace_registry::load_registry_from(&registry_path)?;
+            workspace_registry::validate_workspaces(&mut registry);
+            workspace_registry::save_registry_to(&registry, &registry_path)?;
+            Ok(registry)
+        })?;
 
         let mode_override = self.mode.map(ShipMode::to_core);
         let reports: Vec<SweepReport> = workspace_registry::local_workspaces(&registry)

@@ -187,184 +187,195 @@ impl WorkspaceInitArgs {
         let name = self.name.unwrap_or_else(|| dir_name_or_fallback(cwd));
         let id = canonical_workspace_id(&name);
         let git_remote = detect_git_remote(cwd);
-        let mut registry = workspace_registry::load_registry_from(registry_path)?;
-        let existing_workspace = registry
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.id == id);
-        let existing_checkout = registry
-            .checkouts
-            .iter()
-            .find(|checkout| checkout.repo_root == cwd);
-        let reconciling_existing = existing_workspace.is_some() || existing_checkout.is_some();
-        let registered_shared_root = global_root == orbit_dir
-            && registry
-                .checkouts
-                .iter()
-                .any(|checkout| checkout.orbit_dir == orbit_dir);
-        if registered_shared_root {
-            validate_shared_root_identity(orbit_dir)?;
-        }
+        // Every read of the registry below feeds the write at the end; the lock
+        // keeps a concurrent sweep or init from saving over this registration.
+        let (reconciling_existing, registered_shared_root) =
+            workspace_registry::with_registry_lock(registry_path, || {
+                let mut registry = workspace_registry::load_registry_from(registry_path)?;
+                let existing_workspace = registry
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == id);
+                let existing_checkout = registry
+                    .checkouts
+                    .iter()
+                    .find(|checkout| checkout.repo_root == cwd);
+                let reconciling_existing =
+                    existing_workspace.is_some() || existing_checkout.is_some();
+                let registered_shared_root = global_root == orbit_dir
+                    && registry
+                        .checkouts
+                        .iter()
+                        .any(|checkout| checkout.orbit_dir == orbit_dir);
+                if registered_shared_root {
+                    validate_shared_root_identity(orbit_dir)?;
+                }
 
-        if reconciling_existing && !self.force {
-            return Err(OrbitError::WorkspaceError(format!(
-                "workspace registration already exists for '{}' or '{}'; rerun with --force to reconcile it",
-                id,
-                cwd.display()
-            )));
-        }
+                if reconciling_existing && !self.force {
+                    return Err(OrbitError::WorkspaceError(format!(
+                        "workspace registration already exists for '{}' or '{}'; rerun with --force to reconcile it",
+                        id,
+                        cwd.display()
+                    )));
+                }
 
-        if reconciling_existing {
-            validate_existing_registration(
-                existing_workspace,
-                existing_checkout,
-                cwd,
-                orbit_dir,
-                &id,
-            )?;
-            if !registered_shared_root {
-                validate_workspace_identity(orbit_dir, &id)?;
-            }
-        } else if !registered_shared_root
-            && let Some(identity) = read_workspace_identity(orbit_dir)?
-            && identity.workspace_id != id
-        {
-            // A checkout can carry an identity the registry never recorded:
-            // any command that opens a runtime in an uninitialized checkout
-            // seeds a bootstrap id. Replacing one is explicit reconciliation,
-            // so it needs --force — but --force must not detach an identity a
-            // durable registration still claims.
-            if !self.force {
-                return Err(OrbitError::WorkspaceError(format!(
-                    "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; rerun with --force to reconcile it",
-                    identity.workspace_id,
-                    orbit_dir.join("config.yaml").display(),
-                    id
-                )));
-            }
-            if registry_claims(&registry, &identity.workspace_id) {
-                return Err(OrbitError::WorkspaceError(format!(
-                    "cannot reconcile workspace '{}': checkout identity '{}' at '{}' is claimed by an existing registration",
-                    id,
-                    identity.workspace_id,
-                    orbit_dir.join("config.yaml").display()
-                )));
-            }
-        }
+                if reconciling_existing {
+                    validate_existing_registration(
+                        existing_workspace,
+                        existing_checkout,
+                        cwd,
+                        orbit_dir,
+                        &id,
+                    )?;
+                    if !registered_shared_root {
+                        validate_workspace_identity(orbit_dir, &id)?;
+                    }
+                } else if !registered_shared_root
+                    && let Some(identity) = read_workspace_identity(orbit_dir)?
+                    && identity.workspace_id != id
+                {
+                    // A checkout can carry an identity the registry never recorded:
+                    // any command that opens a runtime in an uninitialized checkout
+                    // seeds a bootstrap id. Replacing one is explicit reconciliation,
+                    // so it needs --force — but --force must not detach an identity a
+                    // durable registration still claims.
+                    if !self.force {
+                        return Err(OrbitError::WorkspaceError(format!(
+                            "workspace identity '{}' at '{}' conflicts with requested workspace '{}'; rerun with --force to reconcile it",
+                            identity.workspace_id,
+                            orbit_dir.join("config.yaml").display(),
+                            id
+                        )));
+                    }
+                    if registry_claims(&registry, &identity.workspace_id) {
+                        return Err(OrbitError::WorkspaceError(format!(
+                            "cannot reconcile workspace '{}': checkout identity '{}' at '{}' is claimed by an existing registration",
+                            id,
+                            identity.workspace_id,
+                            orbit_dir.join("config.yaml").display()
+                        )));
+                    }
+                }
 
-        init_workspace_at_root(
-            orbit_dir,
-            InitOptions {
-                refresh_defaults: true,
-                global_root_override: Some(global_root.to_path_buf()),
-                routine_host_id: local_host_id.clone(),
-                // Host detection is a CLI concern: Core seeds config from the
-                // families this adapter reports, never by probing PATH itself.
-                config_seed: Some(config_seed_from_detection(&detect(&RealAgentEnvProbe))),
-                ..Default::default()
-            },
-        )?;
-        ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
-        let mut checkout_added = false;
-        if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
-            if let Some(ship_mode) = self.ship_mode {
-                existing.ship_mode = Some(ship_mode);
-            }
-            if let Some(base_branch) = self.base_branch {
-                existing.base_branch = base_branch;
-            }
-            existing.updated_at = Utc::now();
-            if let Some(checkout) = registry
-                .checkouts
-                .iter_mut()
-                .find(|checkout| checkout.workspace_id == id)
-            {
-                checkout.repo_root = cwd.to_path_buf();
-                checkout.orbit_dir = orbit_dir.to_path_buf();
-            } else {
-                workspace_registry::register_checkout(
-                    &mut registry,
-                    unassigned_checkout(&id, cwd, orbit_dir),
+                init_workspace_at_root(
+                    orbit_dir,
+                    InitOptions {
+                        refresh_defaults: true,
+                        global_root_override: Some(global_root.to_path_buf()),
+                        routine_host_id: local_host_id.clone(),
+                        // Host detection is a CLI concern: Core seeds config from the
+                        // families this adapter reports, never by probing PATH itself.
+                        config_seed: Some(config_seed_from_detection(&detect(&RealAgentEnvProbe))),
+                        ..Default::default()
+                    },
                 )?;
-                checkout_added = true;
-            }
-        } else {
-            let now = Utc::now();
-            let ws = Workspace {
-                id: id.clone(),
-                name: name.clone(),
-                // The explicit role assignment below writes owner identity
-                // and checkout role together before this registry is saved.
-                owner_machine_id: None,
-                git_remote,
-                ship_mode: self.ship_mode,
-                base_branch: self.base_branch.unwrap_or_else(|| "main".to_string()),
-                status: WorkspaceStatus::Active,
-                created_at: now,
-                updated_at: now,
-            };
-            workspace_registry::register_workspace(&mut registry, ws)?;
-            workspace_registry::register_checkout(
-                &mut registry,
-                unassigned_checkout(&id, cwd, orbit_dir),
-            )?;
-            checkout_added = true;
-        }
-
-        // A new checkout defaults compatibly to the local owner. An explicit
-        // replica declaration supplies its stable owner in this same in-memory
-        // mutation, so no transient local-owner binding is ever persisted.
-        if checkout_added || explicit_role.is_some() {
-            let assigned_role = explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner);
-            workspace_registry::assign_checkout_role(
-                &mut registry,
-                &id,
-                assigned_role,
-                self.owner.as_deref(),
-                local_machine_id.as_deref(),
-            )?;
-            match assigned_role {
-                WorkspaceCheckoutRole::Owner => {
-                    if let (Some(machine_id), Some(host_id)) =
-                        (local_machine_id.as_deref(), local_host_id.as_deref())
+                ensure_orbit_gitignore_entry(cwd, orbit_dir)?;
+                let mut checkout_added = false;
+                if let Some(existing) = registry.workspaces.iter_mut().find(|w| w.id == id) {
+                    if let Some(ship_mode) = self.ship_mode {
+                        existing.ship_mode = Some(ship_mode);
+                    }
+                    if let Some(base_branch) = self.base_branch {
+                        existing.base_branch = base_branch;
+                    }
+                    existing.updated_at = Utc::now();
+                    if let Some(checkout) = registry
+                        .checkouts
+                        .iter_mut()
+                        .find(|checkout| checkout.workspace_id == id)
                     {
-                        workspace_registry::rename_local_owner_host_id(
+                        checkout.repo_root = cwd.to_path_buf();
+                        checkout.orbit_dir = orbit_dir.to_path_buf();
+                    } else {
+                        workspace_registry::register_checkout(
                             &mut registry,
-                            machine_id,
-                            host_id,
+                            unassigned_checkout(&id, cwd, orbit_dir),
                         )?;
+                        checkout_added = true;
+                    }
+                } else {
+                    let now = Utc::now();
+                    let ws = Workspace {
+                        id: id.clone(),
+                        name: name.clone(),
+                        // The explicit role assignment below writes owner identity
+                        // and checkout role together before this registry is saved.
+                        owner_machine_id: None,
+                        git_remote,
+                        ship_mode: self.ship_mode,
+                        base_branch: self.base_branch.unwrap_or_else(|| "main".to_string()),
+                        status: WorkspaceStatus::Active,
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    workspace_registry::register_workspace(&mut registry, ws)?;
+                    workspace_registry::register_checkout(
+                        &mut registry,
+                        unassigned_checkout(&id, cwd, orbit_dir),
+                    )?;
+                    checkout_added = true;
+                }
+
+                // A new checkout defaults compatibly to the local owner. An explicit
+                // replica declaration supplies its stable owner in this same in-memory
+                // mutation, so no transient local-owner binding is ever persisted.
+                if checkout_added || explicit_role.is_some() {
+                    let assigned_role = explicit_role.unwrap_or(WorkspaceCheckoutRole::Owner);
+                    workspace_registry::assign_checkout_role(
+                        &mut registry,
+                        &id,
+                        assigned_role,
+                        self.owner.as_deref(),
+                        local_machine_id.as_deref(),
+                    )?;
+                    match assigned_role {
+                        WorkspaceCheckoutRole::Owner => {
+                            if let (Some(machine_id), Some(host_id)) =
+                                (local_machine_id.as_deref(), local_host_id.as_deref())
+                            {
+                                workspace_registry::rename_local_owner_host_id(
+                                    &mut registry,
+                                    machine_id,
+                                    host_id,
+                                )?;
+                            }
+                        }
+                        WorkspaceCheckoutRole::Replica => {
+                            // v1 has no fleet lookup from stable machine id to display
+                            // name. Until the local record is enriched with a human
+                            // name, the explicit owner id is itself recognizable to
+                            // routine-pin diagnostics as a known-elsewhere owner.
+                            if let Some(owner) = self.owner.as_deref() {
+                                registry
+                                    .owner_host_ids
+                                    .entry(owner.to_string())
+                                    .or_insert_with(|| owner.to_string());
+                            }
+                        }
                     }
                 }
-                WorkspaceCheckoutRole::Replica => {
-                    // v1 has no fleet lookup from stable machine id to display
-                    // name. Until the local record is enriched with a human
-                    // name, the explicit owner id is itself recognizable to
-                    // routine-pin diagnostics as a known-elsewhere owner.
-                    if let Some(owner) = self.owner.as_deref() {
-                        registry
-                            .owner_host_ids
-                            .entry(owner.to_string())
-                            .or_insert_with(|| owner.to_string());
-                    }
+                orbit_core::adapter::HubCoordinationExecutor::register_workspace(
+                    global_root,
+                    &id,
+                    &name,
+                )?;
+                // A first checkout for this data dir must land in sqlite before the
+                // JSON catalog is saved. Shared-root follow-on checkouts reuse one
+                // orbit_dir (UNIQUE) and must not steal that row. `--force` rebinds
+                // a leftover synthetic parent(data-dir) mint.
+                if !registered_shared_root {
+                    orbit_core::adapter::HubCoordinationExecutor::bind_checkout(
+                        global_root,
+                        &id,
+                        &name,
+                        cwd,
+                        orbit_dir,
+                        self.force,
+                    )?;
                 }
-            }
-        }
-        orbit_core::adapter::HubCoordinationExecutor::register_workspace(global_root, &id, &name)?;
-        // A first checkout for this data dir must land in sqlite before the
-        // JSON catalog is saved. Shared-root follow-on checkouts reuse one
-        // orbit_dir (UNIQUE) and must not steal that row. `--force` rebinds
-        // a leftover synthetic parent(data-dir) mint.
-        if !registered_shared_root {
-            orbit_core::adapter::HubCoordinationExecutor::bind_checkout(
-                global_root,
-                &id,
-                &name,
-                cwd,
-                orbit_dir,
-                self.force,
-            )?;
-        }
-        workspace_registry::save_registry_to(&registry, registry_path)?;
+                workspace_registry::save_registry_to(&registry, registry_path)?;
+                Ok((reconciling_existing, registered_shared_root))
+            })?;
         if !reconciling_existing && !registered_shared_root {
             write_workspace_identity(orbit_dir, &id)?;
         }

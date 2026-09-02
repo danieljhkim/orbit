@@ -485,3 +485,23 @@ capabilities = ["agent"]
         "a machine that accepts SSH with no callers file is the Tier 1 gap the doctor reports"
     );
 }
+
+/// A label is a peer's operator-chosen host id or an SSH destination; a
+/// quote in it must be escaped, or the seed is unparseable and every remote
+/// session is refused until someone hand-edits the file.
+#[test]
+fn seed_escapes_labels_that_would_break_the_toml_literal() {
+    let seeded = render_callers_seed(&[SeedCaller {
+        machine_id: "hm_0123456789abcdef".to_string(),
+        label: Some("laptop\" # not a comment".to_string()),
+    }]);
+    assert!(
+        seeded.contains("label        = \"laptop\\\" # not a comment\""),
+        "{seeded}"
+    );
+    let parsed: toml::Value = toml::from_str(&seeded).expect("seed parses as TOML");
+    assert_eq!(
+        parsed["callers"][0]["label"].as_str(),
+        Some("laptop\" # not a comment")
+    );
+}
