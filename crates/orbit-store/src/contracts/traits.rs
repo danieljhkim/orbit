@@ -343,6 +343,11 @@ pub trait TaskReservationStoreBackend: Send + Sync {
 pub trait JobRunStoreBackend: Send + Sync {
     fn list_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn list_job_runs_filtered(&self, query: &JobRunQuery) -> Result<Vec<JobRun>, OrbitError>;
+    /// Number of runs matching `query`, ignoring its `limit`.
+    fn count_job_runs_filtered(&self, query: &JobRunQuery) -> Result<u64, OrbitError>;
+    /// Every recorded `duration_ms` among runs matching `query`, ignoring
+    /// its `limit`.
+    fn list_job_run_durations_filtered(&self, query: &JobRunQuery) -> Result<Vec<u64>, OrbitError>;
     fn get_job_run(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError>;
     fn list_pending_or_running_job_runs(&self, job_id: &str) -> Result<Vec<JobRun>, OrbitError>;
     fn insert_job_run(

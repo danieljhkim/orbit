@@ -608,22 +608,21 @@ fn count_failed_runs(
     runtime: &OrbitRuntime,
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
-    let mut total: i64 = 0;
+    let mut total: u64 = 0;
     for state in [
         JobRunState::Failed,
         JobRunState::Timeout,
         JobRunState::Interrupted,
     ] {
-        let runs = runtime.list_job_runs(JobRunListParams {
+        total += runtime.count_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
             terminal_only: false,
             since: Some(since),
-            limit: Some(HISTORY_MAX_LIMIT),
+            limit: None,
         })?;
-        total += runs.len() as i64;
     }
-    Ok(total)
+    Ok(i64::try_from(total).unwrap_or(i64::MAX))
 }
 
 /// Counts running runs whose start time is older than the 95th percentile of
@@ -635,27 +634,20 @@ fn count_active_long_runs(
     runtime: &OrbitRuntime,
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
-    let mut finished_durations: Vec<i64> = Vec::new();
-    for state in [
-        JobRunState::Success,
-        JobRunState::Failed,
-        JobRunState::Timeout,
-        JobRunState::Cancelled,
-        JobRunState::Interrupted,
-    ] {
-        let runs = runtime.list_job_runs(JobRunListParams {
+    // Every finished run in the window, as durations only: the baseline is
+    // a percentile, so a capped page of hydrated rows would both drift low
+    // and cost the step reads it never looks at.
+    let mut finished_durations: Vec<i64> = runtime
+        .list_job_run_durations(JobRunListParams {
             job_id: None,
-            state: Some(state),
-            terminal_only: false,
+            state: None,
+            terminal_only: true,
             since: Some(since),
-            limit: Some(HISTORY_MAX_LIMIT),
-        })?;
-        for r in runs {
-            if let Some(d) = r.duration_ms {
-                finished_durations.push(d as i64);
-            }
-        }
-    }
+            limit: None,
+        })?
+        .into_iter()
+        .map(|d| i64::try_from(d).unwrap_or(i64::MAX))
+        .collect();
 
     if finished_durations.is_empty() {
         return Ok(0);
@@ -670,7 +662,7 @@ fn count_active_long_runs(
         state: Some(JobRunState::Running),
         terminal_only: false,
         since: None,
-        limit: Some(HISTORY_MAX_LIMIT),
+        limit: None,
     })?;
 
     let now = Utc::now();
