@@ -184,14 +184,12 @@ impl FrictionStore {
                         }
                     };
                 }
+                // Unlike `resolved_at`, which keeps the first resolution
+                // instant, the resolving task is whatever the caller names:
+                // re-resolving against a corrected task must not silently
+                // keep the wrong one.
                 if let Some(resolved_by_task) = params.resolved_by_task.clone() {
-                    stored.record.resolved_by_task = Some(
-                        stored
-                            .record
-                            .resolved_by_task
-                            .clone()
-                            .unwrap_or(resolved_by_task),
-                    );
+                    stored.record.resolved_by_task = Some(resolved_by_task);
                 }
                 queries::upsert_record(
                     conn,

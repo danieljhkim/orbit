@@ -336,3 +336,62 @@ fn accounting_facts_are_unbounded_distinct_and_half_open_without_tool_hydration(
         "until is exclusive"
     );
 }
+
+/// The accounting read hydrates every invocation in its window in one go,
+/// so its `IN (...)` lists must be chunked below SQLite's bound-parameter
+/// cap. 1,100 rows crosses several chunks; every row must still get its own
+/// task and tool-call linkage back.
+#[test]
+fn hydration_spans_several_in_list_chunks_without_losing_linkage() {
+    let store = Store::open_in_memory().expect("open store");
+    let total = 1_100;
+    for index in 0..total {
+        store
+            .insert_invocation_trace_record(&InvocationInsertParams {
+                job_run_id: format!("jrun-chunk-{index}"),
+                activity_id: "implement_one".to_string(),
+                agent: "codex".to_string(),
+                model: Some(TEST_CODEX_MODEL.to_string()),
+                task_ids: vec![format!("ORB-{index}")],
+                trace: InvocationTrace {
+                    tool_calls: vec![ToolCallTrace {
+                        seq: 0,
+                        tool_name: format!("tool-{index}"),
+                        result_bytes: 1,
+                        result_payload: None,
+                    }],
+                    ..Default::default()
+                },
+            })
+            .expect("insert invocation");
+    }
+
+    let facts = store
+        .list_invocation_accounting_facts(&InvocationAccountingQuery {
+            since: None,
+            until: Utc.with_ymd_and_hms(2100, 1, 1, 0, 0, 0).unwrap(),
+        })
+        .expect("accounting facts");
+    assert_eq!(facts.len(), total);
+    assert!(
+        facts.iter().all(|fact| fact.task_ids.len() == 1),
+        "every fact keeps its task linkage across chunks"
+    );
+
+    let records = store
+        .list_invocation_records(&InvocationQuery {
+            limit: total + 10,
+            ..Default::default()
+        })
+        .expect("detailed records");
+    assert_eq!(records.len(), total);
+    for record in &records {
+        let index = record
+            .job_run_id
+            .strip_prefix("jrun-chunk-")
+            .expect("fixture run id");
+        assert_eq!(record.task_ids, vec![format!("ORB-{index}")]);
+        assert_eq!(record.tool_calls.len(), 1, "{}", record.job_run_id);
+        assert_eq!(record.tool_calls[0].tool_name, format!("tool-{index}"));
+    }
+}

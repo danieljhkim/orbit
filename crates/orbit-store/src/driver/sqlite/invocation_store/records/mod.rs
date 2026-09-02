@@ -199,38 +199,46 @@ impl Store {
         }
 
         let conn = self.connection_handle()?;
-        let placeholders = sql_placeholders(invocation_ids.len());
-        let sql = format!(
-            "SELECT invocation_id, seq, tool_name, result_bytes FROM tool_calls WHERE invocation_id IN ({placeholders}) ORDER BY invocation_id ASC, seq ASC"
-        );
-        let params: Vec<Box<dyn ToSql>> = invocation_ids
-            .iter()
-            .map(|id| Box::new(*id) as Box<dyn ToSql>)
-            .collect();
-        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
-
-        let mut stmt = conn
-            .prepare(&sql)
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-        let rows = stmt
-            .query_map(param_refs.as_slice(), |row| {
-                Ok(InvocationToolCallRecord {
-                    invocation_id: row.get(0)?,
-                    seq: row.get::<_, i64>(1)? as u64,
-                    tool_name: row.get(2)?,
-                    result_bytes: row.get::<_, i64>(3)? as u64,
-                })
-            })
-            .map_err(|e| OrbitError::Store(e.to_string()))?;
-
         let mut grouped: HashMap<i64, Vec<InvocationToolCallRecord>> = HashMap::new();
-        for row in rows {
-            let call = row.map_err(|e| OrbitError::Store(e.to_string()))?;
-            grouped.entry(call.invocation_id).or_default().push(call);
+        for chunk in invocation_ids.chunks(SQL_IN_LIST_CHUNK) {
+            let placeholders = sql_placeholders(chunk.len());
+            let sql = format!(
+                "SELECT invocation_id, seq, tool_name, result_bytes FROM tool_calls WHERE invocation_id IN ({placeholders}) ORDER BY invocation_id ASC, seq ASC"
+            );
+            let params: Vec<Box<dyn ToSql>> = chunk
+                .iter()
+                .map(|id| Box::new(*id) as Box<dyn ToSql>)
+                .collect();
+            let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
+
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    Ok(InvocationToolCallRecord {
+                        invocation_id: row.get(0)?,
+                        seq: row.get::<_, i64>(1)? as u64,
+                        tool_name: row.get(2)?,
+                        result_bytes: row.get::<_, i64>(3)? as u64,
+                    })
+                })
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+            for row in rows {
+                let call = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+                grouped.entry(call.invocation_id).or_default().push(call);
+            }
         }
         Ok(grouped)
     }
 }
+
+/// Ids per `IN (...)` list. SQLite caps bound parameters per statement
+/// (`SQLITE_MAX_VARIABLE_NUMBER`, 32766 on the bundled build), and the
+/// accounting path hydrates every invocation in a window in one go, so an
+/// unchunked list fails outright once the window holds more rows than that.
+const SQL_IN_LIST_CHUNK: usize = 500;
 
 fn insert_invocation_task_ids(
     tx: &rusqlite::Transaction<'_>,
@@ -453,27 +461,29 @@ fn load_grouped_strings(
         return Ok(HashMap::new());
     }
 
-    let placeholders = sql_placeholders(invocation_ids.len());
-    let sql = sql_template.replace("{placeholders}", &placeholders);
-    let params: Vec<Box<dyn ToSql>> = invocation_ids
-        .iter()
-        .map(|id| Box::new(*id) as Box<dyn ToSql>)
-        .collect();
-    let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| OrbitError::Store(e.to_string()))?;
-    let rows = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| OrbitError::Store(e.to_string()))?;
-
     let mut grouped: HashMap<i64, Vec<String>> = HashMap::new();
-    for row in rows {
-        let (invocation_id, value) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
-        grouped.entry(invocation_id).or_default().push(value);
+    for chunk in invocation_ids.chunks(SQL_IN_LIST_CHUNK) {
+        let placeholders = sql_placeholders(chunk.len());
+        let sql = sql_template.replace("{placeholders}", &placeholders);
+        let params: Vec<Box<dyn ToSql>> = chunk
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn ToSql>)
+            .collect();
+        let param_refs: Vec<&dyn ToSql> = params.iter().map(|value| value.as_ref()).collect();
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| OrbitError::Store(e.to_string()))?;
+
+        for row in rows {
+            let (invocation_id, value) = row.map_err(|e| OrbitError::Store(e.to_string()))?;
+            grouped.entry(invocation_id).or_default().push(value);
+        }
     }
     Ok(grouped)
 }

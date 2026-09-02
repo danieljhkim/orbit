@@ -349,6 +349,17 @@ fn resolution_records_the_resolving_task_and_reopening_clears_it() {
         Some("ORB-00042")
     );
 
+    // A later resolution against a different task replaces the first one;
+    // the original resolution instant is kept.
+    let re_resolved = frictions
+        .resolve_by_task(&stored.record.id, "ORB-00043", at(2, 12))
+        .expect("re-resolve by another task");
+    assert_eq!(
+        re_resolved.record.resolved_by_task.as_deref(),
+        Some("ORB-00043")
+    );
+    assert_eq!(re_resolved.record.resolved_at, Some(at(2, 0)));
+
     let reopened = frictions
         .update(
             &stored.record.id,
