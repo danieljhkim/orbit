@@ -148,3 +148,31 @@ fn a_log_without_checkout_evidence_yields_nothing_rather_than_a_guess() {
     assert!(evidence.commits.is_empty());
     assert!(evidence.lines.is_empty());
 }
+
+/// The commit list is bounded like the lines are: a matrix log with tens of
+/// thousands of fetch lines must not hand the caller an unbounded array, and
+/// every commit appears once.
+#[test]
+fn checkout_evidence_caps_and_dedups_commits() {
+    let mut log = String::new();
+    for index in 0..500_u32 {
+        let sha = format!("{index:040x}");
+        // Each commit appears twice, as a fetch line and a checkout line.
+        log.push_str(&format!(
+            "setup\tRun actions/checkout@v4\t2026-01-01T00:00:00.0000000Z  * branch {sha} -> FETCH_HEAD\n"
+        ));
+        log.push_str(&format!(
+            "setup\tRun actions/checkout@v4\t2026-01-01T00:00:01.0000000Z HEAD is now at {sha} chore\n"
+        ));
+    }
+
+    let evidence = scan_checkout_evidence(&log, 40);
+
+    assert_eq!(evidence.commits.len(), 40, "{:?}", evidence.commits);
+    assert_eq!(evidence.lines.len(), 40);
+    let mut unique = evidence.commits.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), evidence.commits.len());
+    assert_eq!(evidence.commits[0], format!("{:040x}", 0));
+}

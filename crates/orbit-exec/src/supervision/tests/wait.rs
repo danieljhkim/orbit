@@ -36,11 +36,52 @@ fn wait_kills_process_when_stdout_capture_limit_is_exceeded() {
         "expected None (SIGKILL) or Some(141) (SIGPIPE cascade), got {:?}",
         result.exit_code
     );
-    assert!(result.stderr.is_empty());
+    // `yes` may die of SIGPIPE before the supervisor observes the cap; only
+    // the supervisor-delivered kill carries the reason (asserted separately
+    // below with a child that survives the pipe closing).
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.is_empty() || stderr.contains("process output capture limit exceeded on stdout"),
+        "stderr was {stderr:?}"
+    );
     assert!(result.stdout.ends_with(OUTPUT_TRUNCATED_MARKER));
     assert!(result.stdout.len() <= 64 + OUTPUT_TRUNCATED_MARKER.len());
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "output cap should kill the subprocess promptly"
     );
+}
+
+/// A child that ignores SIGPIPE keeps running after the drain drops the pipe,
+/// so the supervisor is the one that stops it — and it must say why, or the
+/// caller sees a bare failure with an empty stderr for a log that was merely
+/// long.
+#[cfg(unix)]
+#[test]
+fn capture_limit_kill_names_its_reason_on_stderr() {
+    let req = ExecRequest {
+        program: "/bin/sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            "trap '' PIPE; while :; do echo orbit-cap; done".to_string(),
+        ],
+        current_dir: None,
+        timeout_ms: Some(5_000),
+        stdin_mode: StdinMode::Null,
+        environment_mode: EnvironmentMode::Inherit,
+        debug: false,
+    };
+    let child = crate::process::spawn(&req).expect("spawn child");
+
+    let result =
+        wait_with_timeout_and_output_limit(child, Some(5_000), false, None, 64).expect("wait");
+
+    assert!(!result.exit_success);
+    assert_eq!(result.exit_code, None, "supervisor kill, not a self-exit");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("process output capture limit exceeded on stdout"),
+        "stderr was {stderr:?}"
+    );
+    assert!(result.stdout.ends_with(OUTPUT_TRUNCATED_MARKER));
 }

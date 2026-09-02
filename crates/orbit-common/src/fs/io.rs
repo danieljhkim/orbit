@@ -89,14 +89,22 @@ pub fn atomic_write_bytes(path: &Path, content: &[u8]) -> io::Result<()> {
     let temp_path = temp_path_for(path);
     let mut file = create_new_private_file(&temp_path)?;
 
-    if let Ok(metadata) = fs::metadata(path) {
-        fs::set_permissions(&temp_path, metadata.permissions())?;
+    let staged = (|| {
+        if let Ok(metadata) = fs::metadata(path) {
+            fs::set_permissions(&temp_path, metadata.permissions())?;
+        }
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp_path, path)
+    })();
+    if staged.is_err() {
+        // Every temp name is fresh, so a leftover would never be reclaimed:
+        // a failed write (ENOSPC mid-`write_all`, a rename refused) must not
+        // keep consuming the space it was short of.
+        let _ = fs::remove_file(&temp_path);
     }
-
-    file.write_all(content)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&temp_path, path)?;
+    staged?;
     sync_parent_dir(path)
 }
 
