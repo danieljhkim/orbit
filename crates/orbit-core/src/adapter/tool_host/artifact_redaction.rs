@@ -680,46 +680,13 @@ fn tool_name(action: OrbitBuiltinAction) -> &'static str {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use crate::adapter::tool_host::test_support::test_runtime;
 
-    struct EnvVarGuard {
-        _lock: MutexGuard<'static, ()>,
-        name: &'static str,
-        previous: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set(name: &'static str, value: &str) -> Self {
-            static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-            let lock = LOCK
-                .get_or_init(|| Mutex::new(()))
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let previous = std::env::var(name).ok();
-            // SAFETY: this test guard serializes environment mutation and restores on drop.
-            unsafe {
-                std::env::set_var(name, value);
-            }
-            Self {
-                _lock: lock,
-                name,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            // SAFETY: the guard holds the serialization lock for the full mutation window.
-            unsafe {
-                match &self.previous {
-                    Some(value) => std::env::set_var(self.name, value),
-                    None => std::env::remove_var(self.name),
-                }
-            }
-        }
+    /// Set one variable under the process-wide env guard shared by every
+    /// env-mutating test in this binary; restored on drop.
+    fn env_var(name: &'static str, value: &str) -> orbit_common::test_env::ScopedEnv {
+        orbit_common::test_env::scoped([(name, Some(value))])
     }
 
     #[test]
@@ -845,7 +812,7 @@ mod tests {
     #[test]
     fn dispatch_preserves_common_word_github_token_in_task_description() {
         let word = "user";
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", word);
+        let _env = env_var("GITHUB_TOKEN", word);
         let (_root, runtime, _repo_root) = test_runtime();
         let description = format!("No {word}-facing CLI behavior should change.");
 
@@ -873,7 +840,7 @@ mod tests {
     #[test]
     fn dispatch_redacts_live_github_token_before_task_persistence_and_audits() {
         let token = "orbit-redaction-secret-value";
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
+        let _env = env_var("GITHUB_TOKEN", token);
         let (_root, runtime, _repo_root) = test_runtime();
 
         let output = runtime
@@ -1031,7 +998,7 @@ mod tests {
     #[test]
     fn friction_body_update_is_sanitized_but_tags_are_verbatim() {
         let token = "orbit-friction-secret-value";
-        let _env = EnvVarGuard::set("GITHUB_TOKEN", token);
+        let _env = env_var("GITHUB_TOKEN", token);
         let (_root, runtime, _repo_root) = test_runtime();
         let tag = "sk-abcdefghijklmnopqrstuvwx";
         let frictions_root = runtime.data_root().join("frictions");

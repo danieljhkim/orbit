@@ -1,7 +1,5 @@
 //! Sibling tests for `crew.rs` (migrated per ORB-00246 / docs/design-patterns/test_layout.md).
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
-
 use chrono::Utc;
 use orbit_engine::RuntimeHost;
 use orbit_store::maintenance::task_registry::{TaskRegistryStore, task_registry_path};
@@ -14,15 +12,6 @@ use crate::OrbitRuntime;
 use crate::application::task::TaskAddParams;
 
 const CONSTELLATION_DEFAULT_PROVIDER_ENV: &str = "CONSTELLATION_DEFAULT_PROVIDER";
-
-/// Serialize the process-wide `CONSTELLATION_DEFAULT_PROVIDER` mutations so the
-/// env-default test cannot race concurrent tests.
-fn env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn runtime_with_named_crews() -> (TempDir, OrbitRuntime) {
     let root = tempdir().expect("create temp root");
@@ -418,22 +407,15 @@ fn select_crew_name_precedence_and_environment_default() {
 /// the env tier, a leaked value cannot affect concurrent tests.
 #[test]
 fn resolve_crew_for_task_reads_env_default_but_workspace_crew_wins() {
-    let _lock = env_lock();
-    let saved = std::env::var(CONSTELLATION_DEFAULT_PROVIDER_ENV).ok();
-    // SAFETY: serialized by env_lock(); restored before we assert or return.
-    unsafe { std::env::set_var(CONSTELLATION_DEFAULT_PROVIDER_ENV, "claude") };
+    // The process-wide guard every env-mutating test in this binary shares.
+    // A module-local lock only serialized this test against its siblings; a
+    // workspace init running elsewhere read the leaked `claude` and tried to
+    // resolve it as a crew.
+    let _env =
+        orbit_common::test_env::scoped([(CONSTELLATION_DEFAULT_PROVIDER_ENV, Some("claude"))]);
 
     let (_root, runtime) = runtime_with_named_crews();
     let resolved = runtime.resolve_crew_for_task(None, None);
-
-    // Restore the prior environment before asserting so a failure never leaks.
-    // SAFETY: same serialization lock still held.
-    unsafe {
-        match saved {
-            Some(value) => std::env::set_var(CONSTELLATION_DEFAULT_PROVIDER_ENV, value),
-            None => std::env::remove_var(CONSTELLATION_DEFAULT_PROVIDER_ENV),
-        }
-    }
 
     let crew = resolved.expect("resolve crew");
     // `[workflow].default_crew = "primary"` (workspace tier) beats the env tier.
