@@ -196,6 +196,48 @@ fn dry_run_and_yes_share_eligibility_but_only_yes_removes() {
     assert!(applied.reports[0].bytes_reclaimed > 0);
 }
 
+/// A branch that cannot be deleted must not turn a completed removal into an
+/// error: the directory is gone, its bytes are reclaimed, and the pass keeps
+/// going. The report says the branch stayed behind.
+#[test]
+fn removed_worktree_with_an_undeletable_branch_is_reported_not_failed() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    init_repo(&repo);
+    let run = pipeline_run("jrun-locked", JobRunState::Success, &["ORB-LOCKED"]);
+    let worktree = resolved_task_worktree(&repo, &run);
+    add_worktree(&repo, &worktree, "orbit/locked");
+    let host = FakeTaskHost::new(vec![task_fixture("ORB-LOCKED", TaskStatus::Done)]);
+    // A stale ref lock makes `git branch -D` fail while the worktree itself
+    // removes cleanly.
+    let lock = repo
+        .join(".git")
+        .join("refs")
+        .join("heads")
+        .join("orbit")
+        .join("locked.lock");
+    fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    fs::write(&lock, b"").unwrap();
+
+    let applied = collect_worktrees(
+        &repo,
+        &[run],
+        &host,
+        &WorktreeGcOptions {
+            delete: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(!worktree.exists());
+    assert_eq!(applied.reports[0].action, "removed:branch_retained");
+    assert!(applied.reports[0].bytes_reclaimed > 0);
+    assert!(
+        git(&repo, &["branch", "--list", "orbit/locked"]).contains("orbit/locked"),
+        "the branch stays until the lock is cleared"
+    );
+}
+
 #[test]
 fn colliding_sanitized_run_ids_are_ambiguous_and_never_removed() {
     let temp = tempdir().unwrap();
