@@ -320,6 +320,37 @@ fn gpt_5_6_rates_change_at_the_exclusive_july_30_boundary_without_overlap() {
     }
 }
 
+/// Gemini's `promptTokenCount` is the total effective prompt including the
+/// cached content (ai.google.dev/api/generate-content, UsageMetadata), so the
+/// cached share must come out of the input bucket before the input rate
+/// applies; the old exclusive rows billed it twice.
+#[test]
+fn gemini_prompt_total_is_gross_of_cached_content() {
+    let at = dt("2026-08-14T00:00:00Z");
+    let usage = TokenUsage {
+        input: 100_000,
+        cache_read: 90_000,
+        output: 1_000,
+        ..TokenUsage::default()
+    };
+    // gemini-3.7-flash introductory: 10k uncached @ 0.75 + 90k cached @ 0.075
+    // + 1k output @ 3.75 = 0.0075 + 0.00675 + 0.00375 = 0.018.
+    let cost = derive_cost_usd("gemini-3.7-flash", at, &usage).expect("priced");
+    assert!((cost - 0.018).abs() < 1e-9, "cost was {cost}");
+    let normalized = normalize_token_usage("gemini-3.7-flash", at, &usage).expect("normalized");
+    assert_eq!(normalized.input, 10_000);
+    assert_eq!(normalized.cache_read, 90_000);
+    for model in ["gemini-3.5-flash", "gemini-3.7-flash"] {
+        for row in covering_rows(model, at) {
+            assert_eq!(
+                row.input_token_basis,
+                InputTokenBasis::GrossIncludesCache,
+                "{model}"
+            );
+        }
+    }
+}
+
 #[test]
 fn gross_openai_input_is_split_into_uncached_read_and_write_buckets() {
     let at = dt("2026-07-30T00:00:00Z");

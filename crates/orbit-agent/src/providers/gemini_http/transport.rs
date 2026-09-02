@@ -270,7 +270,10 @@ impl LoopTransport for GeminiHttpTransport {
 
         let usage = TurnUsage {
             input_tokens: parsed.usage_metadata.prompt_token_count,
-            output_tokens: parsed.usage_metadata.candidates_token_count,
+            output_tokens: parsed
+                .usage_metadata
+                .candidates_token_count
+                .saturating_add(parsed.usage_metadata.thoughts_token_count),
             cache_read_input_tokens: parsed.usage_metadata.cached_content_token_count,
             cache_creation_input_tokens: 0,
         };

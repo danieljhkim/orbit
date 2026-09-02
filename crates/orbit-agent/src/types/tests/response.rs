@@ -404,6 +404,34 @@ mod sum {
 
     use super::super::super::response::usage::*;
 
+    /// Gemini's `usageMetadata` reports reasoning beside the candidates;
+    /// `totalTokenCount` is prompt + thoughts + candidates, so both count as
+    /// output, and `promptTokenCount` stays the gross prompt total that the
+    /// price table's gross basis later splits.
+    #[test]
+    fn gemini_usage_metadata_counts_thoughts_as_output() {
+        let documents = vec![json!({
+            "usageMetadata": {
+                "promptTokenCount": 100_000,
+                "cachedContentTokenCount": 90_000,
+                "candidatesTokenCount": 800,
+                "thoughtsTokenCount": 4_200,
+                "totalTokenCount": 105_000
+            }
+        })];
+
+        assert_eq!(
+            sum_usage(&documents),
+            TokenUsage {
+                input: 100_000,
+                cache_read: 90_000,
+                cache_create: 0,
+                cache_create_1h: 0,
+                output: 5_000,
+            }
+        );
+    }
+
     #[test]
     fn claude_cli_cache_creation_ttl_split_maps_each_ttl() {
         let documents = vec![json!({
