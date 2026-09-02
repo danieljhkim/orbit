@@ -1250,6 +1250,16 @@ fn apply_audit_self_reported_actor(conn: &Connection) -> Result<(), OrbitError> 
     .map_err(|error| OrbitError::Store(error.to_string()))
 }
 
+/// v18 `audit_actor_alias_v2` migration: the alias map moved `fable` from a
+/// shorthand entry to a family rule, so versioned Fable labels (`fable-5.1`)
+/// now resolve to `claude` instead of an unrecognized family. Re-derive every
+/// row stamped with the previous map; rows already at the current version are
+/// untouched, and `role` is never rewritten.
+fn apply_audit_actor_alias_v2(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_audit_events_schema(conn)?;
+    backfill_audit_actor_identity(conn)
+}
+
 /// Derive the actor columns for every row whose stamped alias version is not
 /// the current one.
 ///

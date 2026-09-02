@@ -456,3 +456,36 @@ fn audit_actor_backfill_is_idempotent() {
     assert_eq!(kind, "agent");
     assert_eq!(id, "claude");
 }
+
+/// Alias map v2 (migration v18) promoted `fable` to a family rule. A row the
+/// v1 map stamped as an unrecognized-family agent must be re-derived under
+/// the current map, while `role` stays byte-identical.
+#[test]
+fn audit_actor_alias_v2_rederives_rows_stamped_under_the_old_map() {
+    let conn = Connection::open_in_memory().expect("open in-memory connection");
+    apply_schema(&conn).expect("apply schema");
+    conn.execute(
+        "INSERT INTO audit_events(
+            execution_id, timestamp, command, role, status, exit_code,
+            duration_ms, working_directory, pid, actor_kind, actor_id,
+            actor_family, actor_model, actor_alias_version
+        ) VALUES ('exec-1', '2026-08-28T00:00:00Z', 'tool', 'fable-5.1', 'success', 0, 1,
+                  '/tmp', 1, 'agent', 'fable-5.1', NULL, 'fable-5.1', 1)",
+        [],
+    )
+    .expect("insert v1-stamped row");
+
+    super::super::apply_audit_actor_alias_v2(&conn).expect("re-derive under v2");
+
+    let (role, id, family, version): (String, String, String, u32) = conn
+        .query_row(
+            "SELECT role, actor_id, actor_family, actor_alias_version FROM audit_events",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read projection");
+    assert_eq!(role, "fable-5.1");
+    assert_eq!(id, "claude");
+    assert_eq!(family, "claude");
+    assert_eq!(version, orbit_types::telemetry::ACTOR_ALIAS_MAP_VERSION);
+}

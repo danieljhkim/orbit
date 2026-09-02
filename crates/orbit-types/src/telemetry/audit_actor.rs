@@ -42,7 +42,11 @@ use crate::identity::{agent_from_model, all_agent_families, provider_for_agent_f
 /// re-kinded label, a corrected family). Adding a model that an existing rule
 /// already resolves — any `claude-*` build, say — is not a map change and must
 /// not bump it.
-pub const ACTOR_ALIAS_MAP_VERSION: u32 = 1;
+///
+/// History: v2 moved `fable` from a shorthand alias to a family rule, so
+/// versioned Fable labels (`fable-5.1`) resolve to `claude` instead of an
+/// unrecognized family.
+pub const ACTOR_ALIAS_MAP_VERSION: u32 = 2;
 
 /// What kind of thing performed an audited invocation.
 ///
@@ -176,11 +180,7 @@ const NON_AGENT_ALIASES: &[(&str, ActorKind)] = &[
 /// not already cover.
 ///
 /// Editing this table is an alias-map change: bump [`ACTOR_ALIAS_MAP_VERSION`].
-const MODEL_SHORTHAND_ALIASES: &[(&str, &str)] = &[
-    // `orbit-common::model_defaults` ships `fable` as a bare Claude model name.
-    ("fable", "claude"),
-    ("haiku", "claude"),
-];
+const MODEL_SHORTHAND_ALIASES: &[(&str, &str)] = &[("haiku", "claude")];
 
 /// Resolve a recorded `audit_events.role` label into its canonical actor.
 ///

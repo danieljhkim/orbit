@@ -9,6 +9,9 @@ fn claude_cli_model_arg(model: &str) -> String {
     if let Some(version) = trimmed.strip_prefix("sonnet-") {
         return format!("claude-sonnet-{}", version.replace('.', "-"));
     }
+    if let Some(version) = trimmed.strip_prefix("fable-") {
+        return format!("claude-fable-{}", version.replace('.', "-"));
+    }
     trimmed.to_string()
 }
 

@@ -64,6 +64,13 @@ mod resolution {
             infer_agent_family_from_model("claude-opus-4-7").as_deref(),
             Some("claude")
         );
+        for fable in ["claude-fable-5-1", "fable", "fable-5.1"] {
+            assert_eq!(
+                infer_agent_family_from_model(fable).as_deref(),
+                Some("claude"),
+                "{fable}"
+            );
+        }
         assert_eq!(
             infer_agent_family_from_model("gpt-5.5").as_deref(),
             Some("codex")

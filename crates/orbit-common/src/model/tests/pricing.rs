@@ -155,6 +155,7 @@ fn every_fleet_model_string_is_priced() {
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001",
         "claude-fable-5",
+        "claude-fable-5-1",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -170,14 +171,73 @@ fn every_fleet_model_string_is_priced() {
         output: 1_000,
         ..TokenUsage::default()
     };
-    // 2026-08-13 (not 07-24): must be on/after grok-4.6's effective_from so
-    // its row is in range too, while still covering every other open-ended
-    // row (claude-opus-5 from 07-24, grok-4.5 from 08-12).
-    let at = dt("2026-08-13T00:00:00Z");
+    // 2026-09-01: must be on/after the newest effective_from in the table
+    // (claude-fable-5-1) so its row is in range too, while still covering
+    // every other open-ended row (claude-opus-5 from 07-24, grok-4.5 from
+    // 08-12, grok-4.6 from 08-13).
+    let at = dt("2026-09-01T00:00:00Z");
     for model in FLEET_MODELS {
         assert!(
             derive_cost_usd(model, at, &usage).is_some(),
             "fleet model {model} has no covering price row in model_prices.yaml"
+        );
+    }
+}
+
+#[test]
+fn fable_5_1_cache_reads_bill_at_a_fortieth_of_input() {
+    // Official rates from platform.claude.com/docs/en/models/fable-5-1/overview
+    // (released 2026-09-01): $10 input, $0.25 cache read (0.025x, not the
+    // 0.1x every other Claude row uses), $12.50 5m write, $20 1h write, $50
+    // output. 1M of each split → 10 + 0.25 + 12.5 + 20 + 50 = 92.75.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        cache_read: 1_000_000,
+        cache_create: 1_000_000,
+        cache_create_1h: 1_000_000,
+        output: 1_000_000,
+    };
+    let at = dt("2026-09-01T00:00:00Z");
+    let cost = derive_cost_usd("claude-fable-5-1", at, &usage)
+        .expect("claude-fable-5-1 is priced in the shipped table");
+    assert!((cost - 92.75).abs() < 1e-9, "cost was {cost}");
+
+    // Fable 5 keeps its own 0.1x cache-read rate; the 5.1 row must not shadow it.
+    let cache_only = TokenUsage {
+        cache_read: 1_000_000,
+        ..TokenUsage::default()
+    };
+    let legacy = derive_cost_usd("claude-fable-5", at, &cache_only).expect("priced");
+    assert!(
+        (legacy - 1.0).abs() < f64::EPSILON,
+        "fable-5 cache read was {legacy}"
+    );
+    assert!(
+        derive_cost_usd("claude-fable-5-1", dt("2026-08-31T23:59:59Z"), &usage).is_none(),
+        "no fable-5-1 row before its release"
+    );
+}
+
+#[test]
+fn sonnet_5_introductory_rate_became_the_standard_rate() {
+    // The 3/15 rise scheduled for 2026-09-01 was cancelled before it took
+    // effect; 2/10 is the one open-ended rate on both sides of that date.
+    let usage = TokenUsage {
+        input: 1_000_000,
+        output: 1_000_000,
+        ..TokenUsage::default()
+    };
+    for at in [
+        "2026-08-31T23:59:59Z",
+        "2026-09-01T00:00:00Z",
+        "2027-01-01T00:00:00Z",
+    ] {
+        let rows = covering_rows("claude-sonnet-5", dt(at));
+        assert_eq!(rows.len(), 1, "exactly one sonnet-5 row covers {at}");
+        let cost = derive_cost_usd("claude-sonnet-5", dt(at), &usage).expect("priced");
+        assert!(
+            (cost - 12.0).abs() < f64::EPSILON,
+            "cost at {at} was {cost}"
         );
     }
 }

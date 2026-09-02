@@ -136,12 +136,19 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "audit_self_reported_actor",
         apply: super::apply_audit_self_reported_actor,
     },
+    // Alias map v2: `fable` became a family rule so versioned Fable labels
+    // resolve to `claude`. Rows stamped with the old map are re-derived.
+    Migration {
+        version: 18,
+        name: "audit_actor_alias_v2",
+        apply: super::apply_audit_actor_alias_v2,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 17;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 18;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 
