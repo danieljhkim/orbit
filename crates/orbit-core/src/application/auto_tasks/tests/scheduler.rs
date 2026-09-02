@@ -7,9 +7,9 @@ use orbit_types::workflow::{AutoTaskSchedule, auto_task_tag};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
+use crate::application::auto_tasks::cursor_state_path;
+use crate::application::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 use crate::application::task::TaskUpdateParams;
-use crate::auto_tasks::cursor_state_path;
-use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 
 use super::interval_params;
 

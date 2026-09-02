@@ -9,8 +9,8 @@ use orbit_types::workflow::{DedupePolicy, auto_task_tag};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
-use crate::auto_tasks::state::cursor_state_path;
+use crate::application::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
+use crate::application::auto_tasks::state::cursor_state_path;
 
 use super::interval_params;
 

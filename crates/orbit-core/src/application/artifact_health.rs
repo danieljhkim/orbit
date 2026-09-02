@@ -49,7 +49,7 @@ pub use super::activity_catalog_health::{
 };
 
 use crate::OrbitRuntime;
-use crate::auto_tasks::{auto_tasks_dir, collect_auto_tasks};
+use crate::application::auto_tasks::{auto_tasks_dir, collect_auto_tasks};
 
 use super::job::catalog::DEFAULT_JOB_FILES;
 use super::skill::{DEFAULT_SKILL_FILES, inject_skill_template_tokens};
@@ -57,8 +57,8 @@ use super::{
     MANAGED_ASSET_MANIFEST_FILE, ManagedAssetLayout, load_managed_asset_manifest,
     preserve_modified_retired_asset, sha256_hex,
 };
+use crate::application::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 use crate::application::routine::DEFAULT_ROUTINE_FILES;
-use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 use crate::bootstrap::activity::DEFAULT_ACTIVITY_FILES;
 
 /// The five definition-artifact kinds Orbit ships defaults for.

@@ -9,7 +9,7 @@ doc_role: design
 type: design
 summary: Proposed contract for routine definitions, sweep dispatch, host-local state, and OS clock integration.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/application/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
 related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10800, ORB-10986, ORB-11082]
 ---
@@ -201,7 +201,7 @@ The implementation boundary is vertical: `crates/orbit-cmd/src/registry_routines
 `host.toml` and `workspaces.json` through `orbit-registry`, validates local checkout paths,
 and constructs registered runtimes through `registry_runtime`. It projects those inputs
 through `RoutinePlacementProvider` and `RoutineWorkspaceProvider` into
-`crates/orbit-core/src/routines/`. Core owns the registry-neutral scheduler and does not
+`crates/orbit-core/src/application/routines/`. Core owns the registry-neutral scheduler and does not
 read either registry file directly. There is no hub snapshot, satellite cache, fleet
 health, or remote placement service in the v1 path.
 

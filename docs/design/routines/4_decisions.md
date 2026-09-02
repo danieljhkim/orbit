@@ -9,7 +9,7 @@ doc_role: decisions
 type: design
 summary: Decision log for the routines scheduler, including default seeding and workspace-local shipment.
 tags: [routines, scheduler]
-paths: ["crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
+paths: ["crates/orbit-core/src/application/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/**"]
 related_features: [routines, activity-job, host-registry]
 related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739, ORB-10986, ORB-11082]
 ---
@@ -23,7 +23,7 @@ related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-1
 ## The OS owns the clock: stateless orbit sweep under launchd/systemd, no resident daemon
 
 **Recorded:** 2026-07-04 21:14:40.327750Z · [ORB-10021]
-**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
+**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/application/routines/**`
 
 ### Context
 
@@ -42,7 +42,7 @@ launchd (`StartInterval` 60s) and a systemd timer (`OnActiveSec` plus `OnUnitAct
 ## Routine discovery via the workspace registry and a versioned [routines] role=source config key
 
 **Recorded:** 2026-07-04 21:14:40.332406Z · [ORB-10021]
-**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
+**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/application/routines/**`
 
 ### Context
 
@@ -61,7 +61,7 @@ Sweep enumerates `~/.orbit/workspaces.json` and collects `.orbit/routines/*.yaml
 ## Routine targets are catalog references only — no inline command payloads
 
 **Recorded:** 2026-07-04 21:14:40.329169Z · [ORB-10021]
-**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
+**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/application/routines/**`
 
 ### Context
 
@@ -80,7 +80,7 @@ The original sketch allowed a `run: {type: shell, command: ...}` payload for sma
 ## Routines pin hosts explicitly; no cross-host coordination in v1
 
 **Recorded:** 2026-07-04 21:14:40.332307Z · [ORB-10021]
-**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
+**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/application/routines/**`
 
 ### Context
 
@@ -99,7 +99,7 @@ Each routine carries a `hosts:` list matched against the host-local `host_id`; t
 ## Routine definitions are git-shared; scheduler state is host-local and never synced
 
 **Recorded:** 2026-07-04 21:14:40.331256Z · [ORB-10021]
-**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/routines/**`
+**Paths:** `docs/design/routines/**`, `crates/orbit-core/src/application/routines/**`
 
 ### Context
 
@@ -152,7 +152,7 @@ Seed a workspace-local ship-sweep routine targeting a shipped wrapper job. The w
 ## Host-local sweep clock configuration
 
 **Recorded:** 2026-08-11 03:29:01.559340Z · [ORB-10720]
-**Paths:** `crates/orbit-core/src/routines/**`, `crates/orbit-cli/src/command/routine/**`, `docs/design/routines/**`
+**Paths:** `crates/orbit-core/src/application/routines/**`, `crates/orbit-cli/src/command/routine/**`, `docs/design/routines/**`
 
 ### Context
 The OS sweep clock is shared host infrastructure but previously had a hard-coded minutely cadence and only native-manager controls. The alternatives were a workspace routine setting, which would make one workspace own host infrastructure, or a host-local configuration plus Orbit CLI controls.

@@ -46,13 +46,11 @@
 
 pub mod adapter;
 pub mod application;
-pub mod auto_tasks;
 pub mod bootstrap;
 pub mod composition;
 pub mod context;
 pub mod metrics;
 mod paths;
-pub mod routines;
 pub mod runtime;
 
 // Store metric/scoreboard projections consumed by the dashboard's JSON API.
@@ -81,7 +79,7 @@ pub use context::ActorIdentity;
 pub use runtime::workspace_catalog::{FederatedWorkspaceTarget, WorkspaceCatalog, WorkspaceScope};
 // Shared domain types (owned by orbit-common) that the CLI and dashboard
 // render or construct.
-pub use auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
+pub use application::auto_tasks::{AutoTaskAddParams, AutoTaskUpdateParams};
 pub use orbit_common::security::redaction::redact_sensitive_env_text;
 pub use orbit_common::{NotFoundKind, OrbitError};
 pub use orbit_store::{

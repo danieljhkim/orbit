@@ -11,8 +11,10 @@ use orbit_common::governance::authorization::{
     DASHBOARD_AUTO_TASK_MINT, DASHBOARD_AUTO_TASK_TOGGLE, OPERATOR_OVERRIDE_ENV,
 };
 use orbit_core::OrbitRuntime;
-use orbit_core::auto_tasks::{collect_auto_tasks, cursor_state_path, load_cursor_state};
-use orbit_core::routines::parse_cron;
+use orbit_core::application::auto_tasks::{
+    collect_auto_tasks, cursor_state_path, load_cursor_state,
+};
+use orbit_core::application::routines::parse_cron;
 use orbit_types::task::TaskStatus;
 use orbit_types::workflow::{
     AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, auto_task_tag,
@@ -351,7 +353,7 @@ fn list_json(
 fn definition_json(
     runtime: &OrbitRuntime,
     definition: &AutoTaskDefinition,
-    cursor: Option<&orbit_core::auto_tasks::AutoTaskCursor>,
+    cursor: Option<&orbit_core::application::auto_tasks::AutoTaskCursor>,
     now: DateTime<Utc>,
 ) -> Value {
     let minted = tagged_instances(runtime, &definition.name);
@@ -440,7 +442,7 @@ fn template_summary(template: &AutoTaskTemplate) -> String {
 
 fn next_evaluation(
     schedule: &AutoTaskSchedule,
-    cursor: Option<&orbit_core::auto_tasks::AutoTaskCursor>,
+    cursor: Option<&orbit_core::application::auto_tasks::AutoTaskCursor>,
     now: DateTime<Utc>,
 ) -> Option<String> {
     let cursor = cursor?;
@@ -461,7 +463,7 @@ fn next_evaluation(
 
 fn next_interval(
     every_minutes: u64,
-    cursor: &orbit_core::auto_tasks::AutoTaskCursor,
+    cursor: &orbit_core::application::auto_tasks::AutoTaskCursor,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
     if every_minutes == 0 {

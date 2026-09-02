@@ -10,7 +10,7 @@
 use crate::command::{Block, CommandOut, Payload};
 use clap::Args;
 use orbit_cmd::registry_routines::run_sweep;
-use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
+use orbit_core::application::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
 use serde_json::json;
 
 #[derive(Args)]
@@ -183,6 +183,8 @@ pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json:
     })
 }
 
-fn severity_label(severity: orbit_core::routines::RoutineDiagnosticSeverity) -> &'static str {
+fn severity_label(
+    severity: orbit_core::application::routines::RoutineDiagnosticSeverity,
+) -> &'static str {
     severity.as_str()
 }

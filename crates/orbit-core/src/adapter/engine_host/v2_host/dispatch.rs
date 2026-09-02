@@ -215,12 +215,12 @@ pub(crate) fn run_deterministic(
         // `.orbit/auto_tasks/`; catch-up collapses and `skip_if_open` dedupe
         // are enforced in the scheduler core.
         CoreDeterministicAction::RunAutoTaskScheduler => {
-            crate::auto_tasks::run_scheduler_action_json(runtime, input).map_err(|error| {
-                DispatchError::DeterministicActionFailed {
+            crate::application::auto_tasks::run_scheduler_action_json(runtime, input).map_err(
+                |error| DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),
-                }
-            })
+                },
+            )
         }
         // The admissible work for one drain iteration [ORB-10819]: the
         // conflict-free backlog leaves, plus one backlog epic root when no

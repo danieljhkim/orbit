@@ -686,11 +686,13 @@ fn sha256_hex(content: &[u8]) -> String {
 pub(crate) mod activity_catalog_health;
 pub mod artifact_health;
 pub mod audit_event;
+pub mod auto_tasks;
 pub(crate) mod docs;
 pub(crate) mod executor;
 pub mod gc;
 pub mod job;
 pub(crate) mod routine;
+pub mod routines;
 pub(crate) mod search;
 pub mod semantic;
 pub mod skill;

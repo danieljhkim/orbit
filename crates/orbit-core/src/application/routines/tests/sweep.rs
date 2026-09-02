@@ -18,12 +18,12 @@ use orbit_store::{RoutineFireIntentParams, RoutineFireState, Store};
 use orbit_types::workflow::{JobRunState, RoutineDefinition};
 
 use crate::application::job::RunOwnerLiveness;
-use crate::routines::loader::{DiscoveredWorkspaces, RoutineWorkspaceProvider};
-use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
-use crate::routines::sweep::{
+use crate::application::routines::loader::{DiscoveredWorkspaces, RoutineWorkspaceProvider};
+use crate::application::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
+use crate::application::routines::sweep::{
     RoutineDispatch, SweepOptions, run_sweep_at_with_providers, run_sweep_core,
 };
-use crate::routines::validation::{
+use crate::application::routines::validation::{
     RoutineHostIdentity, RoutinePlacementProjection, RoutinePlacementProvider,
 };
 
