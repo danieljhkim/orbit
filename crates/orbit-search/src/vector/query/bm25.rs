@@ -22,7 +22,7 @@ pub fn bm25_top_k(
         return Ok(Vec::new());
     }
 
-    let match_query = fts_phrase_quote(query);
+    let match_query = fts_terms_query(query);
     let conn = store.connection();
     let conn = conn
         .lock()
@@ -151,7 +151,17 @@ fn snippet_by_chunk_idx(
     })
 }
 
+/// Turn a free-text query into an FTS5 `MATCH` expression: every
+/// whitespace-separated term is quoted (so `-`, `*`, `NOT`, and the like are
+/// literal), and the terms are joined with FTS5's implicit AND. Quoting the
+/// whole query as one string would make it a *phrase* query, which only hits
+/// chunks where the words are adjacent — a multi-word search returned nothing
+/// from the lexical half of hybrid ranking.
 // widened for tests per ORB-00230 sibling layout; see test_layout.md
-pub(crate) fn fts_phrase_quote(query: &str) -> String {
-    format!("\"{}\"", query.trim().replace('"', "\"\""))
+pub(crate) fn fts_terms_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
