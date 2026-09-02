@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::context::RuntimeHost;
 
+use super::super::git::git_success;
 use super::cleanup::remove_worktree;
 use super::{WorktreeIdentity, resolve_shared_worktree_path};
 
@@ -251,10 +252,19 @@ fn classify_known<H: RuntimeHost + ?Sized>(
 
     // Deliberately no `--force`: a last-moment dirtying of the worktree makes
     // Git fail closed. Never replace this with raw recursive deletion.
-    let branch_to_delete = branch_exists(repo_root, &branch).then_some(branch.as_str());
-    remove_worktree(repo_root, path, branch_to_delete, false)?;
-    report.action = "removed".to_string();
+    remove_worktree(repo_root, path, None, false)?;
     report.bytes_reclaimed = estimated_bytes;
+    // The directory is gone and its bytes are reclaimed either way; a branch
+    // that cannot be deleted right now (ref lock, checked out elsewhere) is
+    // reported rather than turning the whole pass into an error that hides
+    // this removal and stops the paths after it.
+    report.action = if branch_exists(repo_root, &branch)
+        && git_success(repo_root, &["branch", "-D", &branch]).is_err()
+    {
+        "removed:branch_retained".to_string()
+    } else {
+        "removed".to_string()
+    };
     Ok(report)
 }
 

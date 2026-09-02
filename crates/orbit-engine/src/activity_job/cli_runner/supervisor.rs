@@ -276,7 +276,13 @@ pub(super) fn spawn_with_timeout(
         }
     }
 
-    let reader_join_deadline = timed_out.then(|| Instant::now() + OUTPUT_READER_JOIN_TIMEOUT);
+    // The join is bounded on every exit path, not only after a timeout. A
+    // reader returns when the last writer closes the pipe, and a helper the
+    // agent left in its own session (`setsid`) keeps the write end open after
+    // the child itself exits and after the group kill above. An unbounded
+    // join there never returns, no finish event is emitted, and the run's
+    // reservation is never released.
+    let reader_join_deadline = Instant::now() + OUTPUT_READER_JOIN_TIMEOUT;
     if let Some(h) = stdout_reader {
         join_output_reader(h, reader_join_deadline);
     }
@@ -376,21 +382,16 @@ where
     OutputReaderHandle { finished, join }
 }
 
-fn join_output_reader(reader: OutputReaderHandle, deadline: Option<Instant>) {
+fn join_output_reader(reader: OutputReaderHandle, deadline: Instant) {
     let OutputReaderHandle { finished, join } = reader;
-    match deadline {
-        Some(deadline) => {
-            let timeout = deadline.saturating_duration_since(Instant::now());
-            match finished.recv_timeout(timeout) {
-                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let _ = join.join();
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-        }
-        None => {
+    let timeout = deadline.saturating_duration_since(Instant::now());
+    match finished.recv_timeout(timeout) {
+        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
             let _ = join.join();
         }
+        // The reader is still blocked on a pipe some escaped process holds;
+        // the captured bytes so far are what the run gets.
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
     }
 }
 
