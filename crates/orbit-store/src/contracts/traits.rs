@@ -175,6 +175,14 @@ pub trait FrictionStoreBackend: Send + Sync {
         task_id: &str,
         resolved_at: DateTime<Utc>,
     ) -> Result<StoredFrictionRecord, OrbitError>;
+    /// Resolve as a task-completion side effect: an already-resolved record
+    /// is returned untouched, and `Ok(None)` means the record does not exist.
+    fn auto_resolve_by_task(
+        &self,
+        id: &str,
+        task_id: &str,
+        resolved_at: DateTime<Utc>,
+    ) -> Result<Option<StoredFrictionRecord>, OrbitError>;
     fn tags(&self) -> Result<Vec<String>, OrbitError>;
     fn reported_by_model(
         &self,

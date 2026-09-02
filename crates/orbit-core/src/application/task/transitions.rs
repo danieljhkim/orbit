@@ -176,19 +176,11 @@ impl OrbitRuntime {
             if !is_valid_friction_id(target) {
                 continue;
             }
-            match frictions.show(target) {
-                Ok(Some(_)) => match frictions.resolve_by_task(target, &task.id, Utc::now()) {
-                    Ok(_) => events.push(OrbitEvent::FrictionAutoResolved {
-                        task_id: task.id.clone(),
-                        friction_id: target.to_string(),
-                    }),
-                    Err(error) => events.push(OrbitEvent::TaskRelationSideEffectFailed {
-                        task_id: task.id.clone(),
-                        target: target.to_string(),
-                        relation: RELATION_RESOLVES.to_string(),
-                        reason: error.to_string(),
-                    }),
-                },
+            match frictions.auto_resolve_by_task(target, &task.id, Utc::now()) {
+                Ok(Some(_)) => events.push(OrbitEvent::FrictionAutoResolved {
+                    task_id: task.id.clone(),
+                    friction_id: target.to_string(),
+                }),
                 Ok(None) => events.push(OrbitEvent::TaskRelationDangling {
                     task_id: task.id.clone(),
                     target: target.to_string(),

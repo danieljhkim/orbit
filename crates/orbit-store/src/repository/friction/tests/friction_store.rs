@@ -349,6 +349,17 @@ fn resolution_records_the_resolving_task_and_reopening_clears_it() {
         Some("ORB-00042")
     );
 
+    // A later resolution against a different task replaces the first one;
+    // the original resolution instant is kept.
+    let re_resolved = frictions
+        .resolve_by_task(&stored.record.id, "ORB-00043", at(2, 12))
+        .expect("re-resolve by another task");
+    assert_eq!(
+        re_resolved.record.resolved_by_task.as_deref(),
+        Some("ORB-00043")
+    );
+    assert_eq!(re_resolved.record.resolved_at, Some(at(2, 0)));
+
     let reopened = frictions
         .update(
             &stored.record.id,
@@ -370,6 +381,38 @@ fn resolution_records_the_resolving_task_and_reopening_clears_it() {
         .expect("resolve");
     assert_eq!(plain.record.resolved_at, Some(at(4, 0)));
     assert_eq!(plain.record.resolved_by_task, None);
+}
+
+/// Task completion claims a resolution only when nobody has resolved the
+/// record yet; an explicit `resolve_by_task` still replaces the task.
+#[test]
+fn auto_resolution_yields_to_an_existing_resolution() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let frictions = friction_store(temp.path(), "ws_one");
+    let stored = frictions
+        .add(add_params(TEST_CODEX_MODEL, at(1, 0), &["tooling"]))
+        .expect("seed record");
+
+    let first = frictions
+        .auto_resolve_by_task(&stored.record.id, "ORB-00001", at(2, 0))
+        .expect("auto-resolve open record")
+        .expect("record exists");
+    assert_eq!(first.record.status, FrictionStatus::Resolved);
+    assert_eq!(first.record.resolved_by_task.as_deref(), Some("ORB-00001"));
+
+    let second = frictions
+        .auto_resolve_by_task(&stored.record.id, "ORB-00002", at(3, 0))
+        .expect("auto-resolve resolved record")
+        .expect("record exists");
+    assert_eq!(second.record.resolved_by_task.as_deref(), Some("ORB-00001"));
+    assert_eq!(second.record.resolved_at, Some(at(2, 0)));
+
+    assert!(
+        frictions
+            .auto_resolve_by_task("F2026-01-999", "ORB-00003", at(3, 0))
+            .expect("missing record is not an error")
+            .is_none()
+    );
 }
 
 /// The taxonomy stayed a file; record persistence moving does not move it.

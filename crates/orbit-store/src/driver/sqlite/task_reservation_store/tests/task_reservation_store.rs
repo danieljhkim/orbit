@@ -274,3 +274,25 @@ fn task_reservation_owned_conflict_limit_applies_after_overlap_filter() {
         Some("jrun-target")
     );
 }
+
+/// Two reservations minted back to back must never share a primary key,
+/// even when the clock does not advance between them.
+#[test]
+fn reservation_ids_are_unique_within_a_clock_tick() {
+    let ids: std::collections::BTreeSet<String> =
+        (0..1_000).map(|_| unique_row_id("reservation-")).collect();
+    assert_eq!(ids.len(), 1_000);
+    assert!(ids.iter().all(|id| id.starts_with("reservation-")));
+
+    let store = Store::open_in_memory().expect("open store");
+    let first = store
+        .reserve_task_reservation(&reserve_params("file:src/a.rs"))
+        .expect("reserve a");
+    let mut second_params = reserve_params("file:src/b.rs");
+    second_params.task_ids = vec!["T2".to_string()];
+    let second = store
+        .reserve_task_reservation(&second_params)
+        .expect("reserve b");
+    assert!(first.reserved && second.reserved);
+    assert_ne!(first.reservation_id, second.reservation_id);
+}

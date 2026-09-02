@@ -62,13 +62,7 @@ impl Store {
                 });
             }
 
-            let claim_id = format!(
-                "{CLAIM_ID_PREFIX}{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_nanos())
-                    .unwrap_or(0)
-            );
+            let claim_id = super::unique_row_id(CLAIM_ID_PREFIX);
             let claim_token = mint_claim_token();
             let expires_at =
                 (Utc::now() + Duration::seconds(params.ttl_seconds as i64)).to_rfc3339();

@@ -184,14 +184,12 @@ impl FrictionStore {
                         }
                     };
                 }
+                // Unlike `resolved_at`, which keeps the first resolution
+                // instant, the resolving task is whatever the caller names:
+                // re-resolving against a corrected task must not silently
+                // keep the wrong one.
                 if let Some(resolved_by_task) = params.resolved_by_task.clone() {
-                    stored.record.resolved_by_task = Some(
-                        stored
-                            .record
-                            .resolved_by_task
-                            .clone()
-                            .unwrap_or(resolved_by_task),
-                    );
+                    stored.record.resolved_by_task = Some(resolved_by_task);
                 }
                 queries::upsert_record(
                     conn,
@@ -244,6 +242,25 @@ impl FrictionStore {
                 updated_at: resolved_at,
             },
         )
+    }
+
+    /// Resolve `id` as a side effect of `task_id` completing, unless someone
+    /// already resolved it. A task's `resolves` relation is a claim, not an
+    /// override: an existing resolution (and the task it names) is kept and
+    /// returned untouched. `Ok(None)` means no such record exists locally.
+    pub fn auto_resolve_by_task(
+        &self,
+        id: &str,
+        task_id: &str,
+        resolved_at: DateTime<Utc>,
+    ) -> Result<Option<StoredFrictionRecord>, OrbitError> {
+        let Some(stored) = self.show(id)? else {
+            return Ok(None);
+        };
+        if stored.record.status == FrictionStatus::Resolved {
+            return Ok(Some(stored));
+        }
+        self.resolve_by_task(id, task_id, resolved_at).map(Some)
     }
 
     pub fn tags(&self) -> Result<Vec<String>, OrbitError> {
@@ -401,6 +418,15 @@ impl crate::contracts::FrictionStoreBackend for FrictionStore {
         resolved_at: DateTime<Utc>,
     ) -> Result<StoredFrictionRecord, OrbitError> {
         Self::resolve_by_task(self, id, task_id, resolved_at)
+    }
+
+    fn auto_resolve_by_task(
+        &self,
+        id: &str,
+        task_id: &str,
+        resolved_at: DateTime<Utc>,
+    ) -> Result<Option<StoredFrictionRecord>, OrbitError> {
+        Self::auto_resolve_by_task(self, id, task_id, resolved_at)
     }
 
     fn tags(&self) -> Result<Vec<String>, OrbitError> {
