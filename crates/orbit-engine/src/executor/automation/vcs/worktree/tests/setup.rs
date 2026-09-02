@@ -33,6 +33,33 @@ fn ensure_worktree_reattaches_existing_checkout_without_resetting_its_branch() {
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), epic_commit);
 }
 
+/// A checkout that is a git work tree but not one this repository registered
+/// is refused and left untouched: `clean -fd` must never run on it.
+#[test]
+fn ensure_worktree_refuses_to_clean_a_foreign_checkout_at_the_resolved_path() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let worktree = temp.path().join("worktree");
+    init_repo(&repo, "agent-main");
+    let base = commit_file(&repo, "base.txt", "v1");
+    // Someone else's repository lives exactly where this run's worktree would.
+    init_repo(&worktree, "main");
+    commit_file(&worktree, "theirs.txt", "tracked");
+    fs::write(worktree.join("scratch.txt"), "untracked work").unwrap();
+
+    let error = ensure_worktree(&repo, &worktree, &base, "orbit/test").unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("not a worktree of this repository"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch.txt")).unwrap(),
+        "untracked work"
+    );
+}
+
 #[test]
 fn ensure_worktree_reuses_orphan_branch_from_failed_attempt() {
     let temp = tempdir().unwrap();
