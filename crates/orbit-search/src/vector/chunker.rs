@@ -26,16 +26,19 @@ pub fn chunk_text(
     for paragraph in paragraphs {
         let paragraph_tokens = embedder.token_count(&paragraph)?;
         if paragraph_tokens > target_tokens {
+            // The over-long paragraph is split on its own; no overlap tail is
+            // carried into it, so the buffer and its counter reset together.
+            // (The counter used to keep the discarded tail's weight, which
+            // flushed the next paragraph early and embedded it twice.)
             if !current.is_empty() {
                 chunks.push(current.join("\n\n"));
-                current = overlap_tail(&current, embedder, overlap_tokens)?;
-                current_tokens = count_parts(&current, embedder)?;
+                current.clear();
+                current_tokens = 0;
             }
             for piece in split_long_paragraph(&paragraph, embedder, target_tokens, overlap_tokens)?
             {
                 chunks.push(piece);
             }
-            current.clear();
             continue;
         }
 
