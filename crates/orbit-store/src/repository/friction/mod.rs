@@ -244,6 +244,25 @@ impl FrictionStore {
         )
     }
 
+    /// Resolve `id` as a side effect of `task_id` completing, unless someone
+    /// already resolved it. A task's `resolves` relation is a claim, not an
+    /// override: an existing resolution (and the task it names) is kept and
+    /// returned untouched. `Ok(None)` means no such record exists locally.
+    pub fn auto_resolve_by_task(
+        &self,
+        id: &str,
+        task_id: &str,
+        resolved_at: DateTime<Utc>,
+    ) -> Result<Option<StoredFrictionRecord>, OrbitError> {
+        let Some(stored) = self.show(id)? else {
+            return Ok(None);
+        };
+        if stored.record.status == FrictionStatus::Resolved {
+            return Ok(Some(stored));
+        }
+        self.resolve_by_task(id, task_id, resolved_at).map(Some)
+    }
+
     pub fn tags(&self) -> Result<Vec<String>, OrbitError> {
         Ok(load_tag_taxonomy(&self.files_root)?.into_iter().collect())
     }
@@ -399,6 +418,15 @@ impl crate::contracts::FrictionStoreBackend for FrictionStore {
         resolved_at: DateTime<Utc>,
     ) -> Result<StoredFrictionRecord, OrbitError> {
         Self::resolve_by_task(self, id, task_id, resolved_at)
+    }
+
+    fn auto_resolve_by_task(
+        &self,
+        id: &str,
+        task_id: &str,
+        resolved_at: DateTime<Utc>,
+    ) -> Result<Option<StoredFrictionRecord>, OrbitError> {
+        Self::auto_resolve_by_task(self, id, task_id, resolved_at)
     }
 
     fn tags(&self) -> Result<Vec<String>, OrbitError> {
