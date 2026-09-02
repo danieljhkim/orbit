@@ -9,16 +9,30 @@
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use orbit_common::OrbitError;
 use orbit_types::tool::ToolSessionContext;
 use rmcp::ServiceExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::{McpHost, OrbitToolServer};
 
 /// Loopback port `orbit mcp listen` binds when no address is given.
 pub const DEFAULT_MCP_LISTEN_PORT: u16 = 7879;
+
+/// Sessions one listener serves at a time. Each accepted connection holds a
+/// server instance and an rmcp session until the peer closes, and the
+/// listener authenticates no one, so without a ceiling any process that can
+/// reach the socket can pin descriptors and memory until `accept` itself
+/// fails. Beyond the ceiling new connections wait for a slot rather than
+/// being refused, so a burst of legitimate clients degrades to queueing.
+pub const DEFAULT_MAX_MCP_SESSIONS: usize = 64;
+
+/// How long the accept loop pauses after a resource-exhaustion error before
+/// trying again, instead of spinning or giving up.
+const ACCEPT_EXHAUSTION_BACKOFF: Duration = Duration::from_millis(250);
 
 /// How far a listener is allowed to be reachable.
 ///
@@ -42,6 +56,7 @@ pub struct McpListener {
     listener: TcpListener,
     host: Arc<dyn McpHost>,
     trusted_context: ToolSessionContext,
+    sessions: Arc<Semaphore>,
 }
 
 impl McpListener {
@@ -64,6 +79,7 @@ impl McpListener {
             listener,
             host,
             trusted_context,
+            sessions: Arc::new(Semaphore::new(DEFAULT_MAX_MCP_SESSIONS)),
         })
     }
 
@@ -84,6 +100,13 @@ impl McpListener {
     /// workspace.
     pub async fn serve(self) -> Result<(), OrbitError> {
         loop {
+            // Take the slot before accepting so a full listener leaves the
+            // connection in the kernel backlog instead of holding an accepted
+            // socket it cannot serve yet.
+            let permit = Arc::clone(&self.sessions)
+                .acquire_owned()
+                .await
+                .map_err(|_| OrbitError::Execution("mcp listen session gate closed".to_string()))?;
             let (stream, peer) = match self.listener.accept().await {
                 Ok(accepted) => accepted,
                 // A connection that died between the SYN and our accept is the
@@ -91,6 +114,15 @@ impl McpListener {
                 // longer usable, and spinning on it would burn the accept loop.
                 Err(error) if is_transient_accept_error(&error) => {
                     tracing::warn!(error = %error, "mcp listener skipped a connection");
+                    continue;
+                }
+                // Out of descriptors (or memory): the sessions already being
+                // served will release some. Ending the listener here would
+                // take those healthy sessions' endpoint down with the burst.
+                Err(error) if is_resource_exhaustion(&error) => {
+                    tracing::warn!(error = %error, "mcp listener backing off after resource exhaustion");
+                    drop(permit);
+                    tokio::time::sleep(ACCEPT_EXHAUSTION_BACKOFF).await;
                     continue;
                 }
                 Err(error) => {
@@ -101,7 +133,7 @@ impl McpListener {
                 Arc::clone(&self.host),
                 self.session_context_for(peer),
             );
-            tokio::spawn(serve_connection(server, stream, peer));
+            tokio::spawn(serve_connection(server, stream, peer, permit));
         }
     }
 
@@ -133,7 +165,12 @@ fn ensure_bind_allowed(addr: SocketAddr, exposure: ListenerExposure) -> Result<(
     )))
 }
 
-async fn serve_connection(server: OrbitToolServer, stream: TcpStream, peer: SocketAddr) {
+async fn serve_connection(
+    server: OrbitToolServer,
+    stream: TcpStream,
+    peer: SocketAddr,
+    _permit: OwnedSemaphorePermit,
+) {
     let running = match server.serve(stream).await {
         Ok(running) => running,
         Err(error) => {
@@ -151,6 +188,25 @@ fn is_transient_accept_error(error: &std::io::Error) -> bool {
         error.kind(),
         ErrorKind::ConnectionAborted | ErrorKind::ConnectionReset | ErrorKind::Interrupted
     )
+}
+
+/// `accept` failed for want of a descriptor or memory rather than because the
+/// socket is gone: EMFILE / ENFILE (no stable `ErrorKind` on every platform,
+/// so the raw errno is matched on Unix) or an out-of-memory report.
+fn is_resource_exhaustion(error: &std::io::Error) -> bool {
+    if error.kind() == ErrorKind::OutOfMemory {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        // ENFILE (23) and EMFILE (24) share these values on Linux and macOS;
+        // matching the errno keeps this crate free of a libc edge.
+        matches!(error.raw_os_error(), Some(23 | 24))
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]
