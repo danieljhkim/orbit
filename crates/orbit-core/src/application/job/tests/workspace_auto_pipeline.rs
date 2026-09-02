@@ -277,14 +277,25 @@ fn workspace_auto_keeps_dispatching_while_earlier_leaves_are_still_running() {
         .iter()
         .map(|input| input["run_input"]["task_ids"].clone())
         .collect();
+    // The first iteration fills its two slots from parallel threads, so the
+    // order in which `ORB-FIRST` and `ORB-SECOND` reach the host is whichever
+    // thread wins; only the iteration boundary is a real ordering claim.
     assert_eq!(
-        dispatched,
-        vec![
-            json!(["ORB-FIRST"]),
-            json!(["ORB-SECOND"]),
-            json!(["ORB-LATER"]),
-        ],
-        "one child per leaf, and the second iteration dispatched without waiting"
+        dispatched.len(),
+        3,
+        "one child per leaf, and the second iteration dispatched without waiting: {dispatched:?}"
+    );
+    let mut first_iteration = dispatched[..2].to_vec();
+    first_iteration.sort_by_key(Value::to_string);
+    assert_eq!(
+        first_iteration,
+        vec![json!(["ORB-FIRST"]), json!(["ORB-SECOND"])],
+        "first iteration dispatched both leaves: {dispatched:?}"
+    );
+    assert_eq!(
+        dispatched[2],
+        json!(["ORB-LATER"]),
+        "second iteration dispatched while the first two children were still running"
     );
 
     // Detached, but not lost: every child is durably linked to the parent as
