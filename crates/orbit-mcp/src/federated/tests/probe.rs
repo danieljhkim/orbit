@@ -111,3 +111,36 @@ fn routed_delivery_does_not_inherit_an_exhausted_probe_budget() {
         "{error}"
     );
 }
+
+/// A destination that streams garbage as fast as the pipe allows. The reader
+/// queue applies backpressure instead of buffering the flood while the
+/// consumer decides, and the first non-JSON line ends the session promptly.
+#[cfg(unix)]
+#[test]
+fn a_flooding_destination_is_refused_without_buffering_the_flood() {
+    let child = Command::new("yes")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn a flooding destination");
+    let mut session = DestinationSession::start(
+        destination("orbit-owner", OWNER_MACHINE),
+        child,
+        Duration::from_secs(5),
+    )
+    .expect("start a session against the flooding destination");
+
+    let started = Instant::now();
+    let error = session
+        .handshake()
+        .expect_err("a stream of `y` lines is not an MCP answer");
+    assert!(
+        matches!(error, OrbitError::UnreachableDestination(_)),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the first bad line must end the session, not the deadline"
+    );
+}
