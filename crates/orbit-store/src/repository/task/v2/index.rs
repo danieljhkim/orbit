@@ -40,13 +40,29 @@ impl TaskV2Store {
         &self,
         filter: TaskIndexFilter,
     ) -> Result<Option<Vec<Task>>, OrbitError> {
+        let Some(bundles) = self.indexed_bundles(filter)? else {
+            return Ok(None);
+        };
+        bundles
+            .into_iter()
+            .map(|bundle| self.task_from_bundle(bundle))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+
+    /// The bundles behind an index query, in index order. `None` when the
+    /// index is not usable and the caller must scan bundles instead.
+    pub(super) fn indexed_bundles(
+        &self,
+        filter: TaskIndexFilter,
+    ) -> Result<Option<Vec<TaskBundleV2>>, OrbitError> {
         if !self.index_is_usable()? {
             return Ok(None);
         }
         let ids = self
             .registry
             .indexed_task_ids_filtered(&self.workspace_id, &filter)?;
-        self.tasks_from_ids(ids).map(Some)
+        self.bundles_from_ids(ids).map(Some)
     }
 
     /// Decide whether the generated index still matches the bundles on disk.
@@ -115,15 +131,15 @@ impl TaskV2Store {
     /// concurrent writer is publishing or removing. An id that disappears
     /// between the index query and the bundle read is a task that was deleted,
     /// not a listing failure.
-    fn tasks_from_ids(&self, ids: Vec<String>) -> Result<Vec<Task>, OrbitError> {
-        let mut tasks = Vec::with_capacity(ids.len());
+    fn bundles_from_ids(&self, ids: Vec<String>) -> Result<Vec<TaskBundleV2>, OrbitError> {
+        let mut bundles = Vec::with_capacity(ids.len());
         for id in ids {
             let Some(bundle) = self.bundle_store.read_bundle_if_settled(&id)? else {
                 continue;
             };
-            tasks.push(self.task_from_bundle(bundle)?);
+            bundles.push(bundle);
         }
-        Ok(tasks)
+        Ok(bundles)
     }
 
     pub(super) fn replace_index_best_effort(&self, envelope: &TaskEnvelopeV2, operation: &str) {
