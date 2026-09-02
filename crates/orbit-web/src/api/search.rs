@@ -36,9 +36,11 @@ fn parse_search_query(raw: Option<&str>) -> Result<GlobalSearchParams, String> {
                 params.kind = GlobalSearchKind::from_str(&value)?;
             }
             "limit" => {
-                params.limit = value.parse::<usize>().map_err(|_| {
+                let requested = value.parse::<usize>().map_err(|_| {
                     format!("invalid limit `{value}`; expected a non-negative integer")
                 })?;
+                // Same ceiling as every other list endpoint.
+                params.limit = super::bounded_limit(Some(requested), params.limit);
             }
             "tag" | "tags" => append_csv(&mut params.tags, &value),
             "all" => params.all = parse_bool("all", &value)?,
@@ -90,5 +92,11 @@ mod query_tests {
         assert_eq!(params.status, ["task:open"]);
         assert_eq!(params.path.as_deref(), Some("src/lib.rs"));
         assert_eq!(params.limit, 7);
+    }
+
+    #[test]
+    fn query_parser_caps_limit_like_every_other_list_endpoint() {
+        let params = parse_search_query(Some("q=a&limit=100000000")).expect("parse query");
+        assert_eq!(params.limit, super::super::HISTORY_MAX_LIMIT);
     }
 }

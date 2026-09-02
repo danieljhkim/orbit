@@ -57,6 +57,10 @@ pub struct AuditEventFilter {
     pub job_run_id: Option<String>,
     pub lease_id: Option<String>,
     pub limit: usize,
+    /// Rows to skip after ordering (newest first). Pushed into SQL so a
+    /// caller can page past the first `limit` rows without prefetching the
+    /// entire history in front of the page it wants.
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
