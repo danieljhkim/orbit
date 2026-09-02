@@ -118,7 +118,11 @@ pub fn infer_agent_family_from_model(model: &str) -> Option<String> {
     if model.starts_with("gpt-") || model.starts_with("o1") || model.starts_with("o3") {
         return Some("codex".to_string());
     }
-    if model.starts_with("claude-") || model.starts_with("opus") || model.starts_with("sonnet") {
+    if model.starts_with("claude-")
+        || model.starts_with("opus")
+        || model.starts_with("sonnet")
+        || model.starts_with("fable")
+    {
         return Some("claude".to_string());
     }
     if model.starts_with("gemini-") {

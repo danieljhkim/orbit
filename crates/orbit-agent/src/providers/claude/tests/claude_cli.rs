@@ -133,3 +133,24 @@ fn per_request_toggles_still_compose_with_the_schema_flag() {
         .expect("model flag");
     assert_eq!(args[model_index + 1], "claude-opus-5");
 }
+
+/// Crew configs write the short `<family>-<version>` form for every Claude
+/// tier; the transport expands each to the CLI's `claude-<family>-<version>`
+/// id, so the newest tier must not silently pass through unexpanded.
+#[test]
+fn short_model_forms_expand_to_claude_cli_ids_for_every_tier() {
+    for (short, expanded) in [
+        ("opus-5", "claude-opus-5"),
+        ("sonnet-4.6", "claude-sonnet-4-6"),
+        ("fable-5.1", "claude-fable-5-1"),
+        ("fable", "fable"),
+        ("claude-fable-5-1", "claude-fable-5-1"),
+    ] {
+        let args = ClaudeCliTransport::new(Some(short.to_string())).args(false);
+        let model_index = args
+            .iter()
+            .position(|arg| arg == "--model")
+            .expect("model flag");
+        assert_eq!(args[model_index + 1], expanded, "{short}");
+    }
+}

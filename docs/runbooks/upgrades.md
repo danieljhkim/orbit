@@ -55,7 +55,7 @@ $ orbit migrate --dry-run
 Pending migrations:
   layout v1 (baseline) — adopt the versioned .orbit/ layout (records the current shape; changes nothing)
   layout v2 (archive-friction-tasks) — rewrite removed friction statuses as archived
-  schema v1 (baseline) through schema v17 (audit_self_reported_actor)
+  schema v1 (baseline) through schema v18 (audit_actor_alias_v2)
 error: execution failed: 2 migration(s) pending; run `orbit migrate --confirm` to apply
 ```
 

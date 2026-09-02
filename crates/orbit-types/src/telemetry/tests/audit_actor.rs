@@ -10,6 +10,9 @@ fn agent_granularities_collapse_to_one_canonical_actor() {
         "sonnet",
         "claude-opus-5",
         "claude-sonnet-5",
+        "fable",
+        "fable-5.1",
+        "claude-fable-5-1",
     ] {
         let actor = canonical_actor_for_role_label(label);
         assert_eq!(actor.kind, ActorKind::Agent, "{label}");
