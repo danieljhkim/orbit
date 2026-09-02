@@ -207,3 +207,29 @@ fn exclusive_lock_re_enters_when_the_outer_call_creates_the_parent_under_a_symli
         .expect("nested locks must re-enter");
     assert_eq!(depth, 2);
 }
+
+/// A byte write that cannot be committed must not leave its staging file
+/// behind: temp names are never reused, so a leftover is never reclaimed.
+#[test]
+fn atomic_write_bytes_removes_its_temp_file_when_the_rename_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // A non-empty directory at the target path makes the final rename fail
+    // after the staging file has been fully written.
+    let target = dir.path().join("target");
+    std::fs::create_dir_all(target.join("occupied")).expect("occupy target");
+
+    let error =
+        super::super::io::atomic_write_bytes(&target, b"payload").expect_err("rename fails");
+    assert!(target.is_dir(), "{error}");
+
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "target")
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "staging files left behind: {leftovers:?}"
+    );
+}
