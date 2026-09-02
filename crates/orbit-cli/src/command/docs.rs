@@ -6,7 +6,7 @@ use orbit_core::{DocType, OrbitError, OrbitRuntime};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::command::{CommandOut, CommandOutput, Execute, Payload};
+use crate::command::{Block, CommandOut, CommandOutput, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "List, show, and curate the indexed docs corpus")]
@@ -144,60 +144,57 @@ impl Execute for DocsListArgs {
 impl Execute for DocsShowArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let shown = runtime.show_doc(&self.path)?;
+        let doc = docs_document(&shown)?;
         if self.json {
-            {
-                print_json(&shown)?;
-                Ok(CommandOutput::Silent)
-            }
-        } else {
-            println!("Path: {}", shown.path);
-            println!("Type: {}", shown.frontmatter.doc_type);
-            println!("Summary: {}", shown.frontmatter.summary);
-            if !shown.frontmatter.tags.is_empty() {
-                println!("Tags: {}", shown.frontmatter.tags.join(", "));
-            }
-            if !shown.frontmatter.paths.is_empty() {
-                println!("Paths: {}", shown.frontmatter.paths.join(", "));
-            }
-            if !shown.frontmatter.related_features.is_empty() {
-                println!(
-                    "Related Features: {}",
-                    shown.frontmatter.related_features.join(", ")
-                );
-            }
-            if !shown.frontmatter.related_artifacts.is_empty() {
-                println!(
-                    "Related Artifacts: {}",
-                    shown
-                        .frontmatter
-                        .related_artifacts
-                        .iter()
-                        .map(|artifact| artifact.as_str().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            println!("\n{}", shown.body);
-            Ok(CommandOutput::Silent)
+            return Ok(Payload::document(doc).into());
         }
+
+        let mut text = String::new();
+        text.push_str(&format!("Path: {}\n", shown.path));
+        text.push_str(&format!("Type: {}\n", shown.frontmatter.doc_type));
+        text.push_str(&format!("Summary: {}\n", shown.frontmatter.summary));
+        if !shown.frontmatter.tags.is_empty() {
+            text.push_str(&format!("Tags: {}\n", shown.frontmatter.tags.join(", ")));
+        }
+        if !shown.frontmatter.paths.is_empty() {
+            text.push_str(&format!("Paths: {}\n", shown.frontmatter.paths.join(", ")));
+        }
+        if !shown.frontmatter.related_features.is_empty() {
+            text.push_str(&format!(
+                "Related Features: {}\n",
+                shown.frontmatter.related_features.join(", ")
+            ));
+        }
+        if !shown.frontmatter.related_artifacts.is_empty() {
+            text.push_str(&format!(
+                "Related Artifacts: {}\n",
+                shown
+                    .frontmatter
+                    .related_artifacts
+                    .iter()
+                    .map(|artifact| artifact.as_str().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        text.push_str(&format!("\n{}", shown.body));
+        Ok(Payload::blocks(doc, vec![Block::text(text)]).into())
     }
 }
 
 impl Execute for DocsAddArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let outcome = runtime.add_docs_root(&self.path)?;
+        let doc = docs_document(&outcome)?;
         if self.json {
-            {
-                print_json(&outcome)?;
-                Ok(CommandOutput::Silent)
-            }
-        } else if outcome.added {
-            println!("Added docs root: {}", outcome.path);
-            Ok(CommandOutput::Silent)
-        } else {
-            println!("Docs root already registered: {}", outcome.path);
-            Ok(CommandOutput::Silent)
+            return Ok(Payload::document(doc).into());
         }
+        let line = if outcome.added {
+            format!("Added docs root: {}", outcome.path)
+        } else {
+            format!("Docs root already registered: {}", outcome.path)
+        };
+        Ok(Payload::blocks(doc, vec![Block::text(line)]).into())
     }
 }
 
@@ -245,32 +242,34 @@ fn print_docs_index_text(result: SemanticIndexResult) -> Result<(), OrbitError> 
 impl Execute for DocsMigrateArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let report = runtime.migrate_docs(!self.confirm)?;
+        let doc = docs_document(&report)?;
         if self.json {
-            {
-                print_json(&report)?;
-                Ok(CommandOutput::Silent)
-            }
-        } else if report.changed.is_empty() {
-            println!("No docs need migration.");
-            Ok(CommandOutput::Silent)
+            return Ok(Payload::document(doc).into());
+        }
+        let mut lines = Vec::new();
+        if report.changed.is_empty() {
+            lines.push("No docs need migration.".to_string());
         } else {
             for change in &report.changed {
-                println!("{}", change.diff);
+                lines.push(change.diff.clone());
             }
             if report.dry_run {
-                println!("{} doc(s) would be migrated.", report.changed.len());
+                lines.push(format!(
+                    "{} doc(s) would be migrated.",
+                    report.changed.len()
+                ));
             } else {
-                println!("Migrated {} doc(s).", report.changed.len());
+                lines.push(format!("Migrated {} doc(s).", report.changed.len()));
             }
-            Ok(CommandOutput::Silent)
         }
+        Ok(Payload::blocks(doc, vec![Block::text(lines.join("\n"))]).into())
     }
 }
 
-fn print_json<T: Serialize>(value: &T) -> Result<(), OrbitError> {
-    let value: Value = serde_json::to_value(value)
-        .map_err(|error| OrbitError::Execution(format!("serialize docs output: {error}")))?;
-    crate::output::json::print_pretty(&value)
+/// The `json`-mode document for a docs command result.
+fn docs_document<T: Serialize>(value: &T) -> Result<Value, OrbitError> {
+    serde_json::to_value(value)
+        .map_err(|error| OrbitError::Execution(format!("serialize docs output: {error}")))
 }
 
 /// The list's records, in the same shape `--json` has always emitted.
