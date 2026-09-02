@@ -12,8 +12,10 @@ use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::Value;
 use tower::ServiceExt;
 
+use orbit_types::workflow::JobRunState;
+
 use super::super::{HISTORY_MAX_LIMIT, router};
-use super::test_support::body_json;
+use super::test_support::{body_json, seed_run};
 
 fn seed_audit_event(
     runtime: &OrbitRuntime,
@@ -696,4 +698,35 @@ async fn audit_summary_separates_reliability_from_negative_and_diagnostic_popula
     assert_eq!(unexpected.len(), 1);
     assert_eq!(unexpected[0]["tool"], "orbit.search");
     assert_eq!(unexpected[0]["count"], 1);
+}
+
+/// The header tiles count runs with `COUNT(*)`, so a bad day does not read
+/// as exactly `HISTORY_MAX_LIMIT` failures once the real number passes it.
+#[tokio::test]
+async fn summary_failed_runs_counts_past_the_history_page_size() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let total = HISTORY_MAX_LIMIT + 50;
+    for index in 0..total {
+        seed_run(
+            &runtime,
+            &format!("jrun-failed-{index:04}"),
+            "task_pr_pipeline",
+            JobRunState::Failed,
+        );
+    }
+    seed_run(
+        &runtime,
+        "jrun-timeout",
+        "task_pr_pipeline",
+        JobRunState::Timeout,
+    );
+    seed_run(
+        &runtime,
+        "jrun-success",
+        "task_pr_pipeline",
+        JobRunState::Success,
+    );
+
+    let body = body_json(request_audit(runtime, "/audit/summary?since=24h").await).await;
+    assert_eq!(body["failed_runs"].as_u64(), Some((total + 1) as u64));
 }

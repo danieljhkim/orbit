@@ -1260,6 +1260,19 @@ fn apply_audit_actor_alias_v2(conn: &Connection) -> Result<(), OrbitError> {
     backfill_audit_actor_identity(conn)
 }
 
+/// v19 `job_runs_created_index`: cover the listing's per-workspace
+/// `ORDER BY created_at DESC, run_id ASC` so a bounded page stops scanning
+/// and sorting the whole workspace history.
+fn apply_job_runs_created_index(conn: &Connection) -> Result<(), OrbitError> {
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_job_runs_workspace_created
+            ON job_runs(workspace_id, created_at DESC, run_id ASC);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
 /// Derive the actor columns for every row whose stamped alias version is not
 /// the current one.
 ///

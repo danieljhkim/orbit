@@ -303,9 +303,15 @@ pub(super) async fn list_diagnostics_errors(
     Query(q): Query<DiagnosticsQuery>,
 ) -> Response {
     let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
-    match diagnostics_errors(&runtime, limit) {
+    // Reads up to 50k audit rows and a blob per agent invocation: blocking
+    // pool, not the worker serving the request (see `blocking`).
+    match super::blocking("diagnostics errors", move || {
+        diagnostics_errors(&runtime, limit)
+    })
+    .await
+    {
         Ok(rows) => Json(Value::Array(rows)).into_response(),
-        Err(e) => map_runtime_error(e),
+        Err(response) => *response,
     }
 }
 

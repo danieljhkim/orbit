@@ -143,12 +143,21 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "audit_actor_alias_v2",
         apply: super::apply_audit_actor_alias_v2,
     },
+    // The run listing orders by `created_at DESC, run_id` per workspace; the
+    // existing indexes cover `(workspace_id, job_id, scheduled_at)` and
+    // `(workspace_id, state)`, so every dashboard page scanned and sorted a
+    // workspace's whole run history.
+    Migration {
+        version: 19,
+        name: "job_runs_created_index",
+        apply: super::apply_job_runs_created_index,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 18;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 19;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

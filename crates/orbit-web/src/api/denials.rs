@@ -13,7 +13,7 @@ use orbit_types::workflow::activity_job::{
 };
 use serde_json::{Value, json};
 
-use super::{DEFAULT_SUMMARY_WINDOW, DenialsQuery, bad_request, map_runtime_error, server_error};
+use super::{DEFAULT_SUMMARY_WINDOW, DenialsQuery, bad_request, map_runtime_error};
 use crate::parse::parse_since;
 
 const SQLITE_DENIAL_SCAN_LIMIT: usize = 1000;
@@ -518,12 +518,29 @@ pub(super) async fn list_denials(Ws(runtime): Ws, Query(q): Query<DenialsQuery>)
         .profile
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let agent_filter = q.agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let agent_filter = q
+        .agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
 
-    let rows = match collect_denial_rows(&runtime, since, profile_filter, agent_filter) {
+    // One SQLite scan per denial event type plus a v2 loop scan: blocking
+    // pool, not the worker serving the request (see `blocking`).
+    let rows = match super::blocking("denials listing", move || {
+        collect_denial_rows(
+            &runtime,
+            since,
+            profile_filter.as_deref(),
+            agent_filter.as_deref(),
+        )
+    })
+    .await
+    {
         Ok(rows) => rows,
-        Err(e) => return server_error(e),
+        Err(response) => return *response,
     };
 
     Json(denials_payload(&rows, kind.as_deref(), since)).into_response()
