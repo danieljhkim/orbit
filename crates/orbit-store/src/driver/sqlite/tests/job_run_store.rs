@@ -46,6 +46,18 @@ fn run_with_steps(run_id: &str, state: JobRunState, created: DateTime<Utc>, step
     }
 }
 
+/// The run upsert persists the run row only; steps are written per step.
+fn insert_run_with_steps(store: &Store, workspace_id: &str, run: &JobRun) {
+    store
+        .upsert_job_run_for_workspace(workspace_id, run, None)
+        .expect("insert run");
+    for step in &run.steps {
+        store
+            .upsert_job_run_step_for_workspace(workspace_id, &run.run_id, step)
+            .expect("insert step");
+    }
+}
+
 /// Steps come back for every run on a page whatever its size: the page is
 /// hydrated with one query per id chunk, not one per run, so a long history
 /// must not lose or cross-wire any run's steps.
@@ -60,9 +72,7 @@ fn listing_hydrates_every_runs_steps_across_id_chunks() {
             at(index % 60),
             index % 4,
         );
-        store
-            .upsert_job_run_for_workspace("ws", &run, None)
-            .expect("insert run");
+        insert_run_with_steps(&store, "ws", &run);
     }
 
     let runs = store
@@ -92,9 +102,7 @@ fn count_and_durations_ignore_the_page_limit() {
             JobRunState::Running
         };
         let run = run_with_steps(&format!("jrun-{index:03}"), state, at(index), 1 + index % 2);
-        store
-            .upsert_job_run_for_workspace("ws", &run, None)
-            .expect("insert run");
+        insert_run_with_steps(&store, "ws", &run);
     }
     // Another workspace's rows must not leak into the count.
     let other = run_with_steps("jrun-other", JobRunState::Failed, at(5), 1);

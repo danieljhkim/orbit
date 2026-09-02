@@ -152,12 +152,21 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "job_runs_created_index",
         apply: super::apply_job_runs_created_index,
     },
+    // Every window filter (`ts >= ? AND ts < ?`) and the newest-first
+    // listing (`ORDER BY ts DESC, id DESC LIMIT n`) over `invocations` had
+    // only the job-run and activity indexes to work with, so each was a
+    // full scan plus a temp sort.
+    Migration {
+        version: 20,
+        name: "invocations_ts_index",
+        apply: super::apply_invocations_ts_index,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 19;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 20;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

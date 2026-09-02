@@ -395,3 +395,29 @@ fn hydration_spans_several_in_list_chunks_without_losing_linkage() {
         assert_eq!(record.tool_calls[0].tool_name, format!("tool-{index}"));
     }
 }
+
+/// The newest-first listing and the accounting window both order and filter
+/// on `ts`; after v20 the planner must satisfy them from the index rather
+/// than scanning and sorting the table.
+#[test]
+fn ts_ordered_reads_use_the_invocations_ts_index() {
+    let store = Store::open_in_memory().expect("open store");
+    let plan = store
+        .with_read_connection(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN SELECT id FROM invocations \
+                     WHERE ts >= '2026-01-01' AND ts < '2026-02-01' ORDER BY ts DESC, id DESC LIMIT 10",
+                )
+                .map_err(|e| orbit_common::OrbitError::Store(e.to_string()))?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(3))
+                .map_err(|e| orbit_common::OrbitError::Store(e.to_string()))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| orbit_common::OrbitError::Store(e.to_string()))
+        })
+        .expect("query plan");
+    let plan = plan.join("\n");
+    assert!(plan.contains("idx_invocations_ts"), "{plan}");
+    assert!(!plan.contains("USE TEMP B-TREE"), "{plan}");
+}

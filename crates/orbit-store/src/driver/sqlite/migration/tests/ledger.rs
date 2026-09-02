@@ -79,6 +79,9 @@ fn fresh_db_applies_baseline_and_records_ledger() {
     assert_eq!(applied[18].version, 19);
     assert_eq!(applied[18].name, "job_runs_created_index");
     assert!(!applied[18].applied_at.is_empty());
+    assert_eq!(applied[19].version, 20);
+    assert_eq!(applied[19].name, "invocations_ts_index");
+    assert!(!applied[19].applied_at.is_empty());
 }
 
 #[test]
@@ -255,6 +258,10 @@ fn legacy_db_adopts_versioned_ledger() {
                 "migration.v0019".to_string(),
                 "job_runs_created_index".to_string()
             ),
+            (
+                "migration.v0020".to_string(),
+                "invocations_ts_index".to_string()
+            ),
         ]
     );
 }
@@ -266,7 +273,7 @@ fn refuses_db_from_a_newer_binary() {
 
     conn.execute(
         "INSERT INTO schema_meta(key, value, updated_at)
-        VALUES ('migration.v0020', 'from-the-future', '2099-01-01T00:00:00Z')",
+        VALUES ('migration.v0021', 'from-the-future', '2099-01-01T00:00:00Z')",
         [],
     )
     .expect("record future migration");
@@ -346,7 +353,7 @@ fn store_reopens_database_at_shipped_schema_v4_and_applies_through_latest() {
     );
     assert_eq!(
         applied.last().map(|migration| migration.name.as_str()),
-        Some("job_runs_created_index")
+        Some("invocations_ts_index")
     );
     let connection = store.connection();
     let conn = connection.lock().expect("connection");
