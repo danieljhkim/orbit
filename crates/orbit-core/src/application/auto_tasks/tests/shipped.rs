@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use orbit_common::protocol::yaml::parse_auto_task_yaml;
 use orbit_types::workflow::{AutoTaskSchedule, DedupePolicy};
 
-use crate::auto_tasks::DEFAULT_AUTO_TASK_FILES;
+use crate::application::auto_tasks::DEFAULT_AUTO_TASK_FILES;
 
 /// Every embedded default parses, uses its filename identity, and remains
 /// disabled. An enabled default would turn workspace initialization into an

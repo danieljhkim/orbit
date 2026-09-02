@@ -10,9 +10,11 @@ use tempfile::tempdir;
 
 use crate::OrbitError;
 use crate::application::job::RunOwnerLiveness;
-use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
-use crate::routines::sweep::{RoutineDispatch, SweepOptions, run_sweep_core_with_registry};
-use crate::routines::validation::{
+use crate::application::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin};
+use crate::application::routines::sweep::{
+    RoutineDispatch, SweepOptions, run_sweep_core_with_registry,
+};
+use crate::application::routines::validation::{
     RoutineDiagnosticSeverity, RoutineHostIdentity, RoutineRegistryView, validate_routine_pins,
 };
 
@@ -38,7 +40,7 @@ fn local_view(known_elsewhere: &[&str]) -> RoutineRegistryView {
     }
 }
 
-fn codes(validation: &crate::routines::RoutinePinValidation) -> Vec<&'static str> {
+fn codes(validation: &crate::application::routines::RoutinePinValidation) -> Vec<&'static str> {
     validation
         .diagnostics
         .iter()

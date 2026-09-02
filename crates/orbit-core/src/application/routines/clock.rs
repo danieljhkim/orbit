@@ -12,9 +12,9 @@ use orbit_common::OrbitError;
 use orbit_common::fs::io::atomic_write_text;
 use serde::{Deserialize, Serialize};
 
-const LAUNCHD_PLIST_TEMPLATE: &str = include_str!("../../assets/clock/com.orbit.sweep.plist");
-const SYSTEMD_SERVICE_TEMPLATE: &str = include_str!("../../assets/clock/orbit-sweep.service");
-const SYSTEMD_TIMER_TEMPLATE: &str = include_str!("../../assets/clock/orbit-sweep.timer");
+const LAUNCHD_PLIST_TEMPLATE: &str = include_str!("../../../assets/clock/com.orbit.sweep.plist");
+const SYSTEMD_SERVICE_TEMPLATE: &str = include_str!("../../../assets/clock/orbit-sweep.service");
+const SYSTEMD_TIMER_TEMPLATE: &str = include_str!("../../../assets/clock/orbit-sweep.timer");
 
 /// launchd agent label (macOS).
 pub const LAUNCHD_LABEL: &str = "com.orbit.sweep";

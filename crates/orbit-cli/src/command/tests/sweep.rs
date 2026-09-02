@@ -2,7 +2,7 @@
 //! filtering that keeps the once-a-minute clock from growing its log, and the
 //! stable `--json` shape machine consumers depend on.
 
-use orbit_core::routines::{
+use orbit_core::application::routines::{
     RoutinePinValidation, RoutineRegistryStatus, RoutineSweepReport, SweepOutcome,
 };
 

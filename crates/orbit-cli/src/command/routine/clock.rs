@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use clap::{Args, Subcommand};
-use orbit_core::routines::{clock_status, set_clock_cadence, set_clock_enabled};
+use orbit_core::application::routines::{clock_status, set_clock_cadence, set_clock_enabled};
 
 use crate::command::{CommandOut, CommandOutput};
 

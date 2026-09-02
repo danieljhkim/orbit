@@ -1,5 +1,5 @@
 use chrono::Utc;
-use orbit_core::routines::RoutineRegistryView;
+use orbit_core::application::routines::RoutineRegistryView;
 use orbit_store::maintenance::task_registry::{WorkspaceConfig, write_workspace_config};
 use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 

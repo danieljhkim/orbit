@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use orbit_common::governance::authorization::OPERATOR_OVERRIDE_ENV;
-use orbit_core::auto_tasks::cursor_state_path;
+use orbit_core::application::auto_tasks::cursor_state_path;
 use orbit_core::{AutoTaskAddParams, OrbitRuntime};
 use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
 use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};

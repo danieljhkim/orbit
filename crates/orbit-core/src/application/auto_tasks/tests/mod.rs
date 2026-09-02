@@ -1,7 +1,7 @@
 use orbit_types::task::{TaskPriority, TaskType};
 use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};
 
-use crate::auto_tasks::crud::AutoTaskAddParams;
+use crate::application::auto_tasks::crud::AutoTaskAddParams;
 
 mod crud;
 mod mint;

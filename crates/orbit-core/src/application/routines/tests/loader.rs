@@ -16,7 +16,9 @@ use orbit_types::workspace::{Workspace, WorkspaceStatus};
 use tempfile::{TempDir, tempdir};
 
 use crate::OrbitRuntime;
-use crate::routines::loader::{LoadedRoutine, RoutineCollection, RoutineOrigin, collect_routines};
+use crate::application::routines::loader::{
+    LoadedRoutine, RoutineCollection, RoutineOrigin, collect_routines,
+};
 
 const HOST: &str = "test-host";
 

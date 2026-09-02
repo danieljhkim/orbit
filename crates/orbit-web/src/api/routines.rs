@@ -12,7 +12,7 @@ use orbit_common::governance::authorization::{
     DASHBOARD_CLOCK_SERVICE, DASHBOARD_ROUTINE_TOGGLE, GovernedOperation, authorize,
 };
 use orbit_common::observability::audit_id::audit_execution_id;
-use orbit_core::routines::{
+use orbit_core::application::routines::{
     ClockStatus, RoutineStatus, RoutineStatusReport, RoutineToggleOutcome, clock_status,
     set_clock_cadence, set_clock_enabled, set_routine_enabled,
 };

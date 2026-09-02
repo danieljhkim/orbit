@@ -9,7 +9,7 @@ doc_role: decisions
 type: design
 summary: Decision log for the auto-task primitive.
 tags: [auto-tasks]
-paths: ["crates/orbit-core/src/auto_tasks/**"]
+paths: ["crates/orbit-core/src/application/auto_tasks/**"]
 related_features: [auto-tasks]
 related_artifacts: []
 ---
@@ -23,7 +23,7 @@ This document preserves the feature's non-obvious decisions and their reasoning.
 ## Auto-task primitive: file-backed recurring task templates + one generic scheduler routine
 
 **Recorded:** 2026-07-12 02:58:04.684957Z · [ORB-10149], [ORB-10148]
-**Paths:** `crates/orbit-core/src/auto_tasks/**`
+**Paths:** `crates/orbit-core/src/application/auto_tasks/**`
 
 ### Context
 
@@ -63,7 +63,7 @@ Some normal workflow tasks produce durable side effects through Orbit rather tha
 ## Route tracked auto-task definitions through the active worktree
 
 **Recorded:** 2026-08-08 19:11:08.591438Z · [ORB-10472]
-**Paths:** `crates/orbit-core/src/auto_tasks/**`, `crates/orbit-engine/src/activity_job/workspace.rs`
+**Paths:** `crates/orbit-core/src/application/auto_tasks/**`, `crates/orbit-engine/src/activity_job/workspace.rs`
 
 ### Context
 Auto-task definition CRUD used the shared Orbit root even when a workflow executor was assigned a linked worktree. That let a refresh expose tracked dirt in the registered primary checkout while unrelated implementation guards were sampling it. The alternatives were to tolerate auto_tasks drift in the integrity guard or to make tracked definition mutation worktree-local.

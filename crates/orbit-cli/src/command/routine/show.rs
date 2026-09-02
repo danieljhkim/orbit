@@ -4,7 +4,7 @@ use crate::command::{CommandOut, Payload};
 use clap::Args;
 use orbit_cmd::registry_routines::routine_statuses;
 use orbit_core::OrbitError;
-use orbit_core::routines::recent_fires;
+use orbit_core::application::routines::recent_fires;
 use serde_json::json;
 
 const RECENT_FIRE_LIMIT: usize = 10;
