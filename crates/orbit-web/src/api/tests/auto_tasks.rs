@@ -251,6 +251,23 @@ async fn toggle_denies_a_caller_without_operator_capability() {
     );
 }
 
+/// A missing auto-task is a permanent 404, not a 409 a client would refresh
+/// and retry forever.
+#[tokio::test]
+async fn toggle_of_an_unknown_auto_task_is_not_found() {
+    let (state, _) = state(runtime());
+    let response = as_operator(send(
+        state,
+        Method::POST,
+        "/auto-tasks/toggle?workspace=default",
+        Some(r#"{"name":"no-such-auto-task","expected_enabled":true,"enabled":false}"#),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let json = body_json(response).await;
+    assert_eq!(json["code"], "auto_task_not_found");
+}
+
 #[tokio::test]
 async fn toggle_rolls_back_when_expected_state_is_stale() {
     let runtime = runtime();

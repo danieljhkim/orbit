@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use super::map_runtime_error;
 use super::routines::{
     OperationsQuery, authorization_denied, authorized_caller, explicit_workspace,
-    not_found_or_conflict, record_operation_audit,
+    named_entity_not_found, record_operation_audit, selection_conflict,
 };
 use crate::state::DashboardState;
 
@@ -90,7 +90,7 @@ pub(super) async fn toggle_auto_task(
     let runtime = match resolve_workspace(&state, &workspace) {
         Ok((_, runtime)) => runtime,
         Err(reason) => {
-            return not_found_or_conflict("workspace_mismatch", reason);
+            return selection_conflict("workspace_mismatch", reason);
         }
     };
     let caller = match authorized_caller(&DASHBOARD_AUTO_TASK_TOGGLE) {
@@ -115,7 +115,7 @@ pub(super) async fn toggle_auto_task(
     let current = match runtime.auto_task_show(&body.name) {
         Ok(Some(definition)) => definition,
         Ok(None) => {
-            return not_found_or_conflict(
+            return named_entity_not_found(
                 "auto_task_not_found",
                 format!("auto-task '{}' was not found", body.name),
             );
@@ -195,7 +195,7 @@ pub(super) async fn mint_auto_task(
     let runtime = match resolve_workspace(&state, &workspace) {
         Ok((_, runtime)) => runtime,
         Err(reason) => {
-            return not_found_or_conflict("workspace_mismatch", reason);
+            return selection_conflict("workspace_mismatch", reason);
         }
     };
     if !body.acknowledge_unconditional {

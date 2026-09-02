@@ -86,6 +86,7 @@ impl Execute for AuditListArgs {
             job_run_id: self.run,
             lease_id: self.lease,
             limit: self.limit,
+            offset: 0,
         })?;
 
         let values: Vec<Value> = events.iter().map(audit_event_to_json).collect();

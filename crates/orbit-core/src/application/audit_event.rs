@@ -53,6 +53,7 @@ impl OrbitRuntime {
                 job_run_id: None,
                 lease_id: None,
                 limit,
+                offset: 0,
             })
     }
 

@@ -42,6 +42,7 @@ fn persists_one_row_with_mcp_context() {
         .list_audit_events(&AuditEventFilter {
             tool_name: Some("orbit.workspace.list".to_string()),
             limit: 10,
+            offset: 0,
             ..AuditEventFilter::default()
         })
         .expect("list global dispatch audit");
@@ -83,6 +84,7 @@ fn audits_projection_failure_once() {
         .list_audit_events(&AuditEventFilter {
             tool_name: Some("orbit.workspace.list".to_string()),
             limit: 10,
+            offset: 0,
             ..AuditEventFilter::default()
         })
         .expect("list failed global dispatch audit");
@@ -131,6 +133,7 @@ fn audits_unknown_mcp_tool_as_denied_once() {
         .list_audit_events(&AuditEventFilter {
             tool_name: Some("orbit_unknown_raw".to_string()),
             limit: 10,
+            offset: 0,
             ..AuditEventFilter::default()
         })
         .expect("list unknown-tool audit");
