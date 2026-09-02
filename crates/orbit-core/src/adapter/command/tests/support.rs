@@ -1,15 +1,24 @@
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use orbit_common::test_env::ScopedEnv;
 
 use crate::OrbitRuntime;
 use crate::adapter::command::dispatch::take_tool_audit_recorded;
 
 /// Serializes tests that mutate `ORBIT_AGENT_*` or assert environment-derived
 /// audit roles so parallel test execution cannot race environment writers.
-pub(super) fn env_guard() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+///
+/// Holds the process-wide guard every env-mutating test in this binary
+/// shares (not a lock of its own), clears the variables these tests set or
+/// assert on, and restores whatever was there when dropped.
+pub(super) fn env_guard() -> ScopedEnv {
+    orbit_common::test_env::unset([
+        "ORBIT_AGENT_NAME",
+        "ORBIT_AGENT_MODEL",
+        "ORBIT_TASK_ID",
+        "ORBIT_RUN_ID",
+        crate::runtime::run_input::ORBIT_MANAGED_RUN_CONTEXT_ENV,
+        "ORBIT_ACTIVITY_ID",
+        "ORBIT_STEP_INDEX",
+    ])
 }
 
 pub(super) fn clear_identity_env() {
