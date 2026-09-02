@@ -20,6 +20,13 @@ use super::locks::{
     workspace_task_reservation_id,
 };
 
+/// Workspace-wide facts consulted while classifying stale reservations.
+struct StaleReservationContext {
+    /// Run ids the orphan classifiers already consider conclusively orphaned.
+    orphaned_run_ids: BTreeSet<String>,
+    task_statuses: BTreeMap<String, TaskStatus>,
+}
+
 /// A task reservation that Orbit can prove is no longer protecting live work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaleTaskReservation {
@@ -38,16 +45,11 @@ impl OrbitRuntime {
     /// terminal task status). Empty/missing/mixed task associations remain
     /// ambiguous and are deliberately ignored.
     pub fn list_stale_task_reservations(&self) -> Result<Vec<StaleTaskReservation>, OrbitError> {
-        let reservations = self
-            .stores()
-            .task_reservations()
-            .inspect_active_task_reservations(
-                &workspace_orbit_dir(self),
-                workspace_task_reservation_id(self)?.as_deref(),
-            )?;
+        let reservations = self.inspect_active_reservations()?;
+        let context = self.stale_reservation_context()?;
         let mut stale = Vec::new();
         for reservation in reservations {
-            if let Some(reason) = self.classify_stale_task_reservation(&reservation)? {
+            if let Some(reason) = self.classify_stale_task_reservation(&reservation, &context)? {
                 stale.push(StaleTaskReservation {
                     reservation_id: reservation.reservation_id,
                     task_ids: reservation.task_ids,
@@ -67,21 +69,25 @@ impl OrbitRuntime {
             .into_iter()
             .map(|candidate| candidate.reservation_id)
             .collect::<Vec<_>>();
+        if candidate_ids.is_empty() {
+            return Ok(0);
+        }
+        // The orphan-run and task-status facts are read once for the pass;
+        // only the reservation row itself is re-read before each release,
+        // since that is the row another operator could have released or
+        // re-owned in the meantime.
+        let context = self.stale_reservation_context()?;
         let mut released = 0;
         for reservation_id in candidate_ids {
             let current = self
-                .stores()
-                .task_reservations()
-                .inspect_active_task_reservations(
-                    &workspace_orbit_dir(self),
-                    workspace_task_reservation_id(self)?.as_deref(),
-                )?
+                .inspect_active_reservations()?
                 .into_iter()
                 .find(|reservation| reservation.reservation_id == reservation_id);
             let Some(current) = current else {
                 continue;
             };
-            let Some(stale_reason) = self.classify_stale_task_reservation(&current)? else {
+            let Some(stale_reason) = self.classify_stale_task_reservation(&current, &context)?
+            else {
                 continue;
             };
             let result = self.stores().task_reservations().release_task_reservation(
@@ -114,9 +120,44 @@ impl OrbitRuntime {
         Ok(released)
     }
 
+    fn inspect_active_reservations(&self) -> Result<Vec<ActiveTaskReservation>, OrbitError> {
+        self.stores()
+            .task_reservations()
+            .inspect_active_task_reservations(
+                &workspace_orbit_dir(self),
+                workspace_task_reservation_id(self)?.as_deref(),
+            )
+    }
+
+    /// The workspace-wide facts stale classification consults, read once per
+    /// pass instead of once per reservation: the orphan classifier scans
+    /// every job run and the task sweep reads every task.
+    fn stale_reservation_context(&self) -> Result<StaleReservationContext, OrbitError> {
+        let mut orphaned_run_ids = self
+            .list_orphaned_running_job_runs()?
+            .into_iter()
+            .map(|orphan| orphan.run_id)
+            .collect::<BTreeSet<_>>();
+        orphaned_run_ids.extend(
+            self.list_orphaned_pending_job_runs()?
+                .into_iter()
+                .map(|orphan| orphan.run_id),
+        );
+        let task_statuses = self
+            .list_tasks()?
+            .into_iter()
+            .map(|task| (task.id, task.status))
+            .collect::<BTreeMap<_, _>>();
+        Ok(StaleReservationContext {
+            orphaned_run_ids,
+            task_statuses,
+        })
+    }
+
     fn classify_stale_task_reservation(
         &self,
         reservation: &ActiveTaskReservation,
+        context: &StaleReservationContext,
     ) -> Result<Option<String>, OrbitError> {
         if let Some(owner_run_id) = reservation.owner_run_id.as_deref() {
             let Some(run) = self.get_job_run_backend(owner_run_id)? else {
@@ -128,15 +169,7 @@ impl OrbitRuntime {
                     run.state
                 )));
             }
-            let orphaned_running = self
-                .list_orphaned_running_job_runs()?
-                .into_iter()
-                .any(|orphan| orphan.run_id == owner_run_id);
-            let orphaned_pending = self
-                .list_orphaned_pending_job_runs()?
-                .into_iter()
-                .any(|orphan| orphan.run_id == owner_run_id);
-            if orphaned_running || orphaned_pending {
+            if context.orphaned_run_ids.contains(owner_run_id) {
                 return Ok(Some(format!(
                     "owner run {owner_run_id} is conclusively orphaned ({})",
                     run.state
@@ -148,15 +181,10 @@ impl OrbitRuntime {
         if reservation.task_ids.is_empty() {
             return Ok(None);
         }
-        let statuses = self
-            .list_tasks()?
-            .into_iter()
-            .map(|task| (task.id, task.status))
-            .collect::<BTreeMap<_, _>>();
         let all_done = reservation
             .task_ids
             .iter()
-            .all(|task_id| statuses.get(task_id) == Some(&TaskStatus::Done));
+            .all(|task_id| context.task_statuses.get(task_id) == Some(&TaskStatus::Done));
         if all_done {
             Ok(Some(format!(
                 "unowned reservation references only terminal done task(s): {}",

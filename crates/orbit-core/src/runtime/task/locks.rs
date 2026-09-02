@@ -33,14 +33,9 @@ pub(crate) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
         .list_active_task_reservations(&workspace_orbit_dir(runtime), workspace_id.as_deref())?;
     emit_expired_reservation_events(runtime, &reservation_result.expired_reservations)?;
 
-    let all_tasks = runtime.list_tasks()?;
-    let task_lookup = all_tasks
-        .iter()
-        .cloned()
-        .map(|task| (task.id.clone(), task))
-        .collect::<BTreeMap<_, _>>();
-    let mut tasks: Vec<_> = all_tasks
-        .into_iter()
+    let index = TaskLockIndex::from_tasks(runtime.list_tasks()?);
+    let mut tasks: Vec<&Task> = index
+        .tasks()
         .filter(|task| matches!(task.status, TaskStatus::InProgress | TaskStatus::Review))
         .collect();
     tasks.sort_by_key(|task| {
@@ -60,8 +55,8 @@ pub(crate) fn list(runtime: &OrbitRuntime) -> Result<Value, OrbitError> {
     let locked_surfaces: Vec<(Task, Vec<String>)> = tasks
         .into_iter()
         .map(|task| {
-            let files = lock_context_files_for_task(&task, &task_lookup, repo_root);
-            (task, files)
+            let files = index.lock_context_files(task, repo_root);
+            (task.clone(), files)
         })
         .collect();
 
@@ -204,14 +199,17 @@ pub(crate) fn reserve(
 
     let actor = reservation_actor_label(runtime, agent.as_deref(), model.as_deref());
     let workspace_id = workspace_task_reservation_id(runtime)?;
+    let index = TaskLockIndex::load(runtime)?;
+    let repo_root = runtime.paths().repo_root.as_path();
     let (task_ids, requested_files) = match &reservation_scope {
-        TaskLockReservationScope::TaskIds(task_ids) => {
-            (task_ids.clone(), requested_task_files(runtime, task_ids)?)
-        }
+        TaskLockReservationScope::TaskIds(task_ids) => (
+            task_ids.clone(),
+            requested_task_files_indexed(&index, task_ids, repo_root)?,
+        ),
         TaskLockReservationScope::Files(files) => (Vec::new(), files.clone()),
     };
     runtime.reconcile_stale_owned_reservations_for_files(&requested_files, 32)?;
-    let mut conflicts = task_lock_conflicts(runtime, &task_ids, &requested_files)?;
+    let mut conflicts = task_lock_conflicts_indexed(&index, &task_ids, &requested_files, repo_root);
 
     record_task_lock_audit_event(
         runtime,
@@ -475,50 +473,122 @@ fn task_is_descendant_of(
     false
 }
 
-pub(crate) fn requested_task_files(
-    runtime: &OrbitRuntime,
-    task_ids: &[String],
-) -> Result<Vec<String>, OrbitError> {
-    let tasks = runtime.stores().tasks().list_tasks()?;
-    let task_map = tasks
-        .into_iter()
-        .map(|task| (task.id.clone(), task))
-        .collect::<BTreeMap<_, _>>();
+/// The task store indexed for lock-surface expansion: the id lookup plus,
+/// for each epic root, every task below it. One operation builds it once; a
+/// reserve that inspects forty active tasks then expands forty surfaces
+/// without re-reading the store or re-walking every task's parent chain for
+/// each epic it meets.
+pub(crate) struct TaskLockIndex {
+    tasks: BTreeMap<String, Task>,
+    epic_descendants: BTreeMap<String, Vec<String>>,
+}
 
-    let mut requested_files = BTreeSet::new();
-    for task_id in task_ids {
-        let task = task_map
-            .get(task_id)
-            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.clone()))?;
-        requested_files.extend(lock_context_files_for_task(
-            task,
-            &task_map,
-            runtime.paths().repo_root.as_path(),
-        ));
+impl TaskLockIndex {
+    pub(crate) fn load(runtime: &OrbitRuntime) -> Result<Self, OrbitError> {
+        Ok(Self::from_tasks(runtime.stores().tasks().list_tasks()?))
     }
 
+    pub(crate) fn from_tasks(tasks: Vec<Task>) -> Self {
+        let tasks = tasks
+            .into_iter()
+            .map(|task| (task.id.clone(), task))
+            .collect::<BTreeMap<_, _>>();
+        let mut epic_descendants: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for task in tasks.values() {
+            for epic_id in epic_ancestor_ids(task, &tasks) {
+                epic_descendants
+                    .entry(epic_id)
+                    .or_default()
+                    .push(task.id.clone());
+            }
+        }
+        Self {
+            tasks,
+            epic_descendants,
+        }
+    }
+
+    pub(crate) fn get(&self, task_id: &str) -> Option<&Task> {
+        self.tasks.get(task_id)
+    }
+
+    pub(crate) fn tasks(&self) -> impl Iterator<Item = &Task> {
+        self.tasks.values()
+    }
+
+    /// [`lock_context_files_for_task`] over the precomputed epic families.
+    pub(crate) fn lock_context_files(&self, task: &Task, workspace_root: &Path) -> Vec<String> {
+        let mut files = existing_context_files_at_root(task, workspace_root)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if task.tags.iter().any(|tag| tag == "epic") {
+            for descendant in self
+                .epic_descendants
+                .get(&task.id)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| self.tasks.get(id))
+            {
+                files.extend(existing_context_files_at_root(descendant, workspace_root));
+            }
+        }
+        files.into_iter().collect()
+    }
+}
+
+/// Every epic-tagged ancestor on `task`'s parent chain, under the same hop
+/// and cycle guards as [`task_is_descendant_of`].
+fn epic_ancestor_ids(task: &Task, task_lookup: &BTreeMap<String, Task>) -> Vec<String> {
+    let mut epics = Vec::new();
+    let mut visited = BTreeSet::from([task.id.clone()]);
+    let mut next_parent_id = task.parent_id();
+    for _ in 0..32 {
+        let Some(parent_id) = next_parent_id else {
+            break;
+        };
+        if !visited.insert(parent_id.to_string()) {
+            break;
+        }
+        let Some(parent) = task_lookup.get(parent_id) else {
+            break;
+        };
+        if parent.tags.iter().any(|tag| tag == "epic") {
+            epics.push(parent.id.clone());
+        }
+        next_parent_id = parent.parent_id();
+    }
+    epics
+}
+
+pub(crate) fn requested_task_files_indexed(
+    index: &TaskLockIndex,
+    task_ids: &[String],
+    workspace_root: &Path,
+) -> Result<Vec<String>, OrbitError> {
+    let mut requested_files = BTreeSet::new();
+    for task_id in task_ids {
+        let task = index
+            .get(task_id)
+            .ok_or_else(|| OrbitError::not_found(NotFoundKind::Task, task_id.clone()))?;
+        requested_files.extend(index.lock_context_files(task, workspace_root));
+    }
     Ok(requested_files.into_iter().collect())
 }
 
-pub(crate) fn task_lock_conflicts(
-    runtime: &OrbitRuntime,
+pub(crate) fn task_lock_conflicts_indexed(
+    index: &TaskLockIndex,
     bundle_task_ids: &[String],
     requested_files: &[String],
-) -> Result<Vec<TaskLockConflict>, OrbitError> {
+    workspace_root: &Path,
+) -> Vec<TaskLockConflict> {
     let bundle_ids = bundle_task_ids.iter().cloned().collect::<BTreeSet<_>>();
     let requested_files = requested_files.iter().cloned().collect::<BTreeSet<_>>();
     if requested_files.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
-    let all_tasks = runtime.stores().tasks().list_tasks()?;
-    let task_lookup = all_tasks
-        .iter()
-        .cloned()
-        .map(|task| (task.id.clone(), task))
-        .collect::<BTreeMap<_, _>>();
-    let mut tasks: Vec<Task> = all_tasks
-        .into_iter()
+    let mut tasks: Vec<&Task> = index
+        .tasks()
         .filter(|task| {
             matches!(task.status, TaskStatus::InProgress | TaskStatus::Review)
                 && !bundle_ids.contains(&task.id)
@@ -534,8 +604,7 @@ pub(crate) fn task_lock_conflicts(
 
     let mut conflicts = Vec::new();
     for task in tasks {
-        let held_files =
-            lock_context_files_for_task(&task, &task_lookup, runtime.paths().repo_root.as_path());
+        let held_files = index.lock_context_files(task, workspace_root);
         for requested_file in &requested_files {
             if held_files
                 .iter()
@@ -555,7 +624,7 @@ pub(crate) fn task_lock_conflicts(
             .cmp(&right.file)
             .then(left.held_by_id.cmp(&right.held_by_id))
     });
-    Ok(conflicts)
+    conflicts
 }
 
 pub(crate) fn merge_task_lock_conflicts(
