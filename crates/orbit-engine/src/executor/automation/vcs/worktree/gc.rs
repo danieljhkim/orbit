@@ -14,7 +14,7 @@ use crate::context::RuntimeHost;
 
 use super::super::git::git_success;
 use super::cleanup::remove_worktree;
-use super::{WorktreeIdentity, resolve_shared_worktree_path};
+use super::{WorktreeIdentity, is_registered_worktree, resolve_shared_worktree_path};
 
 /// Task statuses that settle the work as done — the only statuses that
 /// license discarding a run's worktree and branch. Every other status
@@ -353,24 +353,6 @@ fn branch_name(worktree: &Path) -> Result<String, OrbitError> {
 /// The literal comparison is kept as the fast path, and a registered entry
 /// whose directory has already been removed simply fails to canonicalize and
 /// does not match, which is the same answer the literal comparison gave.
-fn is_registered_worktree(repo_root: &Path, path: &Path) -> Result<bool, OrbitError> {
-    let list = git_output(repo_root, &["worktree", "list", "--porcelain"])?;
-    let expected_literal = path.to_string_lossy();
-    let expected_canonical = fs::canonicalize(path).ok();
-    Ok(list
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree "))
-        .any(|registered| {
-            if registered == expected_literal {
-                return true;
-            }
-            match (&expected_canonical, fs::canonicalize(registered).ok()) {
-                (Some(expected), Some(registered)) => *expected == registered,
-                _ => false,
-            }
-        }))
-}
-
 fn branch_exists(repo_root: &Path, branch: &str) -> bool {
     Command::new("git")
         .current_dir(repo_root)

@@ -12,6 +12,30 @@ use sha2::{Digest, Sha256};
 
 use crate::executor::automation::input::{input_string_field, required_input_string};
 
+use super::git::git_output;
+
+/// Whether `path` is one of `repo_root`'s registered worktrees (main or
+/// linked), comparing both the literal path Git recorded and its canonical
+/// form. Any other checkout that happens to live at `path` is not ours to
+/// clean or remove.
+pub(super) fn is_registered_worktree(repo_root: &Path, path: &Path) -> Result<bool, OrbitError> {
+    let list = git_output(repo_root, &["worktree", "list", "--porcelain"])?;
+    let expected_literal = path.to_string_lossy();
+    let expected_canonical = std::fs::canonicalize(path).ok();
+    Ok(list
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|registered| {
+            if registered == expected_literal {
+                return true;
+            }
+            match (&expected_canonical, std::fs::canonicalize(registered).ok()) {
+                (Some(expected), Some(registered)) => *expected == registered,
+                _ => false,
+            }
+        }))
+}
+
 pub use gc::{WorktreeGcOptions, WorktreeGcResult, collect_worktrees};
 pub(in crate::executor::automation) use merge::merge_batch_worktree_into_base;
 pub(in crate::executor::automation) use setup::setup_worktree;

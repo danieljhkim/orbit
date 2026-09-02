@@ -11,11 +11,11 @@ use super::super::git::{
     base_sync_mode_from_input, git_command_success, git_output, git_success,
     resolve_worktree_start_point,
 };
-use super::WorktreeIdentity;
 use super::dependency_delivery::{
     DependencyDeliveryMode, dependency_delivery_mode_from_input,
     ensure_dependencies_delivered_into_base,
 };
+use super::{WorktreeIdentity, is_registered_worktree};
 
 const DEFAULT_BASE: &str = "main";
 
@@ -151,7 +151,12 @@ pub(crate) fn ensure_worktree(
     )?;
 
     if worktree_path.exists() {
-        if git_command_success(worktree_path, &["rev-parse", "--is-inside-work-tree"])? {
+        // Only a worktree this repository registered is ours to reuse and
+        // clean. "Is some git work tree" would also match an unrelated
+        // checkout that happens to sit at the resolved path (a shared
+        // `ORBIT_WORKTREE_ROOT`, a colliding name), and `clean -fd` there
+        // deletes someone else's untracked files.
+        if is_registered_worktree(repo_root, worktree_path)? {
             let attached_branch = git_output(
                 worktree_path,
                 &["symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -169,7 +174,7 @@ pub(crate) fn ensure_worktree(
             })?;
         } else {
             return Err(OrbitError::Execution(format!(
-                "worktree path '{}' exists but is not a Git worktree; move it aside or remove it before retrying",
+                "worktree path '{}' exists but is not a worktree of this repository; move it aside or remove it before retrying",
                 worktree_path.display()
             )));
         }
