@@ -12,7 +12,7 @@ pub use catalog::{
 };
 pub use io::{
     global_orbit_dir, load_registry, load_registry_from, registry_path, registry_path_for,
-    save_registry, save_registry_to,
+    save_registry, save_registry_to, with_registry_lock,
 };
 pub use publication::{
     bind_publication, find_publication_binding, rebind_publication, record_publication_success,

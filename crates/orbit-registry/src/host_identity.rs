@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use orbit_common::OrbitError;
 use orbit_common::fs::io::atomic_write_text;
+use orbit_common::protocol::toml::escape_basic_string;
 use orbit_types::identity::{MACHINE_ID_PREFIX, validate_machine_id};
 use serde::Deserialize;
 
@@ -85,33 +86,11 @@ impl HostIdentity {
              host_id = \"{}\"\n\
              task_prefix = \"{}\"\n",
             self.schema_version,
-            toml_escape_basic(&self.machine_id),
-            toml_escape_basic(&self.host_id),
-            toml_escape_basic(&self.task_prefix),
+            escape_basic_string(&self.machine_id),
+            escape_basic_string(&self.host_id),
+            escape_basic_string(&self.task_prefix),
         )
     }
-}
-
-/// Escape a value for embedding inside a TOML basic (double-quoted) string,
-/// per the TOML spec's basic-string escape set.
-fn toml_escape_basic(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            '\u{08}' => escaped.push_str("\\b"),
-            '\u{0C}' => escaped.push_str("\\f"),
-            control if (control as u32) < 0x20 || control as u32 == 0x7f => {
-                escaped.push_str(&format!("\\u{:04X}", control as u32));
-            }
-            other => escaped.push(other),
-        }
-    }
-    escaped
 }
 
 /// The three actionable states of `host.toml`. Malformed, incomplete, blank,
