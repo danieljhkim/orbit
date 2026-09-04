@@ -1,4 +1,4 @@
-//! `orbit task flow` — filed-versus-closed rates for a task population.
+//! `orbit task flow` — inflow-versus-outflow rates for a task population.
 //!
 //! A non-blocking review model files findings instead of blocking merges, so
 //! the question that decides whether it is working cannot be answered from a
@@ -31,17 +31,19 @@ const DEFAULT_BUCKETS: usize = 6;
 
 #[derive(Args)]
 #[command(
-    about = "Show filed-vs-closed rates over time (is the backlog draining?)",
+    about = "Show backlog inflow-vs-outflow rates over time (is it draining?)",
     after_help = "Examples:\n  orbit task flow\n  orbit task flow --tag code-review\n  orbit task flow --tag security-review --window 14d --buckets 4\n  orbit task flow --type bug --json\n\n\
-                  FILED counts tasks created in the window. CLOSED counts tasks that reached\n\
+                  FILED counts tasks created in the window. REOPENED counts terminal tasks that\n\
+                  re-entered the backlog. CLOSED counts tasks that reached\n\
                   `done`; DROPPED counts `rejected` and `archived`, which clear the backlog\n\
                   without fixing anything — a drain driven by DROPPED is not the same result\n\
-                  as one driven by CLOSED. NET is FILED minus both. OPEN AT END is how much\n\
-                  of the population was still open when that window closed.\n\n\
+                  as one driven by CLOSED. NET is FILED plus REOPENED minus both outflows.\n\
+                  OPEN AT END is how much of the population was still open when that window\n\
+                  closed.\n\n\
                   The verdict compares total inflow against total outflow across every\n\
                   window: draining, flat, or growing.\n\n\
-                  Terminal transitions come from task status history, so reopened tasks retain\n\
-                  their prior CLOSED or DROPPED events in the appropriate windows."
+                  Status transitions come from task history, so reopened tasks retain their prior\n\
+                  CLOSED or DROPPED events while their re-entry is counted as fresh inflow."
 )]
 pub struct TaskFlowArgs {
     /// Filter by tag. Repeat for AND semantics, matching `orbit task list`.
@@ -136,6 +138,17 @@ impl FlowPoint {
                 .find(|change| change.at <= instant)
                 .is_none_or(|change| TerminalKind::of(change.status).is_none())
     }
+
+    /// Nonterminal entries immediately following a terminal status. These
+    /// restore a task to the live backlog and therefore offset the earlier
+    /// terminal outflow in rate arithmetic.
+    fn reopen_times(&self) -> impl Iterator<Item = DateTime<Utc>> + '_ {
+        self.status_changes.windows(2).filter_map(|changes| {
+            (TerminalKind::of(changes[0].status).is_some()
+                && TerminalKind::of(changes[1].status).is_none())
+            .then_some(changes[1].at)
+        })
+    }
 }
 
 /// One bucket's inflow and outflow, plus the population still open at its end.
@@ -143,6 +156,7 @@ pub(crate) struct Bucket {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub filed: usize,
+    pub reopened: usize,
     pub closed: usize,
     pub dropped: usize,
     pub open_at_end: usize,
@@ -150,13 +164,14 @@ pub(crate) struct Bucket {
 
 impl Bucket {
     pub(crate) fn net(&self) -> i64 {
-        self.filed as i64 - self.closed as i64 - self.dropped as i64
+        self.filed as i64 + self.reopened as i64 - self.closed as i64 - self.dropped as i64
     }
 }
 
 pub(crate) struct FlowReport {
     pub buckets: Vec<Bucket>,
     pub filed: usize,
+    pub reopened: usize,
     pub closed: usize,
     pub dropped: usize,
     pub open_now: usize,
@@ -164,7 +179,7 @@ pub(crate) struct FlowReport {
 
 impl FlowReport {
     pub(crate) fn net(&self) -> i64 {
-        self.filed as i64 - self.closed as i64 - self.dropped as i64
+        self.filed as i64 + self.reopened as i64 - self.closed as i64 - self.dropped as i64
     }
 
     /// Inflow against outflow across the whole reported span, worded as the
@@ -174,7 +189,12 @@ impl FlowReport {
     /// zero equals zero is arithmetically a match and substantively nothing,
     /// and a caller who filtered down to no tasks must not read it as health.
     pub(crate) fn verdict(&self) -> &'static str {
-        if self.filed == 0 && self.closed == 0 && self.dropped == 0 && self.open_now == 0 {
+        if self.filed == 0
+            && self.reopened == 0
+            && self.closed == 0
+            && self.dropped == 0
+            && self.open_now == 0
+        {
             return "no data — no tasks matched in the reported span";
         }
         match self.net() {
@@ -202,6 +222,7 @@ pub(crate) fn compute_flow(
                 start: end - width,
                 end,
                 filed: 0,
+                reopened: 0,
                 closed: 0,
                 dropped: 0,
                 open_at_end: 0,
@@ -214,6 +235,10 @@ pub(crate) fn compute_flow(
             if point.created_at >= bucket.start && point.created_at < bucket.end {
                 bucket.filed += 1;
             }
+            bucket.reopened += point
+                .reopen_times()
+                .filter(|at| *at >= bucket.start && *at < bucket.end)
+                .count();
             for change in &point.status_changes {
                 if let Some(kind) = TerminalKind::of(change.status)
                     && change.at >= bucket.start
@@ -233,6 +258,7 @@ pub(crate) fn compute_flow(
 
     FlowReport {
         filed: buckets.iter().map(|bucket| bucket.filed).sum(),
+        reopened: buckets.iter().map(|bucket| bucket.reopened).sum(),
         closed: buckets.iter().map(|bucket| bucket.closed).sum(),
         dropped: buckets.iter().map(|bucket| bucket.dropped).sum(),
         open_now: points.iter().filter(|point| point.open_at(now)).count(),
@@ -259,6 +285,7 @@ impl Execute for TaskFlowArgs {
         let mut table = Table::new(vec![
             Column::new("WINDOW").fixed(),
             Column::new("FILED").number(),
+            Column::new("REOPENED").number(),
             Column::new("CLOSED").number(),
             Column::new("DROPPED").number(),
             Column::new("NET").number(),
@@ -271,6 +298,7 @@ impl Execute for TaskFlowArgs {
             table.add_row(vec![
                 bucket.start.format("%Y-%m-%d").to_string(),
                 bucket.filed.to_string(),
+                bucket.reopened.to_string(),
                 bucket.closed.to_string(),
                 bucket.dropped.to_string(),
                 format_net(bucket.net()),
@@ -287,6 +315,7 @@ impl Execute for TaskFlowArgs {
                     "start": bucket.start.to_rfc3339(),
                     "end": bucket.end.to_rfc3339(),
                     "filed": bucket.filed,
+                    "reopened": bucket.reopened,
                     "closed": bucket.closed,
                     "dropped": bucket.dropped,
                     "net": bucket.net(),
@@ -295,6 +324,7 @@ impl Execute for TaskFlowArgs {
                 .collect::<Vec<_>>(),
             "totals": {
                 "filed": report.filed,
+                "reopened": report.reopened,
                 "closed": report.closed,
                 "dropped": report.dropped,
                 "net": report.net(),
@@ -304,8 +334,9 @@ impl Execute for TaskFlowArgs {
         });
 
         let summary = format!(
-            "{} filed, {} closed, {} dropped over {} × {} — net {}, {} open now: {}",
+            "{} filed, {} reopened, {} closed, {} dropped over {} × {} — net {}, {} open now: {}",
             report.filed,
+            report.reopened,
             report.closed,
             report.dropped,
             self.buckets,

@@ -109,11 +109,53 @@ fn rejection_then_reopen_preserves_dropped_event_and_historical_boundaries() {
     );
 
     assert_eq!(report.buckets[0].dropped, 1);
+    assert_eq!(report.buckets[0].reopened, 0);
     assert_eq!(report.buckets[0].open_at_end, 0);
     assert_eq!(report.buckets[1].dropped, 0);
+    assert_eq!(report.buckets[1].reopened, 1);
     assert_eq!(report.buckets[1].open_at_end, 1);
+    assert_eq!(report.filed, 0);
+    assert_eq!(report.reopened, 1);
     assert_eq!(report.dropped, 1);
+    assert_eq!(report.net(), 0);
     assert_eq!(report.open_now, 1);
+    assert!(report.verdict().starts_with("flat"), "{}", report.verdict());
+}
+
+/// Repeated terminal/reopen cycles retain each historical outflow, but every
+/// return to the backlog is matching inflow rather than an artificial drain.
+#[test]
+fn repeated_reopens_do_not_make_a_stable_open_task_look_draining() {
+    let report = compute_flow(
+        &[status_history(
+            1,
+            &[
+                (9, TaskStatus::Done),
+                (10, TaskStatus::InProgress),
+                (15, TaskStatus::Rejected),
+                (16, TaskStatus::Backlog),
+            ],
+        )],
+        at(21),
+        Duration::days(7),
+        2,
+    );
+
+    assert_eq!(report.filed, 0);
+    assert_eq!(report.reopened, 2);
+    assert_eq!(report.closed, 1);
+    assert_eq!(report.dropped, 1);
+    assert_eq!(report.buckets[0].closed, 1);
+    assert_eq!(report.buckets[0].dropped, 0);
+    assert_eq!(report.buckets[0].reopened, 1);
+    assert_eq!(report.buckets[0].open_at_end, 1);
+    assert_eq!(report.buckets[1].closed, 0);
+    assert_eq!(report.buckets[1].dropped, 1);
+    assert_eq!(report.buckets[1].reopened, 1);
+    assert_eq!(report.buckets[1].open_at_end, 1);
+    assert_eq!(report.net(), 0);
+    assert_eq!(report.open_now, 1);
+    assert!(report.verdict().starts_with("flat"), "{}", report.verdict());
 }
 
 #[test]
