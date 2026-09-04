@@ -472,7 +472,10 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
         .run_tool(
             "orbit.task.locks.reserve",
             json!({
-                "files": ["file:src/lib.rs", "dir:src/auth/"],
+                "files": [
+                    format!("file:{}", repo_root.join("src/lib.rs").display()),
+                    "dir:src/auth/",
+                ],
                 "ttl_seconds": 3600,
                 "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
             }),
@@ -551,6 +554,33 @@ fn files_shape_reservations_conflict_and_release_like_task_reservations() {
         )
         .expect("task reservation succeeds after release");
     assert_eq!(task_reserve["reserved"], true);
+}
+
+#[test]
+fn files_shape_reservations_reject_outside_workspace_before_persisting() {
+    let _env = unmanaged_tool_env_guard();
+    let (_root, runtime, _repo_root) = test_runtime();
+
+    let error = runtime
+        .run_tool(
+            "orbit.task.locks.reserve",
+            json!({
+                "files": ["file:/outside-workspace/lib.rs"],
+                "ttl_seconds": 3600,
+                "model": orbit_common::test_fixtures::TEST_CODEX_MODEL,
+            }),
+        )
+        .expect_err("outside-workspace selector is rejected");
+    let message = invalid_input_message::<Value>(Err(error));
+    assert!(
+        message.contains("must remain inside workspace"),
+        "{message}"
+    );
+
+    let locks = runtime
+        .run_tool("orbit.task.locks", json!({}))
+        .expect("list task locks");
+    assert_eq!(locks["total_reservations"], 0);
 }
 
 use orbit_tools::{ReservationOwnerContext, ToolContext};

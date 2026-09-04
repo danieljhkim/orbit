@@ -206,7 +206,10 @@ pub(crate) fn reserve(
             task_ids.clone(),
             requested_task_files_indexed(&index, task_ids, repo_root)?,
         ),
-        TaskLockReservationScope::Files(files) => (Vec::new(), files.clone()),
+        TaskLockReservationScope::Files(files) => (
+            Vec::new(),
+            canonicalize_file_lock_selectors(files, repo_root)?,
+        ),
     };
     runtime.reconcile_stale_owned_reservations_for_files(&requested_files, 32)?;
     let mut conflicts = task_lock_conflicts_indexed(&index, &task_ids, &requested_files, repo_root);
@@ -391,6 +394,24 @@ fn parse_file_lock_selectors(files: Vec<String>) -> Result<Vec<String>, OrbitErr
         ));
     }
     Ok(deduped.into_iter().collect())
+}
+
+fn canonicalize_file_lock_selectors(
+    files: &[String],
+    workspace_root: &Path,
+) -> Result<Vec<String>, OrbitError> {
+    files
+        .iter()
+        .map(|selector| {
+            canonical_selector_in_workspace(selector, workspace_root).map_err(|error| {
+                OrbitError::InvalidInput(format!(
+                    "`files` entries must remain inside workspace `{}`: {error}",
+                    workspace_root.display()
+                ))
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map(|selectors| selectors.into_iter().collect())
 }
 
 pub(crate) fn workspace_orbit_dir(runtime: &OrbitRuntime) -> String {
