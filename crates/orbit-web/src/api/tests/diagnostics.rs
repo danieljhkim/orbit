@@ -42,6 +42,17 @@ async fn request_dashboard_errors(runtime: OrbitRuntime) -> Response {
 }
 
 fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]) -> String {
+    seed_cli_invocation_audit_at(runtime, run_id, stderr, 4)
+}
+
+/// Seed one run's `run.started` → `step.started` → `cli.invocation.finished`
+/// envelope at `2099-05-08T<hour>:12:2xZ`, so several runs can be ordered.
+fn seed_cli_invocation_audit_at(
+    runtime: &OrbitRuntime,
+    run_id: &str,
+    stderr: &[u8],
+    hour: u32,
+) -> String {
     let audit_root = runtime.data_root().join("state").join("audit");
     let blob_store = BlobStore::new(audit_root.join("blobs"));
     let stdout_ref = blob_store
@@ -53,8 +64,8 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
         json!({
             "schemaVersion": 1,
             "event_type": "run.started",
-            "event_id": "evt-run",
-            "ts": "2099-05-08T04:12:20Z",
+            "event_id": format!("evt-run-{run_id}"),
+            "ts": format!("2099-05-08T{hour:02}:12:20Z"),
             "run_id": run_id,
             "agent_identity": "system",
             "body_kind": "run_started"
@@ -62,22 +73,22 @@ fn seed_cli_invocation_audit(runtime: &OrbitRuntime, run_id: &str, stderr: &[u8]
         json!({
             "schemaVersion": 1,
             "event_type": "step.started",
-            "event_id": "evt-step",
-            "ts": "2099-05-08T04:12:21Z",
+            "event_id": format!("evt-step-{run_id}"),
+            "ts": format!("2099-05-08T{hour:02}:12:21Z"),
             "run_id": run_id,
             "agent_identity": "system",
-            "parent_event_id": "evt-run",
+            "parent_event_id": format!("evt-run-{run_id}"),
             "body_kind": "step_started",
             "step_id": "implement"
         }),
         json!({
             "schemaVersion": 1,
             "event_type": "cli.invocation.finished",
-            "event_id": "evt-cli",
-            "ts": "2099-05-08T04:12:22Z",
+            "event_id": format!("evt-cli-{run_id}"),
+            "ts": format!("2099-05-08T{hour:02}:12:22Z"),
             "run_id": run_id,
             "agent_identity": "system",
-            "parent_event_id": "evt-step",
+            "parent_event_id": format!("evt-step-{run_id}"),
             "body_kind": "cli_invocation_finished",
             "provider": "codex",
             "stdout_blob_ref": stdout_ref,
@@ -221,6 +232,41 @@ async fn diagnostics_errors_include_codex_style_stderr_rows() {
             .as_str()
             .is_some_and(|message| message.contains("apply_patch verification failed"))
     }));
+}
+
+/// The scan stops after `2 * limit` stderr rows, so it has to walk history
+/// newest-first: walking oldest-first fills that budget with the first runs
+/// ever recorded and a failure from five minutes ago never reaches the panel.
+#[tokio::test]
+async fn diagnostics_errors_prefer_the_newest_agent_stderr_rows() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    for (run_id, hour) in [("jrun-old", 1), ("jrun-mid", 2), ("jrun-new", 3)] {
+        let stderr = format!(
+            "2099-05-08T{hour:02}:12:22.000000Z ERROR codex_core::session: failed in {run_id}\n"
+        );
+        seed_cli_invocation_audit_at(&runtime, run_id, stderr.as_bytes(), hour);
+    }
+
+    let response = Router::new()
+        .nest("/api", router())
+        .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+        .oneshot(
+            Request::builder()
+                .uri("/api/diagnostics/errors?limit=1")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_json(response).await;
+    let rows = payload.as_array().expect("rows");
+    let agent_rows = rows
+        .iter()
+        .filter(|row| row["source"] == "agent-stderr")
+        .collect::<Vec<_>>();
+    assert_eq!(agent_rows.len(), 1, "{payload}");
+    assert_eq!(agent_rows[0]["job_run"], "jrun-new");
 }
 
 #[test]

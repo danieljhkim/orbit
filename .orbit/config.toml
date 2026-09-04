@@ -29,7 +29,7 @@ provider = "claude"
 
 [crews.fable]
 backend = "cli"
-model = "claude-fable-5"
+model = "claude-fable-5-1"
 provider = "claude"
 
 [crews.sol]

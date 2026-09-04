@@ -180,14 +180,35 @@ impl TaskV2Store {
         tags: &[String],
     ) -> Result<Vec<Task>, OrbitError> {
         let lowered = query.to_lowercase();
-        let mut tasks = self.list_tasks_by_tags(tags)?;
-        let mut matches = Vec::new();
-        for task in tasks.drain(..) {
-            if self.task_matches_query(&task, &lowered)? {
-                matches.push(task);
-            }
+        let bundles = self.candidate_bundles_by_tags(tags)?;
+        self.search_bundles(bundles, &lowered)
+    }
+
+    /// The bundles `list_tasks_by_tags` would materialize, in the same order,
+    /// handed over whole so a caller that also needs the sidecars does not
+    /// read each bundle again.
+    fn candidate_bundles_by_tags(&self, tags: &[String]) -> Result<Vec<TaskBundleV2>, OrbitError> {
+        let required_tags = normalize_task_tags(tags.to_vec());
+        if let Some(bundles) = self.indexed_bundles(TaskIndexFilter {
+            status: None,
+            priority: None,
+            job_run_id: None,
+            tags: required_tags.clone(),
+        })? {
+            return Ok(bundles);
         }
-        Ok(matches)
+        let mut bundles = self.bundle_store.list_bundles()?;
+        bundles.retain(|bundle| {
+            required_tags
+                .iter()
+                .all(|required| bundle.envelope.tags.iter().any(|tag| tag == required))
+        });
+        sort_by_created_desc_id_asc(
+            &mut bundles,
+            |bundle| &bundle.envelope.created_at,
+            |bundle| &bundle.envelope.id,
+        );
+        Ok(bundles)
     }
 
     pub(crate) fn delete_task(&self, id: &str) -> Result<bool, OrbitError> {

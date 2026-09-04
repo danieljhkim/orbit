@@ -67,8 +67,8 @@ carry `id = "claude"` while `model` keeps the finer grain retrievable.
    distinct diagnostics stay distinct.
 3. A bare agent family name (`claude`) → agent with no model recorded.
 4. A model string whose family is inferable via `identity::agent_from_model`
-   (`claude-opus-5`, `opus`, `gpt-5.6-luna`), or a shorthand in the explicit table
-   (`fable`, `haiku`) → agent with both family and model.
+   (`claude-opus-5`, `opus`, `fable-5.1`, `gpt-5.6-luna`), or a shorthand in the
+   explicit table (`haiku`) → agent with both family and model.
 5. Anything else → an agent with unknown family, keeping the label as both `id` and
    `model`. Every label reaching this point came from an attribution path that held a
    model or family, so an unrecognized *agent* loses less than a discarded row would.
@@ -90,7 +90,8 @@ Bump the version when a label's canonical resolution changes — a new alias, a 
 label, a corrected family. Do **not** bump it for a model that an existing rule already
 resolves. A bump requires a new append-only ledger migration that calls
 `backfill_audit_actor_identity`, which re-derives exactly the rows whose stamped version
-is not current.
+is not current. Map history: v2 (migration v18 `audit_actor_alias_v2`) promoted `fable`
+from a shorthand alias to a family rule so versioned Fable labels resolve to `claude`.
 
 ## Persistence
 

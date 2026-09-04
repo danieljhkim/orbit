@@ -12,7 +12,8 @@
 //! `blocked` is a deliberate dead end for automation: `Blocked` is not in the
 //! workflow-admission allowlist, so the ship
 //! sweep skips these tasks. The only way out is a human/orchestrator decision
-//! (`orbit task start`, which accepts `Blocked`, or moving it back to backlog).
+//! (the `orbit.task.start` tool, which accepts `Blocked`, or moving it back
+//! to backlog with `orbit task update <id> --status backlog`).
 
 use orbit_common::OrbitError;
 use orbit_engine::{RuntimeHost, blocked_workflow_failure_update};

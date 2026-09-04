@@ -8,7 +8,7 @@ use orbit_types::workflow::{AutoTaskSchedule, AutoTaskTemplate, DedupePolicy};
 use serde_json::Value;
 
 use crate::OrbitRuntime;
-use crate::auto_tasks::crud::{AutoTaskAddParams, AutoTaskUpdateParams};
+use crate::application::auto_tasks::crud::{AutoTaskAddParams, AutoTaskUpdateParams};
 
 pub(super) fn add(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitError> {
     let name = required_str(&input, "name")?;

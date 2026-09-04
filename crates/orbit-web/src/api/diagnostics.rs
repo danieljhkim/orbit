@@ -303,9 +303,15 @@ pub(super) async fn list_diagnostics_errors(
     Query(q): Query<DiagnosticsQuery>,
 ) -> Response {
     let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
-    match diagnostics_errors(&runtime, limit) {
+    // Reads up to 50k audit rows and a blob per agent invocation: blocking
+    // pool, not the worker serving the request (see `blocking`).
+    match super::blocking("diagnostics errors", move || {
+        diagnostics_errors(&runtime, limit)
+    })
+    .await
+    {
         Ok(rows) => Json(Value::Array(rows)).into_response(),
-        Err(e) => map_runtime_error(e),
+        Err(response) => *response,
     }
 }
 
@@ -369,7 +375,10 @@ fn agent_stderr_error_rows(
     let step_index_by_id = step_index_by_id(&events);
     let blob_store = audit_blob_store(runtime);
     let mut rows = Vec::new();
-    for event in events {
+    // `events` is oldest-first so the step index above numbers steps in
+    // execution order; the row scan walks newest-first because it stops at
+    // `2 * limit` rows and the caller keeps only the newest `limit` of them.
+    for event in events.iter().rev() {
         if event.get("body_kind").and_then(Value::as_str) != Some("cli_invocation_finished") {
             continue;
         }
@@ -382,7 +391,7 @@ fn agent_stderr_error_rows(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let step = enclosing_step_id_for_event(&event, &by_id);
+        let step = enclosing_step_id_for_event(event, &by_id);
         let step_index = step
             .as_ref()
             .and_then(|step| step_index_by_id.get(step).copied());

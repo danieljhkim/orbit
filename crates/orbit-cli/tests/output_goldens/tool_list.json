@@ -212,7 +212,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Append an Orbit friction report to the Orbit store via orbit.friction.*",
+    "description": "Append a friction report",
     "enabled": true,
     "name": "orbit.friction.add",
     "parameters": [
@@ -252,7 +252,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "List Orbit friction records from the Orbit store via orbit.friction.*",
+    "description": "List friction records",
     "enabled": true,
     "name": "orbit.friction.list",
     "parameters": [
@@ -316,7 +316,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Update triage metadata for an Orbit friction record",
+    "description": "Update triage metadata for a friction record",
     "enabled": true,
     "name": "orbit.friction.update",
     "parameters": [

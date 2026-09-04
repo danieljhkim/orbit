@@ -136,12 +136,37 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "audit_self_reported_actor",
         apply: super::apply_audit_self_reported_actor,
     },
+    // Alias map v2: `fable` became a family rule so versioned Fable labels
+    // resolve to `claude`. Rows stamped with the old map are re-derived.
+    Migration {
+        version: 18,
+        name: "audit_actor_alias_v2",
+        apply: super::apply_audit_actor_alias_v2,
+    },
+    // The run listing orders by `created_at DESC, run_id` per workspace; the
+    // existing indexes cover `(workspace_id, job_id, scheduled_at)` and
+    // `(workspace_id, state)`, so every dashboard page scanned and sorted a
+    // workspace's whole run history.
+    Migration {
+        version: 19,
+        name: "job_runs_created_index",
+        apply: super::apply_job_runs_created_index,
+    },
+    // Every window filter (`ts >= ? AND ts < ?`) and the newest-first
+    // listing (`ORDER BY ts DESC, id DESC LIMIT n`) over `invocations` had
+    // only the job-run and activity indexes to work with, so each was a
+    // full scan plus a temp sort.
+    Migration {
+        version: 20,
+        name: "invocations_ts_index",
+        apply: super::apply_invocations_ts_index,
+    },
 ];
 
 /// Highest schema version this binary knows how to produce. Public for
 /// the future `orbit migrate` surface (P3.4), alongside
 /// [`AppliedMigration`] and the `Store` version accessors.
-pub const SUPPORTED_SCHEMA_VERSION: u32 = 17;
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 20;
 
 const LEDGER_KEY_PREFIX: &str = "migration.v";
 

@@ -9,7 +9,7 @@ doc_role: overview
 type: design
 summary: Dynamically-defined recurring task templates minted by one generic scheduler routine — periodic work as data, not code.
 tags: [auto-tasks]
-paths: ["crates/orbit-core/src/auto_tasks/**"]
+paths: ["crates/orbit-core/src/application/auto_tasks/**"]
 related_features: [auto-tasks]
 related_artifacts: [ORB-10149, ORB-10318, ORB-10348, ORB-10439, ORB-10446, ORB-10514, ORB-10549, ORB-10950, ORB-11054, ORB-11095]
 ---
@@ -70,12 +70,12 @@ becomes just the first definition.
 | Concern | File | Task |
 |---|---|---|
 | Definition schema | `crates/orbit-types/src/workflow/auto_task.rs` | ORB-10149 |
-| Discovery (fail-closed) | `crates/orbit-core/src/auto_tasks/loader.rs` | ORB-10149 |
-| Due-math + catch-up | `crates/orbit-core/src/auto_tasks/schedule.rs` | ORB-10149 |
-| Host-local cursor | `crates/orbit-core/src/auto_tasks/state.rs` | ORB-10149 |
-| Scheduler pass | `crates/orbit-core/src/auto_tasks/scheduler.rs` | ORB-10149 |
-| CRUD (CLI + MCP shared) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10149 |
-| Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
+| Discovery (fail-closed) | `crates/orbit-core/src/application/auto_tasks/loader.rs` | ORB-10149 |
+| Due-math + catch-up | `crates/orbit-core/src/application/auto_tasks/schedule.rs` | ORB-10149 |
+| Host-local cursor | `crates/orbit-core/src/application/auto_tasks/state.rs` | ORB-10149 |
+| Scheduler pass | `crates/orbit-core/src/application/auto_tasks/scheduler.rs` | ORB-10149 |
+| CRUD (CLI + MCP shared) | `crates/orbit-core/src/application/auto_tasks/crud.rs` | ORB-10149 |
+| Manual mint (`mint`, CLI + MCP) | `crates/orbit-core/src/application/auto_tasks/crud.rs` | ORB-10439, ORB-10798 |
 | Deterministic action | `crates/orbit-core/src/adapter/engine_host/v2_host/dispatch.rs` | ORB-10149 |
 | Seeded assets | `crates/orbit-core/assets/{activities,jobs,routines}/…` | ORB-10149 |
 | Default auto-task catalog | `crates/orbit-core/assets/auto_tasks/…` | ORB-10549, ORB-10550, ORB-10950 |

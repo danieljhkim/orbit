@@ -9,7 +9,7 @@ doc_role: overview
 type: design
 summary: Durable, git-versioned scheduler primitive that fires catalog jobs/activities on cron triggers, per host, with local state.
 tags: [routines, scheduler]
-paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
+paths: ["crates/orbit-cli/src/command/routine/**", "crates/orbit-core/src/application/routines/**", "crates/orbit-cmd/src/registry_routines.rs", "crates/orbit-cmd/src/registry_runtime.rs", "crates/orbit-registry/src/host_identity.rs", "crates/orbit-registry/src/workspace_registry/**", "crates/orbit-store/src/sqlite/routine_store/**"]
 related_features: [routines, activity-job, host-registry]
 related_artifacts: [ORB-10001, ORB-10021, ORB-10207, ORB-10270, ORB-10319, ORB-10739]
 ---
@@ -93,7 +93,7 @@ fragmentation this feature exists to end.
 | Concern | File | Task |
 |---------|------|------|
 | Routine definition type + fail-closed YAML parse | `crates/orbit-common/src/types/routine.rs` | [ORB-10021] |
-| Registry-neutral loading, due computation, dispatch, status, and pin validation | `crates/orbit-core/src/routines/` | [ORB-10021], [ORB-10270] |
+| Registry-neutral loading, due computation, dispatch, status, and pin validation | `crates/orbit-core/src/application/routines/` | [ORB-10021], [ORB-10270] |
 | Local identity/catalog composition, workspace discovery, and runtime construction | `crates/orbit-cmd/src/registry_routines.rs`, `crates/orbit-cmd/src/registry_runtime.rs`, `crates/orbit-registry/src/` | [ORB-10270], [ORB-10319] |
 | Host-local scheduler state (fires, pauses) | `crates/orbit-store/src/sqlite/routine_store/` | [ORB-10021] |
 | Sweep advisory lock (flock, host-global) | `crates/orbit-store/src/sqlite/routine_store/mod.rs` | [ORB-10021] |

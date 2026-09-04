@@ -35,13 +35,7 @@ impl OrbitRuntime {
             }
         }
 
-        let query = JobRunQuery {
-            job_id: params.job_id,
-            state: params.state,
-            terminal_only: params.terminal_only,
-            created_since: params.since,
-            limit: params.limit,
-        };
+        let query = job_run_query(params);
         let runs = self.list_job_runs_filtered_backend(&query)?;
         if self.reconcile_job_run_records(&runs)? > 0 {
             self.list_job_runs_filtered_backend(&query)
@@ -74,7 +68,35 @@ impl OrbitRuntime {
         self.stores().jobs().list_job_runs_filtered(query)
     }
 
+    /// How many runs match `params`, without hydrating any of them. `limit`
+    /// is ignored: a count is a count.
+    pub fn count_job_runs(&self, params: JobRunListParams) -> Result<u64, OrbitError> {
+        self.reconcile_stale_job_runs(params.job_id.as_deref())?;
+        self.stores()
+            .jobs()
+            .count_job_runs_filtered(&job_run_query(params))
+    }
+
+    /// Recorded wall-clock durations of every run matching `params`, for
+    /// percentile baselines. `limit` is ignored.
+    pub fn list_job_run_durations(&self, params: JobRunListParams) -> Result<Vec<u64>, OrbitError> {
+        self.reconcile_stale_job_runs(params.job_id.as_deref())?;
+        self.stores()
+            .jobs()
+            .list_job_run_durations_filtered(&job_run_query(params))
+    }
+
     pub(crate) fn get_job_run_backend(&self, run_id: &str) -> Result<Option<JobRun>, OrbitError> {
         self.stores().jobs().get_job_run(run_id)
+    }
+}
+
+fn job_run_query(params: JobRunListParams) -> JobRunQuery {
+    JobRunQuery {
+        job_id: params.job_id,
+        state: params.state,
+        terminal_only: params.terminal_only,
+        created_since: params.since,
+        limit: params.limit,
     }
 }

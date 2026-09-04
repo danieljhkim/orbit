@@ -431,6 +431,13 @@
         min-height: 0;
       }
 
+      /* `main` has an author display rule, so make the Operations subview's
+         HTML hidden state win at every breakpoint (including the compact
+         `main { ... !important }` layout below).  The router owns which
+         sibling carries `hidden`; this rule only gives that state its native
+         rendered and interaction semantics. */
+      .tab-pane[data-tab="operations"] > main[hidden] { display: none !important; }
+
       /* ORB-10972: the content column scrolls, not the document. The task
          pane's main fills the column so the dock beside it can be full height. */
       .main-col > .tab-pane { flex: 1 1 auto; min-height: 0; overflow-y: auto; }

@@ -4,14 +4,14 @@
 //!
 //! Catch-up always collapses: fires missed while the host was down produce a
 //! single make-up task, not one per missed slot. Cron schedules reuse the
-//! routine due-math (`crate::routines::due`) under [`MissedRunPolicy::CatchUpOnce`];
+//! routine due-math (`crate::application::routines::due`) under [`MissedRunPolicy::CatchUpOnce`];
 //! interval schedules fire at most one task for the most recent boundary.
 
 use chrono::{DateTime, Duration, Local, Utc};
 use orbit_common::OrbitError;
 use orbit_types::workflow::{AutoTaskSchedule, MissedRunPolicy};
 
-use crate::routines::due::{DueDecision, due_decision, parse_cron};
+use crate::application::routines::due::{DueDecision, due_decision, parse_cron};
 
 /// Outcome of the due check for one definition on one scheduler pass.
 #[derive(Debug, Clone, PartialEq, Eq)]

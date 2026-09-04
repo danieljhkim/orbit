@@ -630,6 +630,9 @@ fn ensure_invocation_schema_v1(conn: &Connection) -> Result<(), OrbitError> {
             CREATE INDEX IF NOT EXISTS idx_invocations_activity_id
             ON invocations(activity_id);
 
+            CREATE INDEX IF NOT EXISTS idx_invocations_ts
+            ON invocations(ts DESC, id DESC);
+
             CREATE INDEX IF NOT EXISTS idx_invocation_tasks_task_id
             ON invocation_tasks(task_id);
 
@@ -697,6 +700,9 @@ fn ensure_v2_state_consolidation_schema(conn: &Connection) -> Result<(), OrbitEr
 
             CREATE INDEX IF NOT EXISTS idx_job_runs_ws_state
             ON job_runs(workspace_id, state);
+
+            CREATE INDEX IF NOT EXISTS idx_job_runs_workspace_created
+            ON job_runs(workspace_id, created_at DESC, run_id ASC);
 
             CREATE TABLE IF NOT EXISTS job_run_steps (
                 workspace_id TEXT NOT NULL,
@@ -1245,6 +1251,58 @@ fn apply_audit_self_reported_actor(conn: &Connection) -> Result<(), OrbitError> 
         r#"
             CREATE INDEX IF NOT EXISTS idx_audit_events_self_reported_actor
             ON audit_events(self_reported_actor);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v18 `audit_actor_alias_v2` migration: the alias map moved `fable` from a
+/// shorthand entry to a family rule, so versioned Fable labels (`fable-5.1`)
+/// now resolve to `claude` instead of an unrecognized family. Re-derive every
+/// row stamped with the previous map; rows already at the current version are
+/// untouched, and `role` is never rewritten.
+fn apply_audit_actor_alias_v2(conn: &Connection) -> Result<(), OrbitError> {
+    ensure_audit_events_schema(conn)?;
+    backfill_audit_actor_identity(conn)
+}
+
+/// v19 `job_runs_created_index`: cover the listing's per-workspace
+/// `ORDER BY created_at DESC, run_id ASC` so a bounded page stops scanning
+/// and sorting the whole workspace history.
+///
+/// A legacy database may reach this entry with no `job_runs` table, or with
+/// the pre-consolidation one that has no `workspace_id`; the current table
+/// is created at open time by `ensure_v2_state_consolidation_schema`, which
+/// declares the same index. So this entry indexes the table only when it is
+/// already the current shape and otherwise leaves it to open time.
+fn apply_job_runs_created_index(conn: &Connection) -> Result<(), OrbitError> {
+    if !table_has_column(conn, "job_runs", "workspace_id")?
+        || !table_has_column(conn, "job_runs", "created_at")?
+    {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_job_runs_workspace_created
+            ON job_runs(workspace_id, created_at DESC, run_id ASC);
+        "#,
+    )
+    .map_err(|error| OrbitError::Store(error.to_string()))
+}
+
+/// v20 `invocations_ts_index`: cover the accounting window filters and the
+/// newest-first invocation listing on `invocations(ts, id)`.
+///
+/// Guarded like v19: `ensure_invocation_schema_v1` declares the same index
+/// for a database whose `invocations` table is created or upgraded at open.
+fn apply_invocations_ts_index(conn: &Connection) -> Result<(), OrbitError> {
+    if !table_has_column(conn, "invocations", "ts")? {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+            CREATE INDEX IF NOT EXISTS idx_invocations_ts
+            ON invocations(ts DESC, id DESC);
         "#,
     )
     .map_err(|error| OrbitError::Store(error.to_string()))

@@ -12,8 +12,9 @@ use serde_json::Value;
 
 use crate::context::RuntimeHost;
 
+use super::super::git::git_success;
 use super::cleanup::remove_worktree;
-use super::{WorktreeIdentity, resolve_shared_worktree_path};
+use super::{WorktreeIdentity, is_registered_worktree, resolve_shared_worktree_path};
 
 /// Task statuses that settle the work as done — the only statuses that
 /// license discarding a run's worktree and branch. Every other status
@@ -251,10 +252,19 @@ fn classify_known<H: RuntimeHost + ?Sized>(
 
     // Deliberately no `--force`: a last-moment dirtying of the worktree makes
     // Git fail closed. Never replace this with raw recursive deletion.
-    let branch_to_delete = branch_exists(repo_root, &branch).then_some(branch.as_str());
-    remove_worktree(repo_root, path, branch_to_delete, false)?;
-    report.action = "removed".to_string();
+    remove_worktree(repo_root, path, None, false)?;
     report.bytes_reclaimed = estimated_bytes;
+    // The directory is gone and its bytes are reclaimed either way; a branch
+    // that cannot be deleted right now (ref lock, checked out elsewhere) is
+    // reported rather than turning the whole pass into an error that hides
+    // this removal and stops the paths after it.
+    report.action = if branch_exists(repo_root, &branch)
+        && git_success(repo_root, &["branch", "-D", &branch]).is_err()
+    {
+        "removed:branch_retained".to_string()
+    } else {
+        "removed".to_string()
+    };
     Ok(report)
 }
 
@@ -333,15 +343,16 @@ fn branch_name(worktree: &Path) -> Result<String, OrbitError> {
     Ok(branch.to_string())
 }
 
-fn is_registered_worktree(repo_root: &Path, path: &Path) -> Result<bool, OrbitError> {
-    let list = git_output(repo_root, &["worktree", "list", "--porcelain"])?;
-    let expected = path.to_string_lossy();
-    Ok(list
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree "))
-        .any(|registered| registered == expected))
-}
-
+/// Match on canonical paths, not raw strings. `git worktree list` reports the
+/// resolved path, while the caller holds whatever path it was handed. Where the
+/// two differ only by a symlink on the way down — on macOS `/var` and `/tmp`
+/// are symlinks into `/private`, so any worktree under them reports one path
+/// and is asked about under another — a literal comparison reads a registered
+/// worktree as unregistered and GC retains it forever.
+///
+/// The literal comparison is kept as the fast path, and a registered entry
+/// whose directory has already been removed simply fails to canonicalize and
+/// does not match, which is the same answer the literal comparison gave.
 fn branch_exists(repo_root: &Path, branch: &str) -> bool {
     Command::new("git")
         .current_dir(repo_root)

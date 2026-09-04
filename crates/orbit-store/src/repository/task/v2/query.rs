@@ -1,45 +1,73 @@
 use super::*;
 
 impl TaskV2Store {
-    pub(super) fn task_matches_query(
+    /// Search over the bundles the candidate listing already read, so a
+    /// query costs one bundle read per task instead of three (each of which
+    /// re-hashed every artifact blob) plus a fourth read of the blobs.
+    pub(super) fn search_bundles(
         &self,
-        task: &Task,
+        bundles: Vec<TaskBundleV2>,
+        lowered: &str,
+    ) -> Result<Vec<Task>, OrbitError> {
+        let mut matches = Vec::new();
+        for bundle in bundles {
+            let comments_match = bundle
+                .comments
+                .iter()
+                .any(|comment| comment.body.to_lowercase().contains(lowered));
+            let manifest = bundle.artifact_manifest.clone();
+            let task = self.task_from_bundle(bundle)?;
+            // Cheapest evidence first: the fields already in memory, then the
+            // comments, and only then the artifact blobs on disk.
+            if task_in_memory_fields_match_query(&task, lowered)
+                || comments_match
+                || self.artifact_manifest_matches_query(&task.id, manifest.as_ref(), lowered)?
+            {
+                matches.push(task);
+            }
+        }
+        Ok(matches)
+    }
+
+    /// Phase 5 bridge: artifact search reads text artifact files on demand
+    /// until generated full-text indexes carry artifact paths, content, and
+    /// snippets. A path match needs no read; a text blob is read only when
+    /// its path did not already match.
+    fn artifact_manifest_matches_query(
+        &self,
+        id: &str,
+        manifest: Option<&ArtifactManifestV2>,
         lowered: &str,
     ) -> Result<bool, OrbitError> {
-        if task_in_memory_fields_match_query(task, lowered) {
-            return Ok(true);
-        }
-
-        if self.task_sidecars_match_query(&task.id, lowered)? {
-            return Ok(true);
-        }
-
-        // Phase 5 bridge: artifact search reads text artifact files on demand until
-        // generated full-text indexes carry artifact paths, content, and snippets.
-        self.task_artifacts_match_query(&task.id, lowered)
-    }
-
-    fn task_sidecars_match_query(&self, id: &str, lowered: &str) -> Result<bool, OrbitError> {
-        let Some(comments) = self.get_task_comments(id)? else {
+        let Some(manifest) = manifest else {
             return Ok(false);
         };
-        Ok(comments
-            .iter()
-            .any(|comment| comment.message.to_lowercase().contains(lowered)))
-    }
-
-    fn task_artifacts_match_query(&self, id: &str, lowered: &str) -> Result<bool, OrbitError> {
-        let Some(artifacts) = self.get_task_artifacts(id)? else {
-            // A task may be deleted after the indexed/listed candidate set is built.
-            return Ok(false);
-        };
-        Ok(artifacts.iter().any(|artifact| {
-            artifact.path.to_lowercase().contains(lowered)
-                || (is_text_artifact_media_type(&artifact.media_type)
-                    && artifact
-                        .text_content()
-                        .is_some_and(|content| content.to_lowercase().contains(lowered)))
-        }))
+        let artifact_dir = self
+            .bundle_store
+            .bundle_path(id)?
+            .join(TASK_ARTIFACTS_DIR_NAME);
+        for file in &manifest.files {
+            if file.path.to_lowercase().contains(lowered) {
+                return Ok(true);
+            }
+            if !is_text_artifact_media_type(&file.media_type) {
+                continue;
+            }
+            let content = match fs::read(artifact_dir.join(&file.blob)) {
+                Ok(content) => content,
+                // The bundle can be rewritten between the listing and this
+                // read; a blob that vanished is not a match, not an error.
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(OrbitError::Io(err.to_string())),
+            };
+            if String::from_utf8(content)
+                .ok()
+                .is_some_and(|text| text.to_lowercase().contains(lowered))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

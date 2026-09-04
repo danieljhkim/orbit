@@ -287,6 +287,64 @@ fn spawn_with_timeout_kills_grandchild_holding_output_pipes() {
     );
 }
 
+/// A helper the agent detached into its own session outlives the child and
+/// the group kill, and keeps the stdout pipe open. The child exited normally,
+/// so the run must still finish promptly with the output it produced.
+#[cfg(unix)]
+#[test]
+fn spawn_with_timeout_returns_after_a_normal_exit_despite_an_escaped_pipe_holder() {
+    if std::process::Command::new("perl")
+        .arg("-e")
+        .arg("1")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let pid_dir = tempdir().expect("pid tempdir");
+    let pid_file = pid_dir.path().join("escaped.pid");
+    // perl re-parents itself into a new session (so the group kill misses it)
+    // and execs a sleep that inherits our stdout.
+    let script = format!(
+        "perl -MPOSIX -e 'POSIX::setsid(); open(my $f, \">\", $ARGV[0]); print $f $$; close $f; exec \"sleep\", \"30\"' {} & printf '%s\n' 'done'",
+        shell_quote(pid_file.to_string_lossy().as_ref())
+    );
+    let args = sh_args(&script);
+
+    let started = std::time::Instant::now();
+    let (stdout, _stderr, exit_code, _duration, timed_out) =
+        spawn_with_timeout(spawn_test_request(
+            "/bin/sh",
+            &args,
+            None,
+            Duration::from_secs(20),
+            SpawnTraceContext {
+                provider: "codex",
+                job_run_id: "job-escaped-holder",
+                task_id: Some("TESC"),
+                cwd: None,
+            },
+        ))
+        .expect("spawn succeeds");
+
+    assert!(
+        wait_until(Duration::from_secs(2), || pid_file.exists()),
+        "escaped helper should have recorded its pid"
+    );
+    let escaped_pid = read_pid(&pid_file);
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &escaped_pid.to_string()])
+        .status();
+
+    assert!(!timed_out);
+    assert_eq!(exit_code, Some(0));
+    assert_eq!(stdout.bytes(), b"done\n");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "a normal exit must not wait on the escaped pipe holder"
+    );
+}
+
 #[cfg(unix)]
 fn read_pid(path: &Path) -> u32 {
     std::fs::read_to_string(path)

@@ -6,10 +6,11 @@
 //! the destination, and delivers that single `tools/call`. The client speaks
 //! MCP over the same non-PTY SSH argv the v1 proxy uses.
 
+use std::io::Read;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, sync_channel};
 use std::time::{Duration, Instant};
 
 use orbit_common::OrbitError;
@@ -18,6 +19,13 @@ use orbit_types::workspace::Workspace;
 use serde_json::{Value, json};
 
 use super::config::Destination;
+
+/// Lines the probe reader may queue ahead of the consumer before it blocks.
+const PROBE_LINE_QUEUE: usize = 64;
+
+/// Longest single line the probe reader accepts from a destination. Every
+/// MCP message is one JSON line; anything past this is not a message.
+const MAX_PROBE_LINE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// How long one destination gets to answer everything that decides *where* a
 /// call goes.
@@ -386,11 +394,27 @@ impl DestinationSession {
             .ok_or_else(|| unreachable(&destination, "SSH session has no stdout".to_string()))?;
         // A reader thread is what makes the deadline real: a blocking read on
         // an unresponsive host cannot otherwise be abandoned, and the thread
-        // ends on its own when the killed child closes the pipe.
-        let (sender, lines) = channel();
+        // ends on its own when the killed child closes the pipe. It is also
+        // bounded in both directions: the queue applies backpressure instead
+        // of buffering whatever the destination streams while the caller
+        // waits, and a line longer than any MCP message ends the session
+        // instead of growing a string until this process is killed.
+        let (sender, lines) = sync_channel(PROBE_LINE_QUEUE);
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader
+                    .by_ref()
+                    .take(MAX_PROBE_LINE_BYTES)
+                    .read_line(&mut line)
+                {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+                if !line.ends_with('\n') && line.len() as u64 >= MAX_PROBE_LINE_BYTES {
+                    break;
+                }
                 if sender.send(line).is_err() {
                     break;
                 }

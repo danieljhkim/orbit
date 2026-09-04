@@ -574,7 +574,7 @@ mod tests {
     use orbit_types::workflow::{OverlapPolicy, RoutineTarget};
     use tempfile::tempdir;
 
-    use crate::routines::parse_cron;
+    use crate::application::routines::parse_cron;
 
     use super::*;
 

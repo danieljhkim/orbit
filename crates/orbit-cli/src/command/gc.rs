@@ -3,7 +3,7 @@
 use clap::{Args, Subcommand};
 use orbit_core::{OrbitError, OrbitRuntime};
 
-use crate::command::{CommandOut, CommandOutput, Execute, Payload};
+use crate::command::{Block, CommandOut, Execute, Payload};
 
 #[derive(Args)]
 #[command(about = "Inspect and explicitly reap Orbit-managed garbage")]
@@ -60,23 +60,21 @@ pub struct WorktreeGcArgs {
 impl Execute for WorktreeGcArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         let result = runtime.gc_worktrees(self.confirm, self.run, self.older_than_hours)?;
+        let doc = serde_json::to_value(&result).map_err(|error| {
+            OrbitError::Execution(format!("failed to serialize worktree GC report: {error}"))
+        })?;
+        // `--json` keeps forcing the document even on a terminal; the global
+        // `--format` picks between the same document and the lines below.
         if self.json {
-            return Ok(
-                Payload::document(serde_json::to_value(result).map_err(|error| {
-                    OrbitError::Execution(format!(
-                        "failed to serialize worktree GC report: {error}"
-                    ))
-                })?)
-                .into(),
-            );
+            return Ok(Payload::document(doc).into());
         }
 
+        let mut lines = Vec::with_capacity(result.reports.len() + 1);
         if result.reports.is_empty() {
-            println!("No worktrees matched.");
-            return Ok(CommandOutput::Silent);
+            lines.push("No worktrees matched.".to_string());
         }
         for report in &result.reports {
-            println!(
+            lines.push(format!(
                 "path={} run_id={} run_state={} task_id={} task_status={} pr_status={} action={} bytes_reclaimed={}",
                 report.path.display(),
                 report.run_id.as_deref().unwrap_or("-"),
@@ -94,9 +92,11 @@ impl Execute for WorktreeGcArgs {
                 report.pr_status.as_deref().unwrap_or("-"),
                 report.action,
                 report.bytes_reclaimed
-            );
+            ));
         }
-        println!("total_bytes_reclaimed={}", result.bytes_reclaimed);
-        Ok(CommandOutput::Silent)
+        if !result.reports.is_empty() {
+            lines.push(format!("total_bytes_reclaimed={}", result.bytes_reclaimed));
+        }
+        Ok(Payload::blocks(doc, vec![Block::text(lines.join("\n"))]).into())
     }
 }

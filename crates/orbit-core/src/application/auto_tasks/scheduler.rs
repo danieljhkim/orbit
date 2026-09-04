@@ -35,7 +35,8 @@ pub struct AutoTaskFireReport {
     pub name: String,
     /// One of: `fired`, `would_fire`, `baselined`, `would_baseline`, `skipped`.
     pub action: &'static str,
-    /// Why, for `skipped` rows.
+    /// Why, for `skipped` rows; for `fired` rows, only when the cursor
+    /// checkpoint after minting failed.
     pub reason: Option<String>,
     /// Scheduled slot consumed (RFC 3339, UTC), when a fire was involved.
     pub slot: Option<String>,
@@ -155,7 +156,12 @@ fn fire_definition(
             }
 
             let task = mint_task(runtime, definition)?;
-            upsert_cursor(
+            // The task exists from here on. A cursor that cannot be written
+            // must not turn this into a `skipped` row: the operator would
+            // see no fire while the backlog gained a task, and every later
+            // pass would mint another for the same slot. Report the fire
+            // with the task id and say the checkpoint is missing.
+            let reason = upsert_cursor(
                 state_path,
                 &definition.name,
                 AutoTaskCursor {
@@ -164,11 +170,15 @@ fn fire_definition(
                     last_fired_at: Some(now.to_rfc3339()),
                     last_task_id: Some(task.id.clone()),
                 },
-            )?;
+            )
+            .err()
+            .map(|error| {
+                format!("cursor not advanced; the next pass may fire this slot again: {error}")
+            });
             Ok(AutoTaskFireReport {
                 name: definition.name.clone(),
                 action: "fired",
-                reason: None,
+                reason,
                 slot: Some(slot),
                 task_id: Some(task.id),
             })

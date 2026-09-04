@@ -12,7 +12,7 @@ use orbit_common::governance::authorization::{
     DASHBOARD_CLOCK_SERVICE, DASHBOARD_ROUTINE_TOGGLE, GovernedOperation, authorize,
 };
 use orbit_common::observability::audit_id::audit_execution_id;
-use orbit_core::routines::{
+use orbit_core::application::routines::{
     ClockStatus, RoutineStatus, RoutineStatusReport, RoutineToggleOutcome, clock_status,
     set_clock_cadence, set_clock_enabled, set_routine_enabled,
 };
@@ -111,7 +111,7 @@ pub(super) async fn toggle_routine(
         .iter()
         .find(|status| status.routine.definition.name == body.name)
     else {
-        return not_found_or_conflict(
+        return named_entity_not_found(
             "routine_not_found",
             format!("routine '{}' was not found", body.name),
         );
@@ -119,7 +119,7 @@ pub(super) async fn toggle_routine(
     if status.routine.source_workspace != body.source
         || status.routine.source_orbit_dir != runtime.shared_root()
     {
-        return not_found_or_conflict(
+        return selection_conflict(
             "workspace_mismatch",
             format!(
                 "select routine source workspace '{}' before changing '{}'",
@@ -128,7 +128,7 @@ pub(super) async fn toggle_routine(
         );
     }
     if body.host_id != report.host_id || !status.pinned_to_host {
-        return not_found_or_conflict(
+        return selection_conflict(
             "host_mismatch",
             format!(
                 "select pinned host '{}' before changing '{}'",
@@ -138,7 +138,7 @@ pub(super) async fn toggle_routine(
     }
     let actual_target = status.routine.definition.target.as_ref_string();
     if body.target != actual_target {
-        return not_found_or_conflict(
+        return selection_conflict(
             "target_mismatch",
             format!("routine target changed; refresh and confirm '{actual_target}'"),
         );
@@ -247,7 +247,7 @@ pub(super) async fn control_clock(
         Err(error) => return map_runtime_error(error),
     };
     if body.host_id != report.host_id {
-        return not_found_or_conflict(
+        return selection_conflict(
             "host_mismatch",
             format!(
                 "select host '{}' before changing its sweep clock",
@@ -423,7 +423,19 @@ pub(super) fn authorization_denied(denial: AuthorizationDenial) -> Response {
         .into_response()
 }
 
-pub(super) fn not_found_or_conflict(code: &'static str, message: String) -> Response {
+/// The named routine or auto-task does not exist: a permanent 404, so a
+/// client's "409 means refresh and retry" policy does not loop on it.
+pub(super) fn named_entity_not_found(code: &'static str, message: String) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": message, "code": code})),
+    )
+        .into_response()
+}
+
+/// The caller's selection (workspace, host, target) no longer matches the
+/// entity it is trying to change: a 409 the client resolves by refreshing.
+pub(super) fn selection_conflict(code: &'static str, message: String) -> Response {
     (
         StatusCode::CONFLICT,
         Json(json!({"error": message, "code": code})),

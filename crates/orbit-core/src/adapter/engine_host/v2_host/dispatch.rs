@@ -15,8 +15,9 @@ use serde_json::Value;
 
 use crate::OrbitRuntime;
 use crate::runtime::task::locks::{
-    emit_expired_reservation_events, merge_task_lock_conflicts, parse_task_ids,
-    requested_task_files, task_lock_conflicts, workspace_orbit_dir, workspace_task_reservation_id,
+    TaskLockIndex, emit_expired_reservation_events, merge_task_lock_conflicts, parse_task_ids,
+    requested_task_files_indexed, task_lock_conflicts_indexed, workspace_orbit_dir,
+    workspace_task_reservation_id,
 };
 
 use super::{
@@ -119,17 +120,20 @@ pub(crate) fn run_deterministic(
                     message: error.to_string(),
                 }
             })?;
-            let requested_files = requested_task_files(runtime, &task_ids).map_err(|error| {
+            let index = TaskLockIndex::load(runtime).map_err(|error| {
                 DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),
                 }
             })?;
-            let task_conflicts = task_lock_conflicts(runtime, &task_ids, &requested_files)
+            let repo_root = runtime.paths().repo_root.as_path();
+            let requested_files = requested_task_files_indexed(&index, &task_ids, repo_root)
                 .map_err(|error| DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),
                 })?;
+            let task_conflicts =
+                task_lock_conflicts_indexed(&index, &task_ids, &requested_files, repo_root);
             runtime
                 .reconcile_stale_owned_reservations_for_files(&requested_files, 32)
                 .map_err(|error| DispatchError::DeterministicActionFailed {
@@ -211,12 +215,12 @@ pub(crate) fn run_deterministic(
         // `.orbit/auto_tasks/`; catch-up collapses and `skip_if_open` dedupe
         // are enforced in the scheduler core.
         CoreDeterministicAction::RunAutoTaskScheduler => {
-            crate::auto_tasks::run_scheduler_action_json(runtime, input).map_err(|error| {
-                DispatchError::DeterministicActionFailed {
+            crate::application::auto_tasks::run_scheduler_action_json(runtime, input).map_err(
+                |error| DispatchError::DeterministicActionFailed {
                     action: action.to_string(),
                     message: error.to_string(),
-                }
-            })
+                },
+            )
         }
         // The admissible work for one drain iteration [ORB-10819]: the
         // conflict-free backlog leaves, plus one backlog epic root when no

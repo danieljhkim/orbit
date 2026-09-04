@@ -14,7 +14,7 @@ use super::{
     ManagedAssetAction, ManagedAssetLayout, ManagedAssetOutcome, ManagedAssetReconcileMode,
     ManagedAssetReconciliation, reconcile_managed_assets_in_mode,
 };
-use crate::auto_tasks::{DEFAULT_AUTO_TASK_FILES, auto_tasks_dir};
+use crate::application::auto_tasks::{DEFAULT_AUTO_TASK_FILES, auto_tasks_dir};
 use crate::bootstrap::activity::DEFAULT_ACTIVITY_FILES;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -808,13 +808,10 @@ fn dir_is_empty(path: &Path) -> Result<bool, OrbitError> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::sync::Mutex;
 
     use tempfile::tempdir;
 
     use super::*;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn fresh_workspace_init_seeds_disabled_worktree_gc_routine() {
@@ -905,7 +902,7 @@ mod tests {
             .expect("initialize fresh workspace");
         assert_eq!(
             initial.seeded_default_auto_tasks,
-            crate::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
+            crate::application::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
         );
         let friction_path = orbit_root.join("auto_tasks/friction-curation.yaml");
         let qa_path = orbit_root.join("auto_tasks/qa-sweep.yaml");
@@ -972,14 +969,14 @@ mod tests {
             orbit_types::workflow::DedupePolicy::SkipIfOpen
         ));
         assert!(!orbit_root.join("state/auto-tasks.json").exists());
-        let loaded = crate::auto_tasks::collect_auto_tasks(&orbit_root);
+        let loaded = crate::application::auto_tasks::collect_auto_tasks(&orbit_root);
         assert!(
             loaded.errors.is_empty(),
             "seeded definition must load cleanly"
         );
         assert_eq!(
             loaded.definitions.len(),
-            crate::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
+            crate::application::auto_tasks::DEFAULT_AUTO_TASK_FILES.len()
         );
         assert!(
             loaded
@@ -1037,12 +1034,10 @@ mod tests {
 
     #[test]
     fn global_init_seeds_skills_and_home_level_links() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+        // The shared guard serializes every HOME mutation in this test binary,
+        // including the runtime resolve tests; a module-local lock did not.
+        let _env = orbit_common::test_env::scoped([("HOME", home.path().to_str())]);
 
         let result = init_global(
             None,
@@ -1052,8 +1047,6 @@ mod tests {
                 ..Default::default()
             },
         );
-
-        restore_home(previous_home);
 
         let result = result.expect("init global");
         // Skills are now reconciled per managed file rather than per skill
@@ -1097,13 +1090,11 @@ mod tests {
 
     #[test]
     fn workspace_init_leaves_repo_skills_unseeded() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
         let workspace = tempdir().expect("workspace tempdir");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+        // The shared guard serializes every HOME mutation in this test binary,
+        // including the runtime resolve tests; a module-local lock did not.
+        let _env = orbit_common::test_env::scoped([("HOME", home.path().to_str())]);
 
         let orbit_root = workspace.path().join(".orbit");
         seed_default_skills(
@@ -1138,8 +1129,6 @@ mod tests {
                 ..Default::default()
             },
         );
-
-        restore_home(previous_home);
 
         let result = result.expect("init workspace");
         // Skills are now reconciled per managed file rather than per skill
@@ -1218,12 +1207,10 @@ mod tests {
 
     #[test]
     fn global_init_writes_crew_settings_as_custom_crew_to_config_toml() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+        // The shared guard serializes every HOME mutation in this test binary,
+        // including the runtime resolve tests; a module-local lock did not.
+        let _env = orbit_common::test_env::scoped([("HOME", home.path().to_str())]);
 
         let settings = BTreeMap::from([(
             "custom".to_string(),
@@ -1241,8 +1228,6 @@ mod tests {
                 ..Default::default()
             },
         );
-
-        restore_home(previous_home);
 
         let result = result.expect("init global with crew settings");
         assert!(result.created_config);
@@ -1278,12 +1263,10 @@ mod tests {
 
     #[test]
     fn global_init_with_existing_config_does_not_overwrite_crew_settings() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+        // The shared guard serializes every HOME mutation in this test binary,
+        // including the runtime resolve tests; a module-local lock did not.
+        let _env = orbit_common::test_env::scoped([("HOME", home.path().to_str())]);
 
         // Pre-seed config.toml with user content.
         let orbit_root = home.path().join(".orbit");
@@ -1309,8 +1292,6 @@ mod tests {
             },
         );
 
-        restore_home(previous_home);
-
         let result = result.expect("init global");
         assert!(!result.created_config);
         let final_contents = fs::read_to_string(&config_path).expect("read config");
@@ -1319,12 +1300,10 @@ mod tests {
 
     #[test]
     fn global_init_without_crew_settings_writes_clean_template() {
-        let _guard = ENV_LOCK.lock().expect("lock env");
         let home = tempdir().expect("home tempdir");
-        let previous_home = std::env::var_os("HOME");
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
+        // The shared guard serializes every HOME mutation in this test binary,
+        // including the runtime resolve tests; a module-local lock did not.
+        let _env = orbit_common::test_env::scoped([("HOME", home.path().to_str())]);
 
         let result = init_global(
             None,
@@ -1334,8 +1313,6 @@ mod tests {
                 ..Default::default()
             },
         );
-
-        restore_home(previous_home);
 
         let result = result.expect("init global");
         assert!(result.created_config);
@@ -1463,16 +1440,5 @@ mod tests {
             path.display()
         );
         assert!(path.join("SKILL.md").exists());
-    }
-
-    fn restore_home(previous_home: Option<std::ffi::OsString>) {
-        match previous_home {
-            Some(value) => unsafe {
-                std::env::set_var("HOME", value);
-            },
-            None => unsafe {
-                std::env::remove_var("HOME");
-            },
-        }
     }
 }

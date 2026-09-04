@@ -70,9 +70,11 @@ pub(super) fn wait_with_timeout_and_output_limit(
 
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut stdin_write_error = None;
+    let mut capture_limited: Option<&'static str> = None;
     let (timed_out, interrupted_signal, exit_success, exit_code) = loop {
-        if output_limit_rx.try_recv().is_ok() {
+        if let Ok(stream) = output_limit_rx.try_recv() {
             terminate_process_group(&mut child, termination_signal(), WAIT_POLL_INTERVAL)?;
+            capture_limited = Some(stream);
             break (false, None, false, None);
         }
 
@@ -155,6 +157,17 @@ pub(super) fn wait_with_timeout_and_output_limit(
             stderr.push(b'\n');
         }
         stderr.extend_from_slice(b"process timed out");
+    }
+    // A capture-limit stop looks like a bare failure otherwise (exit code
+    // `None`, often an empty stderr), and a tool such as `github.run.logs`
+    // then reports "failed: " with no reason for a log that was merely long.
+    if let Some(stream) = capture_limited {
+        if !stderr.is_empty() {
+            stderr.push(b'\n');
+        }
+        stderr.extend_from_slice(
+            format!("process output capture limit exceeded on {stream}").as_bytes(),
+        );
     }
     #[cfg(unix)]
     if !timed_out && let Some(signal) = interrupted_signal {

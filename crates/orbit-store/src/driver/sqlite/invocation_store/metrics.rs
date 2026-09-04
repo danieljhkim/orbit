@@ -193,7 +193,14 @@ impl Store {
             .map_err(|e| OrbitError::Store(e.to_string()))
     }
 
-    fn load_invocation_samples(&self) -> Result<Vec<InvocationSample>, OrbitError> {
+    /// Every invocation with a resolved model, in storage order. The callers
+    /// group into ordered maps and sort each bucket before taking
+    /// percentiles, so an `ORDER BY` here would only add a full-table sort;
+    /// the model filter runs in SQL so unattributed rows are never
+    /// materialized.
+    fn load_model_attributed_invocation_samples(
+        &self,
+    ) -> Result<Vec<InvocationSample>, OrbitError> {
         let conn = self.read()?;
         let mut stmt = conn
             .prepare(
@@ -201,7 +208,7 @@ impl Store {
                 SELECT activity_id, agent, model, input_tokens, cache_read_tokens,
                        cache_create_tokens, output_tokens, tool_call_count
                 FROM invocations
-                ORDER BY activity_id ASC, agent ASC, model ASC, id ASC
+                WHERE model IS NOT NULL AND TRIM(model) <> ''
                 "#,
             )
             .map_err(|e| OrbitError::Store(e.to_string()))?;
@@ -223,22 +230,6 @@ impl Store {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| OrbitError::Store(e.to_string()))
-    }
-
-    fn load_model_attributed_invocation_samples(
-        &self,
-    ) -> Result<Vec<InvocationSample>, OrbitError> {
-        Ok(self
-            .load_invocation_samples()?
-            .into_iter()
-            .filter(|sample| {
-                sample
-                    .model
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty())
-            })
-            .collect())
     }
 
     fn group_invocation_metrics<K, F>(

@@ -4,7 +4,7 @@
 //! `ResolvedFsProfile::modify` as ordered bind mounts. It is therefore honest
 //! write confinement, not a general read-policy implementation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -746,31 +746,41 @@ fn non_subtree_denies(profile: &ResolvedFsProfile) -> Vec<String> {
         .collect()
 }
 
+/// Every existing path matched by any of `rules`.
+///
+/// Rules are grouped by the directory their static prefix resolves to and
+/// each such directory is walked once. The shipped default policy carries
+/// four non-subtree denies (`**/.env` and friends) whose prefix is the
+/// workspace root, and the post-run guard expands them before and after every
+/// sandboxed invocation; one walk per rule per phase made that eight full
+/// workspace traversals (including `target/` and `.git/`) per agent step.
 fn expand_rules(rules: &[String]) -> Result<BTreeSet<PathBuf>, OrbitError> {
-    let mut expanded = BTreeSet::new();
+    let mut by_root: BTreeMap<PathBuf, Vec<_>> = BTreeMap::new();
     for rule in rules {
-        expanded.extend(expand_rule(rule)?);
+        let regex = compile_glob_regex(rule).map_err(|error| {
+            OrbitError::InvalidInput(format!(
+                "invalid linux-bwrap filesystem glob `{rule}`: {error}"
+            ))
+        })?;
+        let root = nearest_existing_ancestor(&static_prefix(rule))?;
+        by_root.entry(root).or_default().push(regex);
     }
-    Ok(expanded)
-}
-
-fn expand_rule(rule: &str) -> Result<BTreeSet<PathBuf>, OrbitError> {
-    let regex = compile_glob_regex(rule).map_err(|error| {
-        OrbitError::InvalidInput(format!(
-            "invalid linux-bwrap filesystem glob `{rule}`: {error}"
-        ))
-    })?;
-    let root = nearest_existing_ancestor(&static_prefix(rule))?;
-    let mut candidates = Vec::new();
-    walk_paths(&root, &mut candidates)?;
     let mut matches = BTreeSet::new();
-    for candidate in candidates {
-        let rendered = candidate.to_string_lossy().replace('\\', "/");
-        if regex.is_match(&rendered) {
-            matches.insert(canonical_existing(&candidate, "denyModify match")?);
+    for (root, regexes) in by_root {
+        let mut candidates = Vec::new();
+        walk_paths(&root, &mut candidates)?;
+        for candidate in candidates {
+            let rendered = candidate.to_string_lossy().replace('\\', "/");
+            if regexes.iter().any(|regex| regex.is_match(&rendered)) {
+                matches.insert(canonical_existing(&candidate, "denyModify match")?);
+            }
         }
     }
     Ok(matches)
+}
+
+fn expand_rule(rule: &str) -> Result<BTreeSet<PathBuf>, OrbitError> {
+    expand_rules(std::slice::from_ref(&rule.to_string()))
 }
 
 fn static_prefix(rule: &str) -> PathBuf {
@@ -800,8 +810,15 @@ fn nearest_existing_ancestor(path: &Path) -> Result<PathBuf, OrbitError> {
     canonical_existing(&current, "glob search root")
 }
 
+/// `root` itself and everything beneath it, each path once.
 fn walk_paths(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), OrbitError> {
     out.push(root.to_path_buf());
+    walk_children(root, out)
+}
+
+/// Every path beneath `root` (not `root`), each once: a directory is pushed
+/// by its parent's listing, never again when it is descended into.
+fn walk_children(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), OrbitError> {
     if !root.is_dir() {
         return Ok(());
     }
@@ -824,7 +841,7 @@ fn walk_paths(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), OrbitError> {
             })?
             .is_dir()
         {
-            walk_paths(&path, out)?;
+            walk_children(&path, out)?;
         }
     }
     Ok(())
@@ -851,3 +868,7 @@ fn is_executable(path: &Path) -> bool {
 fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
+
+#[cfg(test)]
+#[path = "tests/linux_sandbox.rs"]
+mod tests;

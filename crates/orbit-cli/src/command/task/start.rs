@@ -1,9 +1,26 @@
+//! `orbit task start` — hidden compatibility shim.
+//!
+//! Approval and the move to `in-progress` both live on `orbit task update`
+//! now (`--approve`, `--status in-progress`), so this verb is off the help
+//! surface. It still runs, unchanged, because scripts and agent prompts that
+//! predate the move are still calling it; it warns on stderr and will be
+//! removed after a couple of releases.
+//!
+//! Nothing else in the tree should reach for it. The `orbit.task.start` tool
+//! remains the pipeline's own entrypoint and is not affected.
+
 use clap::Args;
 use orbit_core::OrbitRuntime;
 
 use crate::command::{CommandOut, CommandOutput, Execute, Payload};
 
 use super::output::task_to_json_for_runtime;
+
+/// Printed once per invocation, to stderr, so a caller piping `--json` into a
+/// parser sees the notice without it corrupting the document on stdout.
+const DEPRECATION_NOTICE: &str = "note: `orbit task start` is deprecated and hidden from help. \
+Use `orbit task update <id> --approve` to approve proposed work, and \
+`orbit task update <id> --status in-progress` to take it.";
 
 #[derive(Args)]
 pub struct TaskStartArgs {
@@ -28,6 +45,7 @@ pub struct TaskStartArgs {
 
 impl Execute for TaskStartArgs {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
+        eprintln!("{DEPRECATION_NOTICE}");
         let (agent, model) = super::mutation_identity(self.model);
         let task = runtime.start_task_with_identity_and_crew(
             &self.id,
@@ -41,29 +59,6 @@ impl Execute for TaskStartArgs {
             Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
         } else {
             println!("Started task '{}'", task.id);
-            Ok(CommandOutput::Silent)
-        }
-    }
-}
-
-#[derive(Args)]
-#[command(after_help = "Restore an archived task with `orbit task update <id> --status backlog`.")]
-pub struct TaskArchiveArgs {
-    /// Task ID
-    pub id: String,
-    /// Output as JSON
-    #[arg(long)]
-    pub json: bool,
-}
-
-impl Execute for TaskArchiveArgs {
-    fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
-        runtime.archive_task(&self.id)?;
-        if self.json {
-            let task = runtime.get_task(&self.id)?;
-            Ok(Payload::document(task_to_json_for_runtime(runtime, &task)?).into())
-        } else {
-            println!("Archived task '{}'", self.id);
             Ok(CommandOutput::Silent)
         }
     }

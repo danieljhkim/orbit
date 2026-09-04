@@ -32,6 +32,37 @@ fn cli_docs_list_and_show_json() {
     assert!(shown["body"].as_str().expect("body").contains("# Guard"));
 }
 
+/// The global `--format json` must yield the same document `--json` does;
+/// before the commands built one payload, `--format json` fell through to
+/// the human `println!` lines and `jq` choked on `Path: ...`.
+#[test]
+fn cli_docs_show_and_migrate_honor_the_global_json_format() {
+    let workspace = TestWorkspace::new();
+    workspace.write(
+        "docs/pattern.md",
+        "---\ntype: pattern\nsummary: RAII guard pattern\ntags: [rust, guard]\n---\n# Guard\n\nBody\n",
+    );
+
+    let shown = workspace.run_json(
+        &["docs", "show", "docs/pattern.md", "--format", "json"],
+        "docs show --format json",
+    );
+    assert_eq!(shown["frontmatter"]["type"], "pattern");
+    assert_eq!(shown["path"], "docs/pattern.md");
+
+    let human = workspace.run(&["docs", "show", "docs/pattern.md"], "docs show");
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(stdout.contains("Path: docs/pattern.md"), "{stdout}");
+    assert!(stdout.contains("# Guard"), "{stdout}");
+
+    let migrated = workspace.run_json(
+        &["docs", "migrate", "--format", "json"],
+        "docs migrate --format json",
+    );
+    assert_eq!(migrated["dry_run"], json!(true));
+    assert!(migrated["changed"].is_array(), "{migrated}");
+}
+
 #[test]
 fn cli_docs_migrate_is_dry_run_by_default_and_confirm_applies() {
     let workspace = TestWorkspace::new();

@@ -146,25 +146,21 @@ fn usage_from_map(map: &JsonMap, key_mode: UsageKeyMode) -> Option<TokenUsage> {
         UsageKeyMode::Standard => first_u64(map, STANDARD_CACHE_CREATE_KEYS),
         UsageKeyMode::TokenBlock => first_u64(map, STANDARD_CACHE_CREATE_KEYS),
     };
+    // Gemini reports visible output and reasoning ("thoughts") as separate
+    // counters, in the CLI token block and in `usageMetadata` alike
+    // (`totalTokenCount` is prompt + thoughts + candidates); both consume the
+    // output budget, so sum them rather than first-wins. `tool` is the small
+    // tool-call channel of the token block and is also part of the output side.
     let output = match key_mode {
-        UsageKeyMode::Standard => first_u64(map, STANDARD_OUTPUT_KEYS),
-        // Gemini reports visible output and reasoning ("thoughts") as separate
-        // counters in the same token block; both consume the output budget, so
-        // sum them rather than first-wins. `tool` is the small tool-call channel
-        // and is also part of the output side.
-        UsageKeyMode::TokenBlock => {
-            let visible = first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS);
-            let thoughts = first_u64(map, TOKEN_BLOCK_THOUGHT_KEYS);
-            let tool = first_u64(map, TOKEN_BLOCK_TOOL_KEYS);
-            match (visible, thoughts, tool) {
-                (None, None, None) => None,
-                (v, t, tl) => Some(
-                    v.unwrap_or(0)
-                        .saturating_add(t.unwrap_or(0))
-                        .saturating_add(tl.unwrap_or(0)),
-                ),
-            }
-        }
+        UsageKeyMode::Standard => sum_present(&[
+            first_u64(map, STANDARD_OUTPUT_KEYS),
+            first_u64(map, THOUGHT_KEYS),
+        ]),
+        UsageKeyMode::TokenBlock => sum_present(&[
+            first_u64(map, TOKEN_BLOCK_OUTPUT_KEYS),
+            first_u64(map, THOUGHT_KEYS),
+            first_u64(map, TOKEN_BLOCK_TOOL_KEYS),
+        ]),
     };
 
     let cache_creation_split = match key_mode {
@@ -280,8 +276,18 @@ const TOKEN_BLOCK_OUTPUT_KEYS: &[&str] = &[
     "output",
 ];
 
-const TOKEN_BLOCK_THOUGHT_KEYS: &[&str] =
-    &["thoughts", "thoughtsTokenCount", "thoughts_token_count"];
+const THOUGHT_KEYS: &[&str] = &["thoughts", "thoughtsTokenCount", "thoughts_token_count"];
+
+/// `None` when no counter was present; otherwise the saturating sum of the
+/// ones that were.
+fn sum_present(parts: &[Option<u64>]) -> Option<u64> {
+    parts.iter().any(Option::is_some).then(|| {
+        parts
+            .iter()
+            .flatten()
+            .fold(0_u64, |total, value| total.saturating_add(*value))
+    })
+}
 
 const TOKEN_BLOCK_TOOL_KEYS: &[&str] = &["tool", "toolTokenCount", "tool_token_count"];
 

@@ -2,7 +2,7 @@
 type: design
 summary: "Scope: extract docs + search into a plugin-style feature crate"
 tags: [orbit-docs-plugin]
-last_validated: 2026-08-09
+last_validated: 2026-09-04
 ---
 
 # Scope: extract docs + search into a plugin-style feature crate

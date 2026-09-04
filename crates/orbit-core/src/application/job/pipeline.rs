@@ -156,9 +156,14 @@ impl OrbitRuntime {
     /// zero) means one tick, which is what every caller predating the window
     /// gets. The window bounds only the *start* of new work — a child run
     /// already in flight when the deadline passes finishes normally.
+    /// `max_active_leaf_runs` is the drain's concurrency ceiling: how many
+    /// `task_auto_pipeline` children may be live at once. Omitted, the job's
+    /// own default applies — this only forwards an explicit override, so the
+    /// default lives in one place, next to the loop that reads it.
     pub fn submit_workspace_auto_run(
         &self,
         for_seconds: Option<u64>,
+        max_active_leaf_runs: Option<u32>,
         actor: Option<&str>,
         claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
@@ -167,7 +172,20 @@ impl OrbitRuntime {
             crate::application::workflow::AUTO_WORKFLOW_ALIAS,
         )
         .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'auto'".to_string()))?;
-        let input = json!({ "for_seconds": for_seconds.unwrap_or(0) });
+        let mut input = json!({ "for_seconds": for_seconds.unwrap_or(0) });
+        if let Some(max_active_leaf_runs) = max_active_leaf_runs {
+            if max_active_leaf_runs == 0 {
+                return Err(OrbitError::InvalidInput(
+                    "concurrency must be at least 1".to_string(),
+                ));
+            }
+            if let Some(object) = input.as_object_mut() {
+                object.insert(
+                    "max_active_leaf_runs".to_string(),
+                    json!(max_active_leaf_runs),
+                );
+            }
+        }
         self.submit_pipeline_run(workflow.job_id, input, None, actor)
     }
 

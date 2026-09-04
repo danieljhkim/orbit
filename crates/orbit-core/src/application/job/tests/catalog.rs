@@ -1139,7 +1139,6 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         vec![
             "admissible",
             "ship_leaves",
-            "record_leaf_outcomes",
             "start_epic",
             "window",
             "idle_wait",
@@ -1159,38 +1158,35 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         Some("{{ steps.admissible.output.has_leaves }} == true")
     );
     let JobV2StepBody::FanOut { fan_out, fan_in } = &ship.body else {
-        panic!("ship step must fan out crew-homogeneous dispatches");
+        panic!("ship step must fan out the admitted leaf dispatches");
     };
     assert_eq!(
         fan_out.items,
         "{{ steps.admissible.output.loose_task_dispatches }}"
     );
     assert_eq!(fan_out.max_workers, 5);
-    assert_eq!(fan_in.collect.as_deref(), Some("leaf_results"));
+    assert_eq!(fan_in.collect.as_deref(), Some("leaf_dispatches"));
+    // Detached, like the epic: waiting on the whole fan-out held every other
+    // slot closed for as long as its slowest member ran. The classifier caps
+    // the dispatches at the free slots instead, and the loop tops them up.
     let JobV2StepBody::TargetRef(ship_target) = &fan_out.worker.body else {
-        panic!("each leaf partition must invoke and wait");
+        panic!("each leaf must be dispatched by an activity");
     };
-    assert_eq!(ship_target.target, "activity:invoke_and_wait");
+    assert_eq!(ship_target.target, "activity:invoke_detached");
     let ship_input = ship_target.default_input.as_ref().expect("ship input");
     assert_eq!(ship_input["job_name"], "task_auto_pipeline");
     assert_eq!(ship_input["run_input"]["task_ids"], "{{ item.task_ids }}");
 
-    let JobV2StepBody::TargetRef(record) = &drain.steps[2].body else {
-        panic!("leaf outcome recorder must be an activity reference");
-    };
-    assert_eq!(record.target, "activity:pipeline_success_guard");
-    assert_eq!(
-        record.default_input.as_ref().expect("record input")["results"],
-        "{{ steps.leaf_results.output }}"
-    );
-    assert_eq!(
-        record.default_input.as_ref().expect("record input")["allow_non_success"],
-        true
-    );
+    // Nothing aggregates leaf outcomes any more: a detached child records its
+    // own result, and a terminal leaf was already explicitly not a failure of
+    // this sequencer.
+    let definition_body = yaml_without_comments(yaml);
+    assert!(!definition_body.contains("pipeline_success_guard"));
+    assert!(!definition_body.contains("record_leaf_outcomes"));
 
     // The epic must NOT be waited on: blocking on a multi-hour epic would
     // consume the window and starve the conflict-free leaves behind it.
-    let epic = &drain.steps[3];
+    let epic = &drain.steps[2];
     assert_eq!(
         epic.when.as_deref(),
         Some("{{ steps.admissible.output.has_epic }} == true")
@@ -1204,7 +1200,7 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
         "epic_pipeline"
     );
 
-    let JobV2StepBody::TargetRef(window) = &drain.steps[4].body else {
+    let JobV2StepBody::TargetRef(window) = &drain.steps[3].body else {
         panic!("window step must use the deterministic activity");
     };
     assert_eq!(window.target, "activity:drain_window");
@@ -1216,11 +1212,20 @@ fn workspace_auto_pipeline_is_single_flight_and_conditionally_dispatches() {
     // Sleeping only when idle keeps a busy window re-listing immediately, and
     // an expired one from paying a final sleep it will not use.
     assert_eq!(
-        drain.steps[5].when.as_deref(),
+        drain.steps[4].when.as_deref(),
         Some(
-            "{{ steps.admissible.output.empty }} == true && \
+            "{{ steps.admissible.output.idle }} == true && \
              {{ steps.window.output.expired }} == false"
         )
+    );
+    // The classifier picks the wait, so a saturated drain refills a freed slot
+    // in seconds while an empty workspace still waits the long idle.
+    let JobV2StepBody::TargetRef(idle_wait) = &drain.steps[4].body else {
+        panic!("idle wait must use the deterministic activity");
+    };
+    assert_eq!(
+        idle_wait.default_input.as_ref().expect("idle input")["seconds"],
+        "{{ steps.admissible.output.sleep_seconds }}"
     );
     // The four-way `ship`/`hold`/`epic`/`empty` decision is gone; the loop
     // reads an admissible set instead.

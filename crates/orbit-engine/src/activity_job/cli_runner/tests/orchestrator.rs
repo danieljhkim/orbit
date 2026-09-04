@@ -2558,16 +2558,26 @@ fn primary_branch_switch_remains_a_typed_drift_failure() {
 fn primary_escape_is_checked_after_nonzero_exit_and_timeout() {
     for (terminal, trailer, timeout) in [
         ("nonzero", "exit 23", Duration::from_secs(5)),
-        ("timeout", "sleep 10", Duration::from_secs(2)),
+        // The timeout arm's budget has to cover a fork/exec plus one write on a
+        // host running the rest of the suite alongside it; the deadline starts
+        // before the spawn, not when the child reaches its first statement.
+        ("timeout", "sleep 10", Duration::from_secs(4)),
     ] {
         let fixture = linked_worktree_fixture();
         let escaped_name = format!("{terminal}-primary.txt");
         let escaped = fixture.primary.join(&escaped_name);
         let script = fixture.root().join("codex");
+        // The escape write comes before the stdin drain deliberately. `cat`
+        // blocks until the supervisor's detached writer thread runs and drops
+        // the pipe, so draining first makes the child's side effect wait on a
+        // parent thread the scheduler owes nothing to. On the timeout arm that
+        // stall is charged to the deadline: under full-suite load the child was
+        // killed having written nothing, leaving no drift to detect and failing
+        // the assertion for a reason the boundary guard had no part in.
         write_executable(
             &script,
             &format!(
-                "#!/bin/sh\ncat > /dev/null\nprintf '{terminal}\\n' > '{}'\n{trailer}\n",
+                "#!/bin/sh\nprintf '{terminal}\\n' > '{}'\ncat > /dev/null\n{trailer}\n",
                 escaped.display()
             ),
         );

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use orbit_common::OrbitError;
-use orbit_core::routines::{
+use orbit_core::application::routines::{
     DiscoveredWorkspaces, RoutineHostIdentity, RoutineLoadError, RoutinePlacementProjection,
     RoutinePlacementProvider, RoutineRegistryView, RoutineStatusReport, RoutineWorkspaceProvider,
     SweepOptions, SweepOutcome,
@@ -100,7 +100,7 @@ pub(crate) fn discover_registered_workspaces(
 
 pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, OrbitError> {
     let environment = RegistryRoutineEnvironment::load(global_root)?;
-    orbit_core::routines::routine_statuses_with_providers(
+    orbit_core::application::routines::routine_statuses_with_providers(
         global_root,
         &environment,
         &environment,
@@ -111,7 +111,7 @@ pub fn routine_statuses(global_root: &Path) -> Result<RoutineStatusReport, Orbit
 pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
     let global_root = workspace_registry::global_orbit_dir()?;
     let environment = RegistryRoutineEnvironment::load(&global_root)?;
-    orbit_core::routines::run_sweep_with_providers(
+    orbit_core::application::routines::run_sweep_with_providers(
         options,
         environment.local_host(),
         &environment,
@@ -121,7 +121,7 @@ pub fn run_sweep(options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
 
 pub fn run_sweep_at(global_root: &Path, options: SweepOptions) -> Result<SweepOutcome, OrbitError> {
     let environment = RegistryRoutineEnvironment::load(global_root)?;
-    orbit_core::routines::run_sweep_at_with_providers(
+    orbit_core::application::routines::run_sweep_at_with_providers(
         global_root,
         options,
         environment.local_host(),

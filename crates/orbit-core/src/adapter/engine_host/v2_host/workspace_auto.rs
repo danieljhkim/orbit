@@ -16,6 +16,30 @@ use super::backlog_exclusion::{
 /// reads its live runs to decide whether another root may start.
 const EPIC_JOB_NAME: &str = "epic_pipeline";
 
+/// The job that ships loose leaves. Its live runs are read for two things at
+/// once: how many slots are occupied, and which backlog tasks are already
+/// spoken for. The second matters because a leaf handed to a detached child
+/// stays `backlog` until that child moves it to `in-progress` — the child's
+/// own run input is the only record of the claim in between, and without it
+/// the next iteration would hand the same task to a second child.
+const LEAF_JOB_NAME: &str = "task_auto_pipeline";
+
+/// Default ceiling on concurrently live leaf runs. Matches the `max_workers`
+/// the fan-out used while the drain waited on its leaves, so steady-state
+/// parallelism is unchanged; what changed is that a slot reopens the moment
+/// its own child finishes rather than when the slowest child in the batch does.
+const DEFAULT_MAX_ACTIVE_LEAF_RUNS: u64 = 5;
+
+/// Wait before re-listing when the backlog has admissible work but every slot
+/// is occupied. This is the latency a freed slot sits idle, so it is much
+/// shorter than the idle wait.
+const DEFAULT_POLL_SLEEP_SECONDS: u64 = 30;
+
+/// Wait before re-listing when nothing is admissible at all. Long, because the
+/// only things that can change are a task arriving or the detached epic
+/// finishing.
+const DEFAULT_IDLE_SLEEP_SECONDS: u64 = 60;
+
 /// Longest drain window a caller may request, in seconds (24h). The window is
 /// the caller's, not a safety property, but an unbounded deadline would let a
 /// typo hold `workspace_auto_pipeline`'s single active-run slot indefinitely.
@@ -31,18 +55,67 @@ const MAX_DRAIN_WINDOW_SECONDS: f64 = 86_400.0;
 /// exactly the leaves that overlap it. That reservation is why the former
 /// `hold` decision is gone — a blanket freeze excluded conflict-free work the
 /// lock surface had no reason to exclude.
+///
+/// Leaves are offered up to the number of *free* slots rather than in one
+/// batch, because the drain no longer waits on them. The whole backlog is
+/// re-listed every iteration and the free slots are topped up from it, so a
+/// task that entered `backlog` a minute ago starts as soon as any one child
+/// finishes — not after the slowest member of the batch that was running when
+/// it arrived. One task per dispatch: `list_backlog_tasks` already bundles
+/// singletons, so a multi-task child bought nothing but a coarser refill unit,
+/// and a one-task child is crew-homogeneous by construction.
 pub(super) fn classify_workspace_auto_tasks(
     runtime: &OrbitRuntime,
     action: &str,
     input: &Value,
 ) -> Result<Value, DispatchError> {
+    let max_active_leaf_runs = templated_u64(
+        action,
+        input,
+        "max_active_leaf_runs",
+        DEFAULT_MAX_ACTIVE_LEAF_RUNS,
+    )?;
+    let poll_sleep_seconds = templated_u64(
+        action,
+        input,
+        "poll_sleep_seconds",
+        DEFAULT_POLL_SLEEP_SECONDS,
+    )?;
+    let idle_sleep_seconds = templated_u64(
+        action,
+        input,
+        "idle_sleep_seconds",
+        DEFAULT_IDLE_SLEEP_SECONDS,
+    )?;
+
+    let live_leaves = live_leaf_runs(runtime, action)?;
+    let claimed: BTreeSet<String> = live_leaves
+        .iter()
+        .flat_map(|run| run.task_ids.iter().cloned())
+        .collect();
+    let free_slots = usize::try_from(max_active_leaf_runs)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(live_leaves.len());
+
     let backlog = list_backlog_tasks(runtime, action, input)?;
-    let loose_task_ids = backlog
+    // Priority/age order is `list_backlog_tasks`'s, and the truncation to the
+    // free slots has to preserve it: the slots are scarce, so they go to the
+    // front of the queue rather than to whichever tasks happen to sort last.
+    let pending: Vec<String> = backlog
         .get("task_ids")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let loose_task_dispatches = crew_homogeneous_dispatches(runtime, action, &loose_task_ids)?;
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|task_id| !claimed.contains(*task_id))
+        .map(ToOwned::to_owned)
+        .collect();
+    let admitted = &pending[..pending.len().min(free_slots)];
+    let loose_task_dispatches: Vec<Value> = admitted
+        .iter()
+        .map(|task_id| json!({ "task_ids": [task_id] }))
+        .collect();
 
     let active_epic = active_epic_run(runtime, action)?;
     let epic_task_id = match &active_epic {
@@ -56,57 +129,111 @@ pub(super) fn classify_workspace_auto_tasks(
         None => next_admissible_epic_root(runtime, action)?,
     };
 
-    let has_leaves = !loose_task_ids.is_empty();
+    let has_leaves = !loose_task_dispatches.is_empty();
     let has_epic = epic_task_id.is_some();
+    // Idle means "this iteration started nothing", which is not the same as
+    // "there is nothing to do": a saturated drain with a full backlog behind
+    // it is idle in this sense and waits the short poll, while a genuinely
+    // empty workspace waits the long one.
+    let idle = !has_leaves && !has_epic;
+    let sleep_seconds = if pending.is_empty() {
+        idle_sleep_seconds
+    } else {
+        poll_sleep_seconds
+    };
+
     Ok(json!({
-        "loose_task_ids": loose_task_ids,
+        "loose_task_ids": admitted,
         "loose_task_dispatches": loose_task_dispatches,
         "has_leaves": has_leaves,
         "epic_task_id": epic_task_id,
         "has_epic": has_epic,
-        "empty": !has_leaves && !has_epic,
+        "idle": idle,
+        "sleep_seconds": sleep_seconds,
+        "pending_backlog": pending.len(),
+        "active_leaf_runs": live_leaves.len(),
+        "free_slots": free_slots,
         "active_epic_run_id": active_epic.as_ref().map(|epic| epic.run_id.clone()),
         "active_epic_task_id": active_epic.and_then(|epic| epic.task_id),
     }))
 }
 
-/// Partition the already priority-ordered loose leaves by their effective
-/// crew, preserving both task order within a partition and the first-seen
-/// order of the crews. `task_auto_pipeline` resolves the crew again from the
-/// child input and therefore remains the fail-closed authority; this split
-/// only prevents workspace-auto from constructing a heterogeneous child in
-/// the first place.
-fn crew_homogeneous_dispatches(
-    runtime: &OrbitRuntime,
+/// A numeric loop input, tolerating the string a template renders. A step's
+/// `default_input` value goes through the template engine, so `5` arrives as
+/// `"5"`; an input the caller omitted renders as an empty string rather than
+/// JSON `null`, which is the default case.
+fn templated_u64(
     action: &str,
-    task_ids: &[Value],
-) -> Result<Vec<Value>, DispatchError> {
-    let mut partitions: Vec<(String, Vec<String>)> = Vec::new();
-    for task_id in task_ids.iter().filter_map(Value::as_str) {
-        let task = runtime.get_task(task_id).map_err(|err| {
+    input: &Value,
+    name: &str,
+    default: u64,
+) -> Result<u64, DispatchError> {
+    let Some(raw) = input.get(name) else {
+        return Ok(default);
+    };
+    match raw {
+        Value::Null => Ok(default),
+        Value::Number(number) => number
+            .as_u64()
+            .ok_or_else(|| action_failed(action, format!("`{name}` must be a whole number"))),
+        Value::String(text) => {
+            let text = text.trim();
+            if text.is_empty() {
+                return Ok(default);
+            }
+            text.parse::<u64>().map_err(|err| {
+                action_failed(action, format!("`{name}` '{text}' is not a number: {err}"))
+            })
+        }
+        other => Err(action_failed(
+            action,
+            format!("`{name}` must be a number, got {other}"),
+        )),
+    }
+}
+
+/// A live `task_auto_pipeline` run and the tasks it is carrying.
+struct LiveLeafRun {
+    task_ids: Vec<String>,
+}
+
+fn live_leaf_runs(runtime: &OrbitRuntime, action: &str) -> Result<Vec<LiveLeafRun>, DispatchError> {
+    // Reconcile first, for the same reason the epic gate does: one orphaned
+    // `running` row — a worker killed by a reboot or an OOM — would occupy a
+    // slot forever. Unlike the epic gate, that failure degrades rather than
+    // stops: the drain keeps shipping at a quietly lower parallelism, which is
+    // exactly the kind of thing nobody notices.
+    runtime
+        .reconcile_stale_job_runs(Some(LEAF_JOB_NAME))
+        .map_err(|err| {
             action_failed(
                 action,
-                format!("load loose task {task_id} for crew partition: {err}"),
+                format!("reconcile stale {LEAF_JOB_NAME} runs: {err}"),
             )
         })?;
-        let crew = runtime
-            .resolve_crew_for_task(None, task.crew.as_deref())
-            .map_err(|err| {
-                action_failed(
-                    action,
-                    format!("resolve crew for loose task {task_id}: {err}"),
-                )
-            })?;
-        if let Some((_, ids)) = partitions.iter_mut().find(|(name, _)| name == &crew.name) {
-            ids.push(task_id.to_string());
-        } else {
-            partitions.push((crew.name, vec![task_id.to_string()]));
-        }
-    }
-
-    Ok(partitions
+    let runs = runtime
+        .stores()
+        .jobs()
+        .list_pending_or_running_job_runs(LEAF_JOB_NAME)
+        .map_err(|err| action_failed(action, format!("list live {LEAF_JOB_NAME} runs: {err}")))?;
+    Ok(runs
         .into_iter()
-        .map(|(crew, task_ids)| json!({ "crew": crew, "task_ids": task_ids }))
+        .map(|run| LiveLeafRun {
+            task_ids: run
+                .input
+                .as_ref()
+                .and_then(|input| input.get("task_ids"))
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
         .collect())
 }
 

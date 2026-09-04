@@ -8,7 +8,7 @@ use orbit_types::workflow::{AutoTaskSchedule, DedupePolicy};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
-use crate::auto_tasks::crud::AutoTaskUpdateParams;
+use crate::application::auto_tasks::crud::AutoTaskUpdateParams;
 
 use super::{interval_params, template};
 

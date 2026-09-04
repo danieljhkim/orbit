@@ -1,16 +1,18 @@
 mod add;
+mod archive;
 pub(crate) mod artifact;
 pub mod artifacts;
 mod command;
 mod export;
+pub(crate) mod flow;
 mod import;
-mod lifecycle;
 mod lint;
 mod list;
 pub(crate) mod output;
 mod publication;
 mod reindex;
 pub(crate) mod show;
+mod start;
 mod update;
 
 pub use command::{TaskCommand, TaskSubcommand};

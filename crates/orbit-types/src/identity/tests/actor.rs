@@ -4,6 +4,9 @@ mod mapping {
     #[test]
     fn agent_from_model_maps_known_prefixes() {
         assert_eq!(agent_from_model("claude-opus-4-7"), Some("claude"));
+        assert_eq!(agent_from_model("claude-fable-5-1"), Some("claude"));
+        assert_eq!(agent_from_model("fable"), Some("claude"));
+        assert_eq!(agent_from_model("fable-5.1"), Some("claude"));
         assert_eq!(agent_from_model("gpt-5.5"), Some("codex"));
         assert_eq!(agent_from_model("gemini-3.1-pro-preview"), Some("gemini"));
         assert_eq!(agent_from_model("ollama:llama3.2"), Some("ollama"));

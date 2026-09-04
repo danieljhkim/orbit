@@ -52,10 +52,6 @@ pub(super) async fn list_audit(Ws(runtime): Ws, Query(q): Query<AuditQuery>) -> 
 
     let limit = bounded_limit(q.limit, HISTORY_DEFAULT_LIMIT);
     let offset = q.offset.unwrap_or(0);
-
-    // Post-query filters (run_id, q) and offset are applied after the SQLite
-    // call. Request a generous prefetch so common filtered pages are full.
-    let prefetch = HISTORY_MAX_LIMIT;
     let tool = q.tool.filter(|s| !s.is_empty());
     let role = q.role.filter(|s| !s.is_empty());
     let transport = match q
@@ -83,7 +79,7 @@ pub(super) async fn list_audit(Ws(runtime): Ws, Query(q): Query<AuditQuery>) -> 
         None => None,
     };
 
-    let events = match runtime.list_audit_events_filtered(&AuditEventFilter {
+    let mut filter = AuditEventFilter {
         since,
         tool_name: tool,
         target_type: None,
@@ -98,69 +94,124 @@ pub(super) async fn list_audit(Ws(runtime): Ws, Query(q): Query<AuditQuery>) -> 
         mcp_call_id: q.mcp_call.filter(|value| !value.is_empty()),
         job_run_id: q.job_run_id.filter(|value| !value.is_empty()),
         lease_id: q.lease.filter(|value| !value.is_empty()),
-        limit: prefetch,
-    }) {
-        Ok(events) => events,
-        Err(e) => return server_error(e),
+        limit,
+        offset,
     };
 
-    let exec_id_filter = q
-        .execution_id
-        .as_deref()
-        .or(q.run_id.as_deref())
-        .filter(|s| !s.is_empty());
-    let profile_filter = q
-        .profile
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    let needle =
-        q.q.as_deref()
+    let post_filter = AuditPostFilter {
+        execution_id: q
+            .execution_id
+            .as_deref()
+            .or(q.run_id.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        profile: q
+            .profile
+            .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(str::to_lowercase);
+            .map(str::to_string),
+        needle: q
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_lowercase),
+    };
 
-    let mut filtered: Vec<_> = events
-        .into_iter()
-        .filter(|e| {
-            if let Some(eid) = exec_id_filter
-                && e.execution_id != eid
-            {
-                return false;
-            }
-            if let Some(ref profile) = profile_filter
-                && !arguments_json_matches_profile(e.arguments_json.as_deref(), profile)
-            {
-                return false;
-            }
-            if let Some(ref needle) = needle {
-                let haystacks = [
-                    e.command.as_str(),
-                    e.subcommand.as_deref().unwrap_or(""),
-                    e.tool_name.as_deref().unwrap_or(""),
-                    e.target_id.as_deref().unwrap_or(""),
-                    e.target_type.as_deref().unwrap_or(""),
-                    e.role.as_str(),
-                    e.error_message.as_deref().unwrap_or(""),
-                ];
-                if !haystacks.iter().any(|h| h.to_lowercase().contains(needle)) {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect();
+    let page = if post_filter.is_empty() {
+        // Every requested predicate has a column, so the page is exactly the
+        // SQL window: no prefetch, no Rust-side slicing.
+        match runtime.list_audit_events_filtered(&filter) {
+            Ok(events) => events,
+            Err(e) => return server_error(e),
+        }
+    } else {
+        match scan_audit_page(&runtime, &mut filter, &post_filter, offset, limit) {
+            Ok(events) => events,
+            Err(e) => return server_error(e),
+        }
+    };
 
-    if offset >= filtered.len() {
-        return Json(Value::Array(Vec::new())).into_response();
-    }
-    let end = offset.saturating_add(limit).min(filtered.len());
-    let page: Vec<Value> = filtered
-        .drain(offset..end)
-        .map(|e| audit_event_to_json(&e))
-        .collect();
+    let page: Vec<Value> = page.iter().map(audit_event_to_json).collect();
     Json(Value::Array(page)).into_response()
+}
+
+/// Predicates the SQLite schema has no column for, applied to each fetched
+/// row in Rust.
+struct AuditPostFilter {
+    execution_id: Option<String>,
+    profile: Option<String>,
+    /// Lowercased free-text needle.
+    needle: Option<String>,
+}
+
+impl AuditPostFilter {
+    fn is_empty(&self) -> bool {
+        self.execution_id.is_none() && self.profile.is_none() && self.needle.is_none()
+    }
+
+    fn matches(&self, e: &orbit_core::AuditEvent) -> bool {
+        if let Some(eid) = self.execution_id.as_deref()
+            && e.execution_id != eid
+        {
+            return false;
+        }
+        if let Some(profile) = self.profile.as_deref()
+            && !arguments_json_matches_profile(e.arguments_json.as_deref(), profile)
+        {
+            return false;
+        }
+        if let Some(needle) = self.needle.as_deref() {
+            let haystacks = [
+                e.command.as_str(),
+                e.subcommand.as_deref().unwrap_or(""),
+                e.tool_name.as_deref().unwrap_or(""),
+                e.target_id.as_deref().unwrap_or(""),
+                e.target_type.as_deref().unwrap_or(""),
+                e.role.as_str(),
+                e.error_message.as_deref().unwrap_or(""),
+            ];
+            if !haystacks.iter().any(|h| h.to_lowercase().contains(needle)) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Rows a single `/api/audit` request may pull from SQLite while satisfying
+/// a Rust-side predicate. Bounds the cost of a needle that matches nothing
+/// in a long history; a page that hits the cap simply comes back short.
+const AUDIT_POST_FILTER_SCAN_CAP: usize = 10_000;
+
+/// Walk the SQL window in `HISTORY_MAX_LIMIT` batches, keeping rows that pass
+/// `post_filter`, until `offset + limit` matches are in hand, the store runs
+/// dry, or the scan cap is reached. `filter.limit`/`filter.offset` are used
+/// as scratch for the batch window.
+fn scan_audit_page(
+    runtime: &OrbitRuntime,
+    filter: &mut AuditEventFilter,
+    post_filter: &AuditPostFilter,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<orbit_core::AuditEvent>, OrbitError> {
+    let wanted = offset.saturating_add(limit);
+    let mut matched = Vec::new();
+    let mut scanned = 0usize;
+    filter.limit = HISTORY_MAX_LIMIT;
+    filter.offset = 0;
+    while matched.len() < wanted && scanned < AUDIT_POST_FILTER_SCAN_CAP {
+        let batch = runtime.list_audit_events_filtered(filter)?;
+        let fetched = batch.len();
+        scanned += fetched;
+        matched.extend(batch.into_iter().filter(|e| post_filter.matches(e)));
+        if fetched < HISTORY_MAX_LIMIT {
+            break;
+        }
+        filter.offset += fetched;
+    }
+    Ok(matched.into_iter().skip(offset).take(limit).collect())
 }
 
 /// Best-effort match of a stringified `arguments_json` payload against a
@@ -557,22 +608,21 @@ fn count_failed_runs(
     runtime: &OrbitRuntime,
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
-    let mut total: i64 = 0;
+    let mut total: u64 = 0;
     for state in [
         JobRunState::Failed,
         JobRunState::Timeout,
         JobRunState::Interrupted,
     ] {
-        let runs = runtime.list_job_runs(JobRunListParams {
+        total += runtime.count_job_runs(JobRunListParams {
             job_id: None,
             state: Some(state),
             terminal_only: false,
             since: Some(since),
-            limit: Some(HISTORY_MAX_LIMIT),
+            limit: None,
         })?;
-        total += runs.len() as i64;
     }
-    Ok(total)
+    Ok(i64::try_from(total).unwrap_or(i64::MAX))
 }
 
 /// Counts running runs whose start time is older than the 95th percentile of
@@ -584,27 +634,20 @@ fn count_active_long_runs(
     runtime: &OrbitRuntime,
     since: DateTime<Utc>,
 ) -> Result<i64, orbit_core::OrbitError> {
-    let mut finished_durations: Vec<i64> = Vec::new();
-    for state in [
-        JobRunState::Success,
-        JobRunState::Failed,
-        JobRunState::Timeout,
-        JobRunState::Cancelled,
-        JobRunState::Interrupted,
-    ] {
-        let runs = runtime.list_job_runs(JobRunListParams {
+    // Every finished run in the window, as durations only: the baseline is
+    // a percentile, so a capped page of hydrated rows would both drift low
+    // and cost the step reads it never looks at.
+    let mut finished_durations: Vec<i64> = runtime
+        .list_job_run_durations(JobRunListParams {
             job_id: None,
-            state: Some(state),
-            terminal_only: false,
+            state: None,
+            terminal_only: true,
             since: Some(since),
-            limit: Some(HISTORY_MAX_LIMIT),
-        })?;
-        for r in runs {
-            if let Some(d) = r.duration_ms {
-                finished_durations.push(d as i64);
-            }
-        }
-    }
+            limit: None,
+        })?
+        .into_iter()
+        .map(|d| i64::try_from(d).unwrap_or(i64::MAX))
+        .collect();
 
     if finished_durations.is_empty() {
         return Ok(0);
@@ -619,7 +662,7 @@ fn count_active_long_runs(
         state: Some(JobRunState::Running),
         terminal_only: false,
         since: None,
-        limit: Some(HISTORY_MAX_LIMIT),
+        limit: None,
     })?;
 
     let now = Utc::now();

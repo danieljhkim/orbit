@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use orbit_common::OrbitError;
 use orbit_common::security::redaction::redact_all;
 use orbit_exec::{EnvironmentMode, ExecRequest, StdinMode};
@@ -391,11 +393,21 @@ fn commit_sha_tokens(payload: &str) -> Vec<&str> {
     tokens
 }
 
-/// Scan a runner log for checkout evidence, keeping at most `max_lines` lines.
+/// Scan a runner log for checkout evidence, keeping at most `max_lines` lines
+/// and at most `max_lines` distinct commits.
+///
+/// The scan deliberately covers the whole raw log, not the bounded excerpt,
+/// so both outputs must be capped here: a matrix run whose log carries tens
+/// of thousands of fetch lines must not hand the caller an unbounded commit
+/// list, and membership is a set lookup rather than a scan per token.
 pub fn scan_checkout_evidence(log: &str, max_lines: usize) -> CheckoutEvidence {
     let mut commits: Vec<String> = Vec::new();
+    let mut seen_commits: HashSet<&str> = HashSet::new();
     let mut lines = Vec::new();
     for line in log.lines() {
+        if commits.len() >= max_lines && lines.len() >= max_lines {
+            break;
+        }
         let (step, payload) = split_log_line(line);
         let lowered = payload.to_ascii_lowercase();
         let marked = CHECKOUT_MARKERS
@@ -407,7 +419,10 @@ pub fn scan_checkout_evidence(log: &str, max_lines: usize) -> CheckoutEvidence {
             continue;
         }
         for token in commit_sha_tokens(payload) {
-            if !commits.iter().any(|sha| sha == token) {
+            if commits.len() >= max_lines {
+                break;
+            }
+            if seen_commits.insert(token) {
                 commits.push(token.to_string());
             }
         }

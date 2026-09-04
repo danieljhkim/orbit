@@ -12,8 +12,10 @@ use orbit_types::tool::{McpCapability, McpTransport};
 use serde_json::Value;
 use tower::ServiceExt;
 
-use super::super::router;
-use super::test_support::body_json;
+use orbit_types::workflow::JobRunState;
+
+use super::super::{HISTORY_MAX_LIMIT, router};
+use super::test_support::{body_json, seed_run};
 
 fn seed_audit_event(
     runtime: &OrbitRuntime,
@@ -306,6 +308,63 @@ async fn audit_filters_all_trusted_mcp_provenance_fields() {
     let body = body_json(response).await;
     let rows = body.as_array().expect("trusted provenance filtered rows");
     assert_eq!(execution_ids(rows), vec!["exec-trusted"]);
+}
+
+/// The page window is pushed into SQL, so paging is not capped at the first
+/// `HISTORY_MAX_LIMIT` rows of history and a needle can reach rows older
+/// than that window.
+#[tokio::test]
+async fn audit_paging_and_needle_reach_past_the_max_limit_window() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let total = HISTORY_MAX_LIMIT + 50;
+    for index in 0..total {
+        // The five oldest rows carry the only needle-matching tool name.
+        let tool = if index < 5 {
+            "orbit.needle.probe"
+        } else {
+            "orbit.task.update"
+        };
+        seed_audit_event(
+            &runtime,
+            &format!("exec-{index:04}"),
+            tool,
+            AuditEventStatus::Success,
+            "editor",
+            None,
+        );
+    }
+
+    let response = request_audit(
+        runtime.clone(),
+        &format!("/audit?limit=50&offset={HISTORY_MAX_LIMIT}"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("page past the old prefetch cap");
+    assert_eq!(rows.len(), 50);
+    assert_eq!(execution_ids(rows)[0], "exec-0049");
+
+    let response = request_audit(runtime.clone(), "/audit?q=needle&limit=10").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("needle rows");
+    assert_eq!(
+        execution_ids(rows),
+        vec![
+            "exec-0004",
+            "exec-0003",
+            "exec-0002",
+            "exec-0001",
+            "exec-0000"
+        ]
+    );
+
+    let response = request_audit(runtime, "/audit?q=needle&limit=2&offset=3").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body.as_array().expect("offset needle rows");
+    assert_eq!(execution_ids(rows), vec!["exec-0001", "exec-0000"]);
 }
 
 #[tokio::test]
@@ -639,4 +698,35 @@ async fn audit_summary_separates_reliability_from_negative_and_diagnostic_popula
     assert_eq!(unexpected.len(), 1);
     assert_eq!(unexpected[0]["tool"], "orbit.search");
     assert_eq!(unexpected[0]["count"], 1);
+}
+
+/// The header tiles count runs with `COUNT(*)`, so a bad day does not read
+/// as exactly `HISTORY_MAX_LIMIT` failures once the real number passes it.
+#[tokio::test]
+async fn summary_failed_runs_counts_past_the_history_page_size() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let total = HISTORY_MAX_LIMIT + 50;
+    for index in 0..total {
+        seed_run(
+            &runtime,
+            &format!("jrun-failed-{index:04}"),
+            "task_pr_pipeline",
+            JobRunState::Failed,
+        );
+    }
+    seed_run(
+        &runtime,
+        "jrun-timeout",
+        "task_pr_pipeline",
+        JobRunState::Timeout,
+    );
+    seed_run(
+        &runtime,
+        "jrun-success",
+        "task_pr_pipeline",
+        JobRunState::Success,
+    );
+
+    let body = body_json(request_audit(runtime, "/audit/summary?since=24h").await).await;
+    assert_eq!(body["failed_runs"].as_u64(), Some((total + 1) as u64));
 }

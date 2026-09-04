@@ -7,10 +7,15 @@
 //! errors — an unconfigured host logs one line and exits 0, because the OS
 //! clock will invoke it forever.
 
-use crate::command::{CommandOut, CommandOutput};
+use std::path::Path;
+
+use crate::command::{Block, CommandOut, Payload};
 use clap::Args;
-use orbit_cmd::registry_routines::run_sweep;
-use orbit_core::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
+use orbit_cmd::registry_routines::{run_sweep, run_sweep_at};
+use orbit_core::{
+    OrbitError, OrbitRuntime,
+    application::routines::{RoutineSweepReport, SweepOptions, SweepOutcome},
+};
 use serde_json::json;
 
 #[derive(Args)]
@@ -74,52 +79,19 @@ impl SweepCommand {
     /// Runs without a pre-initialized runtime: the sweep resolves every
     /// workspace from the global registry (per-workspace runtimes are built
     /// inside orbit-core).
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let outcome = run_sweep(SweepOptions {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
+        let options = SweepOptions {
             dry_run: self.dry_run,
-        })?;
+        };
+        let outcome = run_sweep_for_selected_root(root_override, options)?;
 
+        let doc = outcome_json(&outcome, self.dry_run);
         if self.json {
-            crate::output::json::print_pretty(&outcome_json(&outcome, self.dry_run))?;
-            return Ok(CommandOutput::Silent);
+            return Ok(Payload::document(doc).into());
         }
 
-        if outcome.lock_busy {
-            println!("sweep: another pass holds the lock on this host; exiting");
-            return Ok(CommandOutput::Silent);
-        }
-        if outcome.reports.is_empty()
-            && outcome.load_errors.is_empty()
-            && outcome.registry.diagnostics.is_empty()
-        {
-            println!("sweep[{}]: no routines configured", outcome.host_id);
-            return Ok(CommandOutput::Silent);
-        }
-
-        // Quiet by default; a dry-run is interactive so it shows everything.
-        let show_all = self.verbose || self.dry_run;
-        let mut shown = 0usize;
-        for report in &outcome.reports {
-            if show_all
-                || report_is_noteworthy(report.action)
-                || !report.validation.diagnostics.is_empty()
-            {
-                println!("{}", format_report_line(report));
-                shown += 1;
-            }
-        }
-        if outcome.reports.is_empty() {
-            for diagnostic in &outcome.registry.diagnostics {
-                println!(
-                    "sweep[{}]: {}[{}]: {}",
-                    outcome.host_id,
-                    severity_label(diagnostic.severity),
-                    diagnostic.code,
-                    diagnostic.message
-                );
-                shown += 1;
-            }
-        }
+        // Load errors are diagnostics, not records: they stay on stderr in
+        // every mode so a `--format json` consumer still sees them.
         for error in &outcome.load_errors {
             let path = error
                 .path
@@ -131,18 +103,74 @@ impl SweepCommand {
                 error.source_workspace, path, error.message
             );
         }
+
+        let lines = self.human_lines(&outcome);
+        Ok(Payload::blocks(doc, vec![Block::text(lines.join("\n"))]).into())
+    }
+
+    /// The `table`/plain lines for one pass.
+    fn human_lines(&self, outcome: &SweepOutcome) -> Vec<String> {
+        if outcome.lock_busy {
+            return vec!["sweep: another pass holds the lock on this host; exiting".to_string()];
+        }
+        if outcome.reports.is_empty()
+            && outcome.load_errors.is_empty()
+            && outcome.registry.diagnostics.is_empty()
+        {
+            return vec![format!(
+                "sweep[{}]: no routines configured",
+                outcome.host_id
+            )];
+        }
+
+        // Quiet by default; a dry-run is interactive so it shows everything.
+        let show_all = self.verbose || self.dry_run;
+        let mut lines = Vec::new();
+        for report in &outcome.reports {
+            if show_all
+                || report_is_noteworthy(report.action)
+                || !report.validation.diagnostics.is_empty()
+            {
+                lines.push(format_report_line(report));
+            }
+        }
+        if outcome.reports.is_empty() {
+            for diagnostic in &outcome.registry.diagnostics {
+                lines.push(format!(
+                    "sweep[{}]: {}[{}]: {}",
+                    outcome.host_id,
+                    severity_label(diagnostic.severity),
+                    diagnostic.code,
+                    diagnostic.message
+                ));
+            }
+        }
         // A one-line heartbeat when a healthy pass had nothing to report, so the
         // log still shows the sweep ran (bounded by the log rotation in
         // `run_sweep`) without a row per routine.
-        if shown == 0 && outcome.load_errors.is_empty() {
-            println!(
+        if lines.is_empty() && outcome.load_errors.is_empty() {
+            lines.push(format!(
                 "sweep[{}]: {} routine(s), nothing due",
                 outcome.host_id,
                 outcome.reports.len()
-            );
+            ));
         }
-        Ok(CommandOutput::Silent)
+        lines
     }
+}
+
+fn run_sweep_for_selected_root(
+    root_override: Option<&Path>,
+    options: SweepOptions,
+) -> Result<SweepOutcome, OrbitError> {
+    let has_env_override = std::env::var("ORBIT_ROOT").is_ok_and(|root| !root.trim().is_empty());
+    if root_override.is_none() && !has_env_override {
+        return run_sweep(options);
+    }
+
+    let cwd = std::env::current_dir().map_err(|error| OrbitError::Io(error.to_string()))?;
+    let roots = OrbitRuntime::resolve_roots_for_cwd(&cwd, root_override)?;
+    run_sweep_at(&roots.global_root, options)
 }
 
 pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json::Value {
@@ -175,6 +203,8 @@ pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json:
     })
 }
 
-fn severity_label(severity: orbit_core::routines::RoutineDiagnosticSeverity) -> &'static str {
+fn severity_label(
+    severity: orbit_core::application::routines::RoutineDiagnosticSeverity,
+) -> &'static str {
     severity.as_str()
 }

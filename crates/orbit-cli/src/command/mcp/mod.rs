@@ -13,8 +13,8 @@ mod listen;
 mod server;
 mod setup;
 
-pub(crate) use command::seal_ssh_acceptance_environment;
 pub use command::{McpCommand, McpSubcommand};
+pub(crate) use command::{normalize_ssh_login_shell_args, verify_ssh_acceptance_launch_boundary};
 pub(crate) use orbit_mcp::safe_mcp_tool_names;
 #[allow(unused_imports)]
 pub(crate) use setup::init_auto_for_workspace;

@@ -2,11 +2,11 @@ use clap::{CommandFactory, Parser, error::ErrorKind};
 
 use crate::command::Cli;
 
-/// The trimmed `orbit task` surface has 12 subcommands. ORB-10428 returns lock
+/// The trimmed `orbit task` surface has 11 subcommands. ORB-10428 returns lock
 /// administration here.
-const EXPECTED_TASK_SUBCOMMANDS: [&str; 12] = [
-    "add", "artifact", "locks", "list", "show", "lint", "update", "start", "archive", "export",
-    "import", "reindex",
+const EXPECTED_TASK_SUBCOMMANDS: [&str; 11] = [
+    "add", "artifact", "locks", "list", "show", "lint", "update", "archive", "export", "import",
+    "reindex",
 ];
 
 const REMOVED_TASK_SUBCOMMANDS: [&str; 7] = [
@@ -52,6 +52,24 @@ fn task_help_lists_exactly_the_trimmed_subcommand_set() {
     }
 }
 
+/// `start` still parses — callers that predate `task update` owning approval
+/// keep working for a couple of releases — but it is off the help surface, so
+/// nothing new discovers it.
+#[test]
+fn deprecated_task_start_still_parses_but_is_hidden_from_help() {
+    Cli::try_parse_from(["orbit", "task", "start", "ORB-00001"])
+        .expect("deprecated `task start` still parses");
+    let help = task_help();
+    assert!(
+        !help.lines().any(|line| {
+            line.trim_start()
+                .strip_prefix("start")
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+        }),
+        "task help should not advertise `start`:\n{help}"
+    );
+}
+
 #[test]
 fn removed_task_subcommands_are_rejected() {
     for subcommand in REMOVED_TASK_SUBCOMMANDS {
@@ -74,8 +92,8 @@ fn removed_task_subcommands_are_rejected() {
 fn task_help_describes_update_status_transitions() {
     let help = task_help();
     assert!(
-        help.contains("guarded status transitions"),
-        "update help should mention guarded status transitions:\n{help}"
+        help.contains("--approve"),
+        "update help should advertise the approval step:\n{help}"
     );
     assert!(!help.contains("proposed → archived"), "{help}");
     assert!(!help.contains("review → backlog"), "{help}");

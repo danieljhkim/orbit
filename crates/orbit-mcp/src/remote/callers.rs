@@ -36,6 +36,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use orbit_common::OrbitError;
+use orbit_common::protocol::toml::escape_basic_string;
 use orbit_types::identity::validate_machine_id;
 use orbit_types::tool::{CallerIdentityProof, McpCapability, RemoteCallerGrant};
 use serde::Deserialize;
@@ -677,7 +678,12 @@ pub fn render_callers_seed(callers: &[SeedCaller]) -> String {
         out.push_str("\n[[callers]]\n");
         out.push_str(&format!("machine_id   = \"{}\"\n", caller.machine_id));
         if let Some(label) = &caller.label {
-            out.push_str(&format!("label        = \"{label}\"\n"));
+            // A label comes from a peer's operator-chosen host id or an SSH
+            // destination string; a quote in it must not end the literal.
+            out.push_str(&format!(
+                "label        = \"{}\"\n",
+                escape_basic_string(label)
+            ));
         }
         out.push_str("capabilities = [\"agent\"]\n");
     }

@@ -117,3 +117,29 @@ fn spawn_one_request_server(response_body: &'static str) -> (String, thread::Joi
 
     (format!("http://{addr}"), handle)
 }
+
+/// Thinking models report reasoning tokens beside the visible candidates;
+/// `totalTokenCount` is prompt + thoughts + candidates, so both are output.
+#[test]
+fn send_turn_counts_thought_tokens_as_output() {
+    let response_body = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":800,"thoughtsTokenCount":4200,"cachedContentTokenCount":90,"totalTokenCount":5100}}"#;
+    let (base_url, server) = spawn_one_request_server(response_body);
+    let transport = GeminiHttpTransport::new(GEMINI_API_KEY, "gemini-test", None)
+        .expect("transport")
+        .with_base_url(base_url);
+    let messages = [Message::user_text("hello")];
+    let req = TurnRequest {
+        system: None,
+        messages: &messages,
+        tools: &[],
+        cache_hint: CacheHint::None,
+        max_response_tokens: 0,
+    };
+
+    let response = transport.send_turn(&req).expect("send turn");
+    server.join().expect("server thread");
+
+    assert_eq!(response.usage.input_tokens, 100);
+    assert_eq!(response.usage.cache_read_input_tokens, 90);
+    assert_eq!(response.usage.output_tokens, 5_000);
+}

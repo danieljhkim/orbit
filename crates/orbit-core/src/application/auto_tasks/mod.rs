@@ -42,19 +42,19 @@ pub use state::{AutoTaskCursor, AutoTaskCursorState, cursor_state_path, load_cur
 pub(crate) const DEFAULT_AUTO_TASK_FILES: &[(&str, &str)] = &[
     (
         "code-review",
-        include_str!("../../assets/auto_tasks/code-review.yaml"),
+        include_str!("../../../assets/auto_tasks/code-review.yaml"),
     ),
     (
         "friction-curation",
-        include_str!("../../assets/auto_tasks/friction-curation.yaml"),
+        include_str!("../../../assets/auto_tasks/friction-curation.yaml"),
     ),
     (
         "qa-sweep",
-        include_str!("../../assets/auto_tasks/qa-sweep.yaml"),
+        include_str!("../../../assets/auto_tasks/qa-sweep.yaml"),
     ),
     (
         "security-review",
-        include_str!("../../assets/auto_tasks/security-review.yaml"),
+        include_str!("../../../assets/auto_tasks/security-review.yaml"),
     ),
 ];
 

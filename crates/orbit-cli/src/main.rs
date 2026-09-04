@@ -155,7 +155,8 @@ fn legacy_json(matches: &ArgMatches) -> bool {
 
 /// Parse argv into the derived CLI plus the two inputs to mode resolution.
 fn parse_cli() -> (command::Cli, Option<FormatArg>, bool) {
-    let matches = install_format_arg(command::Cli::command()).get_matches();
+    let args = command::mcp::normalize_ssh_login_shell_args(std::env::args_os());
+    let matches = install_format_arg(command::Cli::command()).get_matches_from(args);
     let requested = requested_format(&matches);
     let legacy = legacy_json(&matches);
     let cli = command::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
@@ -163,10 +164,10 @@ fn parse_cli() -> (command::Cli, Option<FormatArg>, bool) {
 }
 
 fn main() {
-    // Must be the first operation: a Tier 2 acceptance bearer arrives in the
-    // initial process environment, so even logging setup is intentionally
-    // downstream of the Linux metadata boundary [ORB-11134].
-    command::mcp::seal_ssh_acceptance_environment();
+    // Verify, then reinforce, the kernel state established by the generated
+    // credential-changing Tier 2 launcher. This is deliberately first, but the
+    // pre-userspace boundary is exec itself rather than this Rust call.
+    command::mcp::verify_ssh_acceptance_launch_boundary();
     orbit_common::observability::logging::init_default_subscriber("warn");
     output::pipe::install_handler();
 

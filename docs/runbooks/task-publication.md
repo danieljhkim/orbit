@@ -5,6 +5,7 @@ tags: [operations, backup, recovery, git, task-publication]
 paths: ["crates/orbit-cli/src/command/task/publication.rs", "crates/orbit-cli/src/command/workspace/publication.rs", "crates/orbit-store/src/workflow/task/**"]
 related_features: [task-publication, task-artifacts, host-registry]
 related_artifacts: [ORB-11077, ORB-11142, ORB-11145]
+last_validated: 2026-09-04
 ---
 
 # Publish Orbit Tasks to a Dedicated Repository
@@ -26,7 +27,7 @@ Before binding a workspace, prepare:
 - one empty, dedicated Git repository for exactly one Orbit workspace;
 - provider-side private visibility, collaborators, retention, and branch protection;
 - working SSH or HTTPS credentials for that repository; and
-- the logical workspace selector returned by `orbit workspace list --all --json`.
+- the logical workspace selector returned by `orbit workspace list --all --format json`.
 
 Orbit cannot prove provider-side privacy or erase retained Git history. Never reuse the source
 repository as the publication destination, put credentials in the remote URL, or assume that a
@@ -55,7 +56,7 @@ changing anything:
 command -v orbit
 orbit --version
 git -C "$ORBIT_CHECKOUT" remote get-url origin
-orbit workspace list --all --json
+orbit workspace list --all --format json
 orbit --workspace "$ORBIT_WORKSPACE" workspace publication show --json
 ```
 
@@ -235,7 +236,7 @@ unrelated authorities.
 | Symptom | Check and response |
 | --- | --- |
 | Git reports that it cannot read a username, password, or terminal prompt. | Global credential helpers are intentionally isolated. Use SSH or pass a short-lived `GIT_ASKPASS` helper explicitly to the Orbit command. |
-| A binding appears missing or belongs to another checkout. | Run `orbit workspace list --all --json`, then repeat `workspace publication show` with the intended logical `--workspace` selector before changing the binding. |
+| A binding appears missing or belongs to another checkout. | Run `orbit workspace list --all --format json`, then repeat `workspace publication show` with the intended logical `--workspace` selector before changing the binding. |
 | The logical `ws_*` ID differs from an internal runtime task partition. | This is supported after ORB-11142. Keep selecting the logical workspace; do not rebind or rewrite task storage to make the IDs match. |
 | The publication remote is rejected during bind. | Remove credentials from the URL, confirm it differs from the source remote, and use a dedicated repository. |
 | First publication finds an unrelated or non-publication branch. | Stop. Provision an empty dedicated repository; Orbit will not adopt or overwrite unrelated history. |

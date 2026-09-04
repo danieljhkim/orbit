@@ -384,7 +384,7 @@ impl TestWorkspace {
     }
 
     fn drive_to_done(&self, id: &str) {
-        self.run(&["task", "update", id, "--status", "backlog"], "approve");
+        self.run(&["task", "update", id, "--approve"], "approve");
         self.run(
             &[
                 "task",

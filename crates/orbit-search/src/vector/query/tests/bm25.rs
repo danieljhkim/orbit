@@ -1,6 +1,6 @@
 //! Unit tests for `bm25` — sibling layout under vector/query/tests/.
 
-use super::super::bm25::{bm25_top_k, fts_phrase_quote, snippet_for_hit};
+use super::super::bm25::{bm25_top_k, fts_terms_query, snippet_for_hit};
 
 use crate::NoopEmbedder;
 use crate::vector::{EmbeddingField, VectorStore};
@@ -64,11 +64,43 @@ fn bm25_top_k_filters_by_source_kind() {
 }
 
 #[test]
-fn bm25_phrase_quotes_embedded_double_quotes() {
+fn bm25_terms_are_quoted_individually_not_as_one_phrase() {
     assert_eq!(
-        fts_phrase_quote("foo \"bar\" baz"),
-        "\"foo \"\"bar\"\" baz\""
+        fts_terms_query("foo \"bar\" baz"),
+        "\"foo\" \"\"\"bar\"\"\" \"baz\""
     );
+    assert_eq!(
+        fts_terms_query("  neutrino   decay "),
+        "\"neutrino\" \"decay\""
+    );
+    assert_eq!(fts_terms_query("ORB-11136"), "\"ORB-11136\"");
+}
+
+/// The words of a query need not be adjacent in the chunk: `neutrino decay`
+/// must still find a chunk that says `neutrino ... decay`.
+#[test]
+fn bm25_multi_word_query_matches_non_adjacent_terms() {
+    let store = VectorStore::open_in_memory().unwrap();
+    let embedder = NoopEmbedder::small();
+    for (id, text) in [
+        ("T1", "flaky neutrino harness on the decay path"),
+        ("T2", "neutrino only"),
+        ("T3", "unrelated gamma delta"),
+    ] {
+        store
+            .upsert_embeddings(
+                "task",
+                id,
+                &[EmbeddingField::new("purpose", text)],
+                &embedder,
+                false,
+            )
+            .unwrap();
+    }
+
+    let hits = bm25_top_k(&store, "neutrino decay", Some("task"), 5).unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].source_id, "T1");
 }
 
 #[test]

@@ -283,7 +283,13 @@ fn git_commit_batch_errors_on_empty_stage() {
              Observed after `git add --all`: 0 staged, 0 unstaged, 0 untracked file(s); \
              HEAD {base_sha}; pinned base {base_sha}. Orbit did not inspect, stage, or reset any \
              other checkout",
-            workspace.display()
+            // The diagnostic reports the worktree as git resolves it. Under a
+            // temp dir reached through a symlink — macOS puts `/var` and
+            // `/tmp` inside `/private` — that is not the path this test was
+            // handed, so the expectation has to resolve it the same way.
+            std::fs::canonicalize(workspace)
+                .unwrap_or_else(|_| workspace.to_path_buf())
+                .display()
         )
     );
 

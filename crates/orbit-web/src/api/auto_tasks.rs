@@ -11,8 +11,10 @@ use orbit_common::governance::authorization::{
     DASHBOARD_AUTO_TASK_MINT, DASHBOARD_AUTO_TASK_TOGGLE, OPERATOR_OVERRIDE_ENV,
 };
 use orbit_core::OrbitRuntime;
-use orbit_core::auto_tasks::{collect_auto_tasks, cursor_state_path, load_cursor_state};
-use orbit_core::routines::parse_cron;
+use orbit_core::application::auto_tasks::{
+    collect_auto_tasks, cursor_state_path, load_cursor_state,
+};
+use orbit_core::application::routines::parse_cron;
 use orbit_types::task::TaskStatus;
 use orbit_types::workflow::{
     AutoTaskDefinition, AutoTaskSchedule, AutoTaskTemplate, DedupePolicy, auto_task_tag,
@@ -23,7 +25,7 @@ use serde_json::{Value, json};
 use super::map_runtime_error;
 use super::routines::{
     OperationsQuery, authorization_denied, authorized_caller, explicit_workspace,
-    not_found_or_conflict, record_operation_audit,
+    named_entity_not_found, record_operation_audit, selection_conflict,
 };
 use crate::state::DashboardState;
 
@@ -90,7 +92,7 @@ pub(super) async fn toggle_auto_task(
     let runtime = match resolve_workspace(&state, &workspace) {
         Ok((_, runtime)) => runtime,
         Err(reason) => {
-            return not_found_or_conflict("workspace_mismatch", reason);
+            return selection_conflict("workspace_mismatch", reason);
         }
     };
     let caller = match authorized_caller(&DASHBOARD_AUTO_TASK_TOGGLE) {
@@ -115,7 +117,7 @@ pub(super) async fn toggle_auto_task(
     let current = match runtime.auto_task_show(&body.name) {
         Ok(Some(definition)) => definition,
         Ok(None) => {
-            return not_found_or_conflict(
+            return named_entity_not_found(
                 "auto_task_not_found",
                 format!("auto-task '{}' was not found", body.name),
             );
@@ -195,7 +197,7 @@ pub(super) async fn mint_auto_task(
     let runtime = match resolve_workspace(&state, &workspace) {
         Ok((_, runtime)) => runtime,
         Err(reason) => {
-            return not_found_or_conflict("workspace_mismatch", reason);
+            return selection_conflict("workspace_mismatch", reason);
         }
     };
     if !body.acknowledge_unconditional {
@@ -351,7 +353,7 @@ fn list_json(
 fn definition_json(
     runtime: &OrbitRuntime,
     definition: &AutoTaskDefinition,
-    cursor: Option<&orbit_core::auto_tasks::AutoTaskCursor>,
+    cursor: Option<&orbit_core::application::auto_tasks::AutoTaskCursor>,
     now: DateTime<Utc>,
 ) -> Value {
     let minted = tagged_instances(runtime, &definition.name);
@@ -440,7 +442,7 @@ fn template_summary(template: &AutoTaskTemplate) -> String {
 
 fn next_evaluation(
     schedule: &AutoTaskSchedule,
-    cursor: Option<&orbit_core::auto_tasks::AutoTaskCursor>,
+    cursor: Option<&orbit_core::application::auto_tasks::AutoTaskCursor>,
     now: DateTime<Utc>,
 ) -> Option<String> {
     let cursor = cursor?;
@@ -461,7 +463,7 @@ fn next_evaluation(
 
 fn next_interval(
     every_minutes: u64,
-    cursor: &orbit_core::auto_tasks::AutoTaskCursor,
+    cursor: &orbit_core::application::auto_tasks::AutoTaskCursor,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
     if every_minutes == 0 {

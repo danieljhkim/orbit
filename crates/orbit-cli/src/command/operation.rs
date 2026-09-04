@@ -458,6 +458,8 @@ impl Commands {
                     },
                     TaskSubcommand::Locks(command) => match &command.command {
                         LocksSubcommand::List(_) => ("locks-list", None, None),
+                        LocksSubcommand::Contention(_) => ("locks-contention", None, None),
+                        LocksSubcommand::Reserve(_) => ("locks-reserve", None, None),
                         LocksSubcommand::Release(args) => (
                             "locks-release",
                             Some("reservation"),
@@ -465,6 +467,7 @@ impl Commands {
                         ),
                     },
                     TaskSubcommand::List(_) => ("list", None, None),
+                    TaskSubcommand::Flow(_) => ("flow", None, None),
                     TaskSubcommand::Show(args) => ("show", Some("task"), Some(args.id.as_str())),
                     TaskSubcommand::Lint(args) => ("lint", Some("task"), args.id.as_deref()),
                     TaskSubcommand::Update(args) => {
@@ -962,9 +965,9 @@ fn dispatch_run(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     }
 }
 
-fn dispatch_sweep(command: Commands, _context: DispatchContext<'_>) -> CommandOut {
+fn dispatch_sweep(command: Commands, context: DispatchContext<'_>) -> CommandOut {
     match command {
-        Commands::Sweep(command) => command.execute_without_runtime(),
+        Commands::Sweep(command) => command.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Sweep"),
     }
 }

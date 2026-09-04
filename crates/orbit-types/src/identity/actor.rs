@@ -118,7 +118,11 @@ pub fn agent_from_model(model: &str) -> Option<&'static str> {
         return None;
     }
 
-    if model.starts_with("claude-") || model.starts_with("opus") || model.starts_with("sonnet") {
+    if model.starts_with("claude-")
+        || model.starts_with("opus")
+        || model.starts_with("sonnet")
+        || model.starts_with("fable")
+    {
         return Some("claude");
     }
     if model.starts_with("gpt-") || model.starts_with("o1") || model.starts_with("o3") {

@@ -649,7 +649,8 @@ impl HubCoordinationExecutor {
             for relation in &updated.relations {
                 if relation.relation_type == orbit_types::task::TaskRelationType::Resolves
                     && is_valid_friction_id(&relation.target)
-                    && let Err(error) = frictions.resolve_by_task(&relation.target, id, Utc::now())
+                    && let Err(error) =
+                        frictions.auto_resolve_by_task(&relation.target, id, Utc::now())
                 {
                     tracing::warn!(
                         task_id = id,

@@ -120,4 +120,8 @@ pub struct UsageMetadata {
     pub candidates_token_count: u64,
     #[serde(default)]
     pub cached_content_token_count: u64,
+    /// Reasoning tokens of thinking models, reported beside the visible
+    /// candidates and part of the output budget.
+    #[serde(default)]
+    pub thoughts_token_count: u64,
 }

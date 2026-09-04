@@ -7,8 +7,9 @@ use orbit_types::workflow::{AutoTaskSchedule, auto_task_tag};
 use tempfile::tempdir;
 
 use crate::OrbitRuntime;
+use crate::application::auto_tasks::cursor_state_path;
+use crate::application::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 use crate::application::task::TaskUpdateParams;
-use crate::auto_tasks::scheduler::{SchedulerOptions, run_auto_task_scheduler_at};
 
 use super::interval_params;
 
@@ -73,6 +74,50 @@ fn fires_and_stamps_provenance() {
     assert_eq!(
         task.required_tools,
         vec!["github.auth.status", "github.run.list"]
+    );
+}
+
+/// The task is minted before the cursor is advanced. When that checkpoint
+/// cannot be written the pass must still report the fire and the task it
+/// created, not a `skipped` row that hides a task the backlog now carries.
+#[cfg(unix)]
+#[test]
+fn cursor_write_failure_after_minting_is_reported_as_a_fire() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runtime = runtime();
+    runtime
+        .auto_task_add(interval_params("chore", 60))
+        .expect("add");
+    let t0 = at(2026, 1, 1, 0, 0);
+    fire(&runtime, t0); // baseline writes the cursor file
+
+    let state_path = cursor_state_path(&runtime.paths().state_dir);
+    let writable = std::fs::metadata(&state_path)
+        .expect("state file")
+        .permissions();
+    std::fs::set_permissions(&state_path, std::fs::Permissions::from_mode(0o444))
+        .expect("make cursor file read-only");
+
+    let outcome = run_auto_task_scheduler_at(
+        &runtime,
+        t0 + Duration::minutes(65),
+        SchedulerOptions::default(),
+    )
+    .expect("scheduler pass");
+    std::fs::set_permissions(&state_path, writable).expect("restore permissions");
+
+    assert_eq!(outcome.reports.len(), 1);
+    let report = &outcome.reports[0];
+    assert_eq!(report.action, "fired", "{report:?}");
+    let task_id = report.task_id.clone().expect("minted task id");
+    assert!(runtime.get_task(&task_id).is_ok());
+    assert!(
+        report
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("cursor not advanced")),
+        "{report:?}"
     );
 }
 

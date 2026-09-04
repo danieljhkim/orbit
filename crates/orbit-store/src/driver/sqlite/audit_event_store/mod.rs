@@ -327,11 +327,13 @@ impl Store {
 
         let sql = format!(
             "SELECT {AUDIT_EVENT_COLUMNS} \
-             FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{}",
-            param_values.len() + 1
+             FROM audit_events {where_clause} ORDER BY id DESC LIMIT ?{} OFFSET ?{}",
+            param_values.len() + 1,
+            param_values.len() + 2
         );
 
         param_values.push(Box::new(limit as i64));
+        param_values.push(Box::new(filter.offset as i64));
 
         let mut stmt = conn
             .prepare(&sql)

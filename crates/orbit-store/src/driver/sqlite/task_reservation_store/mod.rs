@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{Duration, Utc};
 use orbit_common::OrbitError;
@@ -16,6 +17,23 @@ use crate::{
 };
 
 mod workspace_claim;
+
+static ROW_ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Mint a reservation or claim row id that cannot collide with another
+/// caller's. The wall clock alone is not enough: two agents reserving in the
+/// same nanosecond tick (or on a clock that fails and reads as 0) would both
+/// produce the same primary key and one would abort on the UNIQUE constraint
+/// instead of getting a reservation. The process id separates processes and
+/// the sequence separates threads within one.
+pub(super) fn unique_row_id(prefix: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = ROW_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}{nanos}-{}-{sequence}", std::process::id())
+}
 
 impl Store {
     /// Inspect active reservations through a pooled read connection. Unlike
@@ -167,13 +185,7 @@ impl Store {
                 });
             }
 
-            let reservation_id = format!(
-                "reservation-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_nanos())
-                    .unwrap_or(0)
-            );
+            let reservation_id = unique_row_id("reservation-");
             let created_at = now;
             let expires_at =
                 (Utc::now() + Duration::seconds(params.ttl_seconds as i64)).to_rfc3339();

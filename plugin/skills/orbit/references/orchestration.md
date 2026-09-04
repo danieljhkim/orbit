@@ -11,6 +11,7 @@ orbit run ship                      # ship ready backlog tasks through the gated
 orbit run ship <task-id> ...        # ship exactly these
 orbit run ship --mode local         # commit to the current branch; no PR
 orbit run auto --for 2h             # drain the backlog for a window
+orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
 orbit run ship-sweep --dry-run      # what every registered workspace would ship
 orbit run triage                    # diagnose tasks blocked by failed runs
 ```
@@ -22,6 +23,10 @@ defaults to `workflow.base_branch`.
 `run auto` drains loose leaf tasks plus one epic for a bounded window. The window
 bounds only the *start* of new work — a task already shipping when it expires
 still finishes.
+
+It keeps `--concurrency` tasks in flight (5 by default) and re-lists the whole
+backlog every pass, so a slot is refilled as soon as its own task finishes and a
+task filed mid-window starts without waiting for the batch around it.
 
 Runs are asynchronous: these commands return once the run is durable, printing a
 run ID. They do not claim the eventual outcome.
