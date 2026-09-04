@@ -131,7 +131,7 @@ spec:
        or change task lifecycle state. An implementation that did not complete is
        never a delivery candidate.
 
-    3. For every delivery candidate, file a friction record naming the failed
+    3. For every delivery candidate, file an Orbit friction naming the failed
        step and original error. Delivery fixes the immediate run; the friction
        preserves the root cause. The filed friction record is the durable
        artifact — do not treat reporting its id as a substitute for filing it.
