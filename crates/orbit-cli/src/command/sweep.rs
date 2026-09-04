@@ -7,10 +7,15 @@
 //! errors — an unconfigured host logs one line and exits 0, because the OS
 //! clock will invoke it forever.
 
+use std::path::Path;
+
 use crate::command::{Block, CommandOut, Payload};
 use clap::Args;
-use orbit_cmd::registry_routines::run_sweep;
-use orbit_core::application::routines::{RoutineSweepReport, SweepOptions, SweepOutcome};
+use orbit_cmd::registry_routines::{run_sweep, run_sweep_at};
+use orbit_core::{
+    OrbitError, OrbitRuntime,
+    application::routines::{RoutineSweepReport, SweepOptions, SweepOutcome},
+};
 use serde_json::json;
 
 #[derive(Args)]
@@ -74,10 +79,11 @@ impl SweepCommand {
     /// Runs without a pre-initialized runtime: the sweep resolves every
     /// workspace from the global registry (per-workspace runtimes are built
     /// inside orbit-core).
-    pub fn execute_without_runtime(self) -> CommandOut {
-        let outcome = run_sweep(SweepOptions {
+    pub fn execute_without_runtime(self, root_override: Option<&Path>) -> CommandOut {
+        let options = SweepOptions {
             dry_run: self.dry_run,
-        })?;
+        };
+        let outcome = run_sweep_for_selected_root(root_override, options)?;
 
         let doc = outcome_json(&outcome, self.dry_run);
         if self.json {
@@ -151,6 +157,20 @@ impl SweepCommand {
         }
         lines
     }
+}
+
+fn run_sweep_for_selected_root(
+    root_override: Option<&Path>,
+    options: SweepOptions,
+) -> Result<SweepOutcome, OrbitError> {
+    let has_env_override = std::env::var("ORBIT_ROOT").is_ok_and(|root| !root.trim().is_empty());
+    if root_override.is_none() && !has_env_override {
+        return run_sweep(options);
+    }
+
+    let cwd = std::env::current_dir().map_err(|error| OrbitError::Io(error.to_string()))?;
+    let roots = OrbitRuntime::resolve_roots_for_cwd(&cwd, root_override)?;
+    run_sweep_at(&roots.global_root, options)
 }
 
 pub(crate) fn outcome_json(outcome: &SweepOutcome, dry_run: bool) -> serde_json::Value {
