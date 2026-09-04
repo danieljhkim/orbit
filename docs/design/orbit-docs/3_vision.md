@@ -10,7 +10,7 @@ summary: "Orbit Docs — open questions, the remaining roadmap (injection, ADR f
 tags: [orbit-docs]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00164, ORB-00165, ORB-00166, ORB-00167, ORB-00168, ORB-00169, ORB-00206]
-last_validated: 2026-08-09
+last_validated: 2026-09-04
 ---
 
 # Orbit Docs — Vision
@@ -26,14 +26,14 @@ The v1 from [ORB-00163] is the corpus and the retrieval primitive; [ORB-00206] a
 
 ## 1. Open Questions
 
-### 1.1 Should `orbit-design` retire on the same cadence as orbit-docs adoption?
+### 1.1 What remains load-bearing after `orbit-design`'s retirement?
 
-[ORB-00165] is filed but deliberately gated on three pre-flight conditions: at least two PRs using `orbit docs`, PreToolUse hook injection wired, and explicit team agreement that the 4-numbered layout is a recommendation rather than a rule. Task-time `task.show --with-context` injection is already wired. Retiring `orbit-design` too early forces a flag-day for authors who learned the old convention; retiring it too late leaves a duplicated retrieval surface (`orbit design list/show` vs `orbit docs list/show`) and a "which mental model do I use?" friction for new agents.
+[ORB-00165] is complete: the `orbit-design` skill and CLI surface were retired, and the 4-numbered layout is now a recommendation documented by `docs/design/CONVENTIONS.md`. Task-time `task.show --with-context` injection is wired; PreToolUse hook injection remains future work. The duplicated retrieval surface (`orbit design list/show` vs. `orbit docs list/show`) is no longer present.
 
-The harder sub-question: does `orbit-design` carry anything load-bearing that orbit-docs doesn't? Two candidates:
+The retirement left two load-bearing rules to keep explicit:
 
-- **ADR earning rule.** `orbit-design` documents (and the docs/design conventions enforce) that ADR headings must be allocated via `orbit.adr.add` before they appear in `4_decisions.md`. This rule belongs to `orbit-adr`, not to a docs skill. Retiring `orbit-design` should not retire the rule.
-- **`Last updated:` freshness assertion.** `orbit-design` asks authors to bump `last_updated:` when the doc materially changes. Orbit-docs has no such field; semantically, frontmatter `last_updated:` is just another tag. We chose not to lift this rule because (a) it's not enforceable without commit-graph integration, (b) it's noisy in practice (every cosmetic edit drives a debate about whether to bump), and (c) `git log -- <path>` answers the same question without an author-side assertion.
+- **ADR earning rule.** The former `orbit-design` surface documented that ADR headings must be allocated via `orbit.adr.add` before they appear in `4_decisions.md`. This rule belongs to `orbit-adr`, not to a docs skill, and remains independent of the retirement.
+- **`Last updated:` freshness assertion.** The former `orbit-design` surface asked authors to bump `last_updated:` when the doc materially changes. The current docs conventions still describe that field, while the tolerant Orbit Docs parser treats it as unmodeled metadata. We chose not to make it an Orbit Docs validation rule because (a) it is not enforceable without commit-graph integration, (b) it is noisy in practice, and (c) `git log -- <path>` answers the same question without an author-side assertion.
 
 The third condition — explicit team agreement — is what makes this an open question rather than a queued task. The answer comes from usage, not from this design doc.
 
@@ -88,7 +88,7 @@ The tradeoff is straightforward: stability of cross-references vs. human-authore
 | Discovery | Push-first (scope-glob injection) | Pull-first (search / show), with task-time context injection |
 | Cross-references | `related_features`, `evidence` | `related_features`, `related_artifacts`, `paths` |
 
-The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearing decision. Both surfaces being separate, with explicit cross-references via `related_artifacts: [L-NNNN]`, is the v1 shape.
+The boundary (rule-with-failure-mode vs. explanatory-context) is the load-bearing decision. The surfaces remain separate, with Orbit Docs cross-references using the task, friction, and retained historical ADR prefixes supported by its parser.
 
 ### 2.2 Orbit ADRs
 

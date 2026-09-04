@@ -2,7 +2,6 @@
 title: Orbit Core — Decisions
 owner: claude
 last_updated: 2026-08-11
-last_validated: 2026-08-09
 status: Accepted
 feature: orbit-core
 doc_role: decisions
@@ -12,6 +11,7 @@ tags: [orbit-core, orbit-cmd, architecture, north-star]
 paths: ["crates/orbit-core/**", "crates/orbit-cmd/**"]
 related_features: [orbit-core]
 related_artifacts: [ORB-10026, ORB-10545]
+last_validated: 2026-09-04
 ---
 
 # Orbit Core — Decisions
