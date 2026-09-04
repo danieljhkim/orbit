@@ -7,15 +7,15 @@
 //! forty close a week and terminal when none do. This bucketizes both rates
 //! over the same windows so the trend is visible.
 //!
-//! Closure time is approximated by `updated_at` on a task that has reached a
-//! terminal status. `Done` is terminal, so nothing moves the timestamp
-//! afterwards, but a task edited shortly before it closed reports that edit's
-//! time. The error is bounded by the gap between a task's last edit and its
-//! close, and it does not accumulate across buckets.
+//! Terminal transitions come from task status history, so a task that is
+//! rejected and later reopened remains closed for the intervening windows and
+//! still contributes its dropped event. Legacy terminal tasks without status
+//! history retain the previous `updated_at` approximation.
 
 use chrono::{DateTime, Duration, Utc};
 use clap::{ArgAction, Args};
 use orbit_core::{OrbitError, OrbitRuntime, Task, TaskStatus, TaskType};
+use orbit_types::task::TaskHistoryEntry;
 use serde_json::json;
 
 use crate::command::{Block, CommandOut, Execute, Payload};
@@ -40,8 +40,8 @@ const DEFAULT_BUCKETS: usize = 6;
                   of the population was still open when that window closed.\n\n\
                   The verdict compares total inflow against total outflow across every\n\
                   window: draining, flat, or growing.\n\n\
-                  Closure time is approximated by a terminal task's last-updated timestamp;\n\
-                  a task edited shortly before closing reports that edit's time."
+                  Terminal transitions come from task status history, so reopened tasks retain\n\
+                  their prior CLOSED or DROPPED events in the appropriate windows."
 )]
 pub struct TaskFlowArgs {
     /// Filter by tag. Repeat for AND semantics, matching `orbit task list`.
@@ -61,14 +61,19 @@ pub struct TaskFlowArgs {
     pub json: bool,
 }
 
-/// The three task fields the report reads. Reducing to them keeps the
-/// arithmetic testable without constructing whole tasks, and makes it obvious
-/// that nothing else influences the numbers.
-#[derive(Clone, Copy)]
+/// The task creation time and status changes the report reads. Reducing to
+/// them keeps the arithmetic testable without constructing whole tasks.
+#[derive(Clone)]
 pub(crate) struct FlowPoint {
     pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub terminal: Option<TerminalKind>,
+    pub status_changes: Vec<StatusChange>,
+}
+
+/// A transition into a task status at a known instant.
+#[derive(Clone, Copy)]
+pub(crate) struct StatusChange {
+    pub at: DateTime<Utc>,
+    pub status: TaskStatus,
 }
 
 /// A task leaves the live backlog on `done`, `rejected`, or `archived`. The
@@ -91,18 +96,45 @@ impl TerminalKind {
 }
 
 impl FlowPoint {
-    pub(crate) fn from_task(task: &Task) -> Self {
+    pub(crate) fn from_task(task: &Task, history: &[TaskHistoryEntry]) -> Self {
+        let mut status_changes: Vec<StatusChange> = history
+            .iter()
+            .filter_map(|entry| {
+                entry.to_status.map(|status| StatusChange {
+                    at: entry.at,
+                    status,
+                })
+            })
+            .collect();
+        status_changes.sort_by_key(|change| change.at);
+
+        // Older task records may predate status history. Preserve their
+        // terminal outflow approximation rather than silently removing them
+        // from the report.
+        if status_changes.is_empty() && TerminalKind::of(task.status).is_some() {
+            status_changes.push(StatusChange {
+                at: task.updated_at,
+                status: task.status,
+            });
+        }
+
         Self {
             created_at: task.created_at,
-            updated_at: task.updated_at,
-            terminal: TerminalKind::of(task.status),
+            status_changes,
         }
     }
 
-    /// Whether the task was still open at `instant`: created by then, and
-    /// either never closed or closed afterwards.
+    /// Whether the task was still open at `instant`: created by then and not
+    /// in a terminal status at that time. A later reopen restores it to the
+    /// historical backlog population.
     fn open_at(&self, instant: DateTime<Utc>) -> bool {
-        self.created_at <= instant && (self.terminal.is_none() || self.updated_at > instant)
+        self.created_at <= instant
+            && self
+                .status_changes
+                .iter()
+                .rev()
+                .find(|change| change.at <= instant)
+                .is_none_or(|change| TerminalKind::of(change.status).is_none())
     }
 }
 
@@ -182,13 +214,15 @@ pub(crate) fn compute_flow(
             if point.created_at >= bucket.start && point.created_at < bucket.end {
                 bucket.filed += 1;
             }
-            if let Some(kind) = point.terminal
-                && point.updated_at >= bucket.start
-                && point.updated_at < bucket.end
-            {
-                match kind {
-                    TerminalKind::Closed => bucket.closed += 1,
-                    TerminalKind::Dropped => bucket.dropped += 1,
+            for change in &point.status_changes {
+                if let Some(kind) = TerminalKind::of(change.status)
+                    && change.at >= bucket.start
+                    && change.at < bucket.end
+                {
+                    match kind {
+                        TerminalKind::Closed => bucket.closed += 1,
+                        TerminalKind::Dropped => bucket.dropped += 1,
+                    }
                 }
             }
             if point.open_at(bucket.end) {
@@ -213,8 +247,12 @@ impl Execute for TaskFlowArgs {
             .list_tasks_by_tags(&self.tags)?
             .iter()
             .filter(|task| self.task_type.is_none_or(|kind| task.task_type == kind))
-            .map(FlowPoint::from_task)
-            .collect();
+            .map(|task| {
+                runtime
+                    .get_task_history(&task.id)
+                    .map(|history| FlowPoint::from_task(task, &history))
+            })
+            .collect::<Result<_, _>>()?;
 
         let report = compute_flow(&points, Utc::now(), width, self.buckets);
 

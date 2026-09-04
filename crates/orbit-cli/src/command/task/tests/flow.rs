@@ -2,7 +2,9 @@
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
-use crate::command::task::flow::{FlowPoint, TerminalKind, compute_flow, format_net};
+use orbit_core::TaskStatus;
+
+use crate::command::task::flow::{FlowPoint, StatusChange, TerminalKind, compute_flow, format_net};
 
 fn at(day: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 1, day, 12, 0, 0)
@@ -13,16 +15,33 @@ fn at(day: u32) -> DateTime<Utc> {
 fn open(created: u32) -> FlowPoint {
     FlowPoint {
         created_at: at(created),
-        updated_at: at(created),
-        terminal: None,
+        status_changes: Vec::new(),
     }
 }
 
 fn terminal(created: u32, ended: u32, kind: TerminalKind) -> FlowPoint {
     FlowPoint {
         created_at: at(created),
-        updated_at: at(ended),
-        terminal: Some(kind),
+        status_changes: vec![StatusChange {
+            at: at(ended),
+            status: match kind {
+                TerminalKind::Closed => TaskStatus::Done,
+                TerminalKind::Dropped => TaskStatus::Rejected,
+            },
+        }],
+    }
+}
+
+fn status_history(created: u32, changes: &[(u32, TaskStatus)]) -> FlowPoint {
+    FlowPoint {
+        created_at: at(created),
+        status_changes: changes
+            .iter()
+            .map(|(day, status)| StatusChange {
+                at: at(*day),
+                status: *status,
+            })
+            .collect(),
     }
 }
 
@@ -73,6 +92,28 @@ fn open_at_end_reflects_the_population_still_open_when_the_window_closed() {
     assert_eq!(report.buckets[0].open_at_end, 1);
     assert_eq!(report.buckets[1].open_at_end, 0);
     assert_eq!(report.open_now, 0);
+}
+
+/// A rejected task remains out of the historical population until its later
+/// reopen, and its rejected transition is still an outflow event.
+#[test]
+fn rejection_then_reopen_preserves_dropped_event_and_historical_boundaries() {
+    let report = compute_flow(
+        &[status_history(
+            1,
+            &[(10, TaskStatus::Rejected), (16, TaskStatus::Backlog)],
+        )],
+        at(21),
+        Duration::days(7),
+        2,
+    );
+
+    assert_eq!(report.buckets[0].dropped, 1);
+    assert_eq!(report.buckets[0].open_at_end, 0);
+    assert_eq!(report.buckets[1].dropped, 0);
+    assert_eq!(report.buckets[1].open_at_end, 1);
+    assert_eq!(report.dropped, 1);
+    assert_eq!(report.open_now, 1);
 }
 
 #[test]
