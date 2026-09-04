@@ -6,8 +6,9 @@
 //! a public key, in a root-managed `AuthorizedKeysFile`, and sshd will not run
 //! that forced command for anyone who cannot complete the key exchange. A
 //! destination-issued bearer capability arrives through an sshd-set key
-//! environment rather than argv. The CLI makes that environment unreadable
-//! before it parses any arguments; Orbit persists only the capability digest.
+//! environment rather than argv. The dedicated account uses a protected
+//! setgid Orbit copy as its login shell, so Linux makes that initial environment unreadable as
+//! part of exec, before any userspace startup; Orbit persists only the digest.
 //!
 //! Three things live here, and nothing else:
 //!
@@ -36,7 +37,7 @@ const SSH_USER_AUTH_ENV: &str = "SSH_USER_AUTH";
 
 /// Key-option environment variable carrying the Tier 2 acceptance bearer.
 ///
-/// This name is public because the CLI must seal process environment metadata
+/// This name is public because the CLI verifies the kernel launch boundary
 /// before it reads the value. It is deliberately not a general configuration
 /// input: only [`SshAcceptance::ForcedCommand`] consumes it.
 pub const SSH_ACCEPTANCE_ENV: &str = "ORBIT_MCP_SSH_ACCEPTANCE";
@@ -140,12 +141,13 @@ impl SshPublicKey {
 
     /// The `authorized_keys` line that pins `machine_id` to this key.
     ///
-    /// `orbit_command` is the absolute path the destination will run, because
-    /// sshd executes a forced command without a login shell's `PATH`. The
-    /// acceptance bearer is installed with sshd's per-key `environment`
-    /// option, never in the forced command argv. The destination requests
-    /// operator so the matched callers-file grant can be realized; that grant
-    /// remains the ceiling and may still cap or deny it.
+    /// `orbit_command` is the protected login shell's absolute path. sshd
+    /// passes the forced command to that shell with `-c`, and the shell uses
+    /// the absolute field to recognize its own generated command without a
+    /// second exec. The acceptance bearer is installed with sshd's per-key
+    /// `environment` option, never in the forced command argv. The destination
+    /// requests operator so the matched callers-file grant can be realized;
+    /// that grant remains the ceiling and may still cap or deny it.
     pub fn authorized_keys_line(
         &self,
         orbit_command: &str,
@@ -224,8 +226,8 @@ pub fn issue_ssh_acceptance(
 }
 
 /// Validate a forced-command capability and recover the key it was issued
-/// beside. The CLI accepts the token only from its sealed process environment;
-/// caller-controlled argv has no value slot that can carry it.
+/// beside. The CLI accepts the token only after verifying the protected exec
+/// boundary; caller-controlled argv has no value slot that can carry it.
 pub fn verify_ssh_acceptance(
     global_root: &Path,
     machine_id: &str,
@@ -268,7 +270,7 @@ fn digests_match(presented: &str, stored: &str) -> bool {
 fn unauthorized_acceptance() -> OrbitError {
     OrbitError::UnauthorizedCaller(
         "SSH MCP acceptance was not issued by this destination; regenerate the authorized_keys \
-         line with `orbit mcp callers authorize`"
+         line with `orbit mcp callers authorize --launcher <path>`"
             .to_string(),
     )
 }

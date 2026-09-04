@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Decisions
 owner: grok
-last_updated: 2026-08-29
-last_validated: 2026-08-29
+last_updated: 2026-09-04
+last_validated: 2026-09-04
 status: Draft
 feature: federated-mcp
 doc_role: decisions
@@ -11,7 +11,7 @@ summary: Standing rules for the proposed federated MCP mux: destinations are con
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access]
-related_artifacts: [ORB-11053, ORB-11052, ORB-11044, ORB-11023, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11184, ORB-11053, ORB-11052, ORB-11044, ORB-11023, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Decisions
@@ -196,40 +196,40 @@ Tier 2 — binding the caller identity to the SSH key via an `authorized_keys` f
 
 ## A caller identity is only as strong as the key sshd checked for it
 
-**Recorded:** 2026-08 · [ORB-11053], corrected by [ORB-11057] and [ORB-11134]
+**Recorded:** 2026-08 · [ORB-11053], corrected by [ORB-11057], [ORB-11134], and [ORB-11184]
 
 **Code anchors:** `crates/orbit-mcp/src/remote/ssh_auth.rs` (`SshAcceptance`, `issue_ssh_acceptance`, `verify_ssh_acceptance`), `crates/orbit-mcp/src/remote/callers.rs` (`RemoteCallerIdentity`, `enforce_key_binding`), `crates/orbit-cli/src/command/mcp/callers.rs::authorize`, `orbit_types::tool::CallerIdentityProof`
 
 ### Context
 
-Tier 1 moved the authorization *statement* to the destination but still keyed it on `--remote-caller-machine-id`, a label the caller types. A caller that can reach the destination can therefore name a different row, which is why that tier is an accident guard rather than a boundary. ORB-11053 tried to close this by treating public forced-command flags as proof of their origin; ORB-11057 established that caller-controlled argv can reproduce those flags and a copied fingerprint. ORB-11134 then established that putting the corrective bearer in the forced-command argv exposed it through same-UID process metadata. The corrected boundary needs a destination-issued capability absent from argv and a deployment where no ordinary process can observe the short-lived login environment, while Orbit persists only its digest rather than a reusable SSH credential.
+Tier 1 moved the authorization *statement* to the destination but still keyed it on `--remote-caller-machine-id`, a label the caller types. A caller that can reach the destination can therefore name a different row, which is why that tier is an accident guard rather than a boundary. ORB-11053 tried to close this by treating public forced-command flags as proof of their origin; ORB-11057 established that caller-controlled argv can reproduce those flags and a copied fingerprint. ORB-11134 moved the corrective bearer from argv to the forced-command environment, but ORB-11184 established that a first-line Rust `PR_SET_DUMPABLE=0` still leaves the interval from `execve` through dynamic loading and runtime startup readable to a same-UID scanner. The corrected boundary must exist before the capability-bearing process begins userspace execution.
 
 ### Decision
 
 Delegate the identity to sshd, which already authenticates the key. Let the *destination* compose the argv that names the caller, while sshd supplies the bearer in a per-key environment:
 
 ```
-environment="ORBIT_MCP_SSH_ACCEPTANCE=<destination-token>",command="/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha",no-pty,… ssh-ed25519 AAAA… caller@box
+environment="ORBIT_MCP_SSH_ACCEPTANCE=<destination-token>",command="/usr/local/libexec/orbit-mcp-ssh mcp serve --accept-ssh --caller hm_alpha",no-pty,… ssh-ed25519 AAAA… caller@box
 ```
 
 Four rules make that operational:
 
 1. **The destination composes the argv; the caller's command is ignored entirely.** `SSH_ORIGINAL_COMMAND` is never parsed, merged, or used to derive a requested authority. Only its presence is logged, so the trail shows an override happened without the content ever reaching a decision.
-2. **An identity without a protected destination-issued capability is unrepresentable.** `--accept-ssh` is a valueless marker. Before parsing it, Linux Orbit sets the process non-dumpable; only then may the CLI read `ORBIT_MCP_SSH_ACCEPTANCE` and construct `SshAcceptance::ForcedCommand`. A missing bearer, failed protection, unsupported host, wrong digest, or caller mismatch refuses before selecting a row. `--caller-key-fingerprint` remains refused.
+2. **An identity without a protected destination-issued capability is unrepresentable.** `--accept-ssh` is a valueless marker. The dedicated account uses a root-owned Orbit copy with mode 2555 and a private, privilege-free group different from its primary group as its login shell. This is load-bearing: sshd always starts a forced command as `<login-shell> -c <command>`, so making only the eventual command setgid would still expose the bearer in an ordinary shell. The login-shell credential transition makes Linux apply its secure-exec dumpability policy inside `execve`, before the first bearer-bearing dynamic loader or Rust startup. Orbit verifies the inherited state, permanently drops the launch group, recognizes the exact generated `-c` shape without a second exec, then sets `PR_SET_DUMPABLE=0` as defense in depth. A normal executable, `NoNewPrivs`, `fs.suid_dumpable=1`, missing bearer, wrong digest, or caller mismatch refuses before selecting a row. `--caller-key-fingerprint` remains refused.
 3. **The capability is bound to the emitted key.** Its destination record stores the public-key fingerprint. A callers-file pin mismatch refuses at session establishment; copied fingerprint argv is not an observation. `SSH_USER_AUTH` remains optional Tier 1 evidence and does not turn caller-selected argv into Tier 2.
 4. **Which tier answered is recorded, not assumed.** `CallerIdentityProof` (`key-bound` / `self-asserted`) rides in `RemoteCallerGrant` into the authorization audit row's `arguments_json`. Both tiers produce identical-looking grants once resolved, so a trail without this field would leave a reader guessing whether the caller had to hold a key.
 
-Orbit renders the authorized-keys line and never installs it. The bearer-bearing entry must live in a root-owned `AuthorizedKeysFile` the login account cannot read, and its `environment=` option requires `PermitUserEnvironment yes` scoped to the account. That protects the bearer at rest; it does not protect the live environment of the login shell. Tier 2 therefore requires a dedicated login UID with no interactive/password/keyboard-interactive path, no unforced key, and no cron job, service, or other persistent process. Re-running `authorize` rotates the capability; the root-managed entry must be replaced as the same operation.
+Orbit renders the authorized-keys line and never installs it. The bearer-bearing entry must live in a root-owned `AuthorizedKeysFile` the login account cannot read, and its `environment=` option requires `PermitUserEnvironment yes` scoped to the account. `authorize` also requires an absolute `--launcher` path; verifies mode 2555, a group different from the account's real group, byte equality with the running Orbit binary, and that the system account database names it as the login shell; then emits that path. The installed launcher must be root-owned and its group must have no members, file privileges, or service privileges; the credential transition exists only to make the kernel protect process metadata. On every Orbit upgrade, replace the launcher with the new binary and re-run `authorize`. Re-authorizing rotates the capability digest immediately, so replacing the root-managed line is part of the same operation.
 
-Rejected alternative: **have Orbit manage `authorized_keys` directly** — generating, rotating, and removing entries. It would make the setup one command instead of three steps, but it puts a task tool in charge of machine login, and a bug in it locks an operator out of their own box. Also rejected: **make Tier 2 mandatory** by refusing remote sessions on a destination with no forced command. Tier 2 needs an sshd configuration change the operator may not control, and a hard requirement would break the Tier 1 destinations that had just been migrated; the tier is opt-in and the difference is recorded instead.
+Rejected alternative: **call `prctl` earlier in `main` or a userspace constructor.** Every such call still runs after `execve` created readable process metadata, so it can reduce but cannot close the race. Also rejected: **require a host-wide Yama policy** such as `ptrace_scope=2`. It would protect this launch, but changes debugging policy for every process on the host rather than placing the rule at the Tier 2 executable boundary. Orbit still does not manage `authorized_keys` directly: a task tool must not own machine login or risk locking an operator out. Tier 2 remains opt-in because it requires sshd and launcher configuration the operator may not control.
 
 ### Consequences
 
-- [3_vision.md §1](./3_vision.md) closes with evidence rather than by assertion: `crates/orbit-cli/tests/mcp_roundtrip.rs` starts the generated key-bound path, checks the live process metadata boundary, and proves an ordinary invocation copied from observable argv is refused.
+- [3_vision.md §1](./3_vision.md) closes with evidence rather than by assertion: `crates/orbit-cli/tests/mcp_roundtrip.rs` runs a separate ordinary same-UID scanner continuously across repeated generated protected launches, retains a valid key-bound grant, and proves an invocation copied from observable metadata is refused.
 - The boundary is real for the SSH transport only. `orbit mcp listen` authenticates nobody and keeps its hardcoded `agent`; no registry or session field was promoted into a credential to get here.
 - `orbit doctor` gains two machine-global rows (`mcp-callers`, `mcp-caller-keys`), composed in `orbit-cli` because `orbit-cmd` does not know about MCP and must not learn. Both are warnings: an opt-in tier not taken up is not a broken machine.
 - Cost: **`ssh_key_fingerprint` now enforces where it previously only parsed.** A destination that wrote the field speculatively under Tier 1 and cannot observe its callers' keys is unaffected, but one that *can* observe them will start refusing any caller whose row records a stale or wrong fingerprint. That is the intended direction and it is a behavior change on existing files.
-- Cost: **the strongest guarantee depends on root-managed sshd and account isolation Orbit does not own or verify.** The root-owned key file, `PermitUserEnvironment`, forced-command-only public-key authentication, and a dedicated no-other-process UID are all deployment requirements. The Linux process protection fail-closes when it cannot be established, but cannot prove the surrounding account has no cron job or service; operators must not describe a shared login UID as Tier 2.
+- Cost: **the strongest guarantee depends on root-managed sshd and a refreshed protected launcher Orbit does not install.** The root-owned key file, `PermitUserEnvironment`, forced-command-only public-key authentication, root-owned launcher, private privilege-free setgid group, and `fs.suid_dumpable` other than 1 are deployment requirements. A stale or unhardened launcher fails closed, but an upgrade is not complete for Tier 2 until the protected copy and rotated root-managed line are replaced.
 - Cost: **two similar-looking flags now exist.** `--remote-caller-machine-id` (Tier 1 audit label, hidden) and `--caller` (Tier 2 identity) both name a machine. They are not interchangeable, and a future change that merges them would silently reopen the escalation.
 
 ## Task References
@@ -240,5 +240,6 @@ Rejected alternative: **have Orbit manage `authorized_keys` directly** — gener
 - [ORB-11044] — implicit local membership for federated serve
 - [ORB-11052] — destination-side caller authorization, Tier 1 (the callers file)
 - [ORB-11053] — key-bound caller identity, Tier 2 (the `authorized_keys` forced command)
+- [ORB-11184] — kernel-protected Tier 2 exec boundary before userspace startup
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

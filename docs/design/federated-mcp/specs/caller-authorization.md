@@ -1,14 +1,14 @@
 ---
 type: design
 summary: "Spec: destination-side caller authorization — the callers file (Tier 1), requested-vs-granted authority, and key-bound caller identity via an authorized_keys forced command (Tier 2). Both shipped."
-last_validated: 2026-08-31
+last_validated: 2026-09-04
 title: Spec — Destination-side caller authorization
 owner: claude
 status: Draft
 feature: federated-mcp
 tags: [federated-mcp, mcp, mcp-bridge, authorization, spec]
 related_features: [federated-mcp, mcp-bridge, host-registry, mcp-session-context]
-related_artifacts: [ORB-11134, ORB-11053, ORB-11052, ORB-11044, ORB-11023, ORB-11017, ORB-11015, ORB-11013, ORB-11012, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11184, ORB-11134, ORB-11053, ORB-11052, ORB-11044, ORB-11023, ORB-11017, ORB-11015, ORB-11013, ORB-11012, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Spec: Destination-side caller authorization
@@ -36,7 +36,7 @@ This is the unresolved transport-authentication question in [3_vision.md §1](..
 This spec therefore has two tiers, and they must not be conflated:
 
 - **Tier 1 — the callers file (implemented, [ORB-11052]).** Moves the authorization *statement* to the destination. The caller identity it keys on is self-asserted, so Tier 1 alone remains an accident guard, in keeping with the kernel's doctrine. It is still strictly stronger than the prior behavior, where the caller's request *was* the grant.
-- **Tier 2 — key-bound caller identity (implemented, [ORB-11053], hardened by [ORB-11057] and [ORB-11134]).** Makes the identity authenticated by delegating key admission to sshd and requiring a destination-issued forced-command capability before Orbit honors the caller name. The bearer is absent from argv and accepted only from a Linux process environment sealed before argument parsing. It is opt-in per destination and requires a dedicated login UID with no ordinary command or persistent-process path; a destination running Tier 1 alone stays valid, with the weaker guarantee stated above.
+- **Tier 2 — key-bound caller identity (implemented, [ORB-11053], hardened by [ORB-11057], [ORB-11134], and [ORB-11184]).** Makes the identity authenticated by delegating key admission to sshd and requiring a destination-issued forced-command capability before Orbit honors the caller name. The bearer is absent from argv and accepted only when a Linux setgid exec protected the initial environment before any userspace startup. It is opt-in per destination and requires a dedicated login UID plus the protected launcher described below; a destination running Tier 1 alone stays valid, with the weaker guarantee stated above.
 
 Tier 2 persists only a SHA-256 capability digest under `~/.orbit/mcp-ssh-acceptance/`; the bearer value exists only in the root-managed authorized-keys entry. Orbit does not hold the caller's SSH private key or any reusable login credential.
 
@@ -94,7 +94,7 @@ Both halves are load-bearing:
 
 A session that is not remote-originated is **local**, and its authority resolution is unchanged: the process owner is the caller, argv stays authoritative, and the accident-guard model holds unmodified. No local workflow changes.
 
-Under Tier 2 the Tier 1 origination check is not consulted. The hidden `--accept-ssh` marker carries no value; the digest match uses `ORBIT_MCP_SSH_ACCEPTANCE`, which sshd installs with the generated per-key `environment=` option. Linux Orbit makes its initial environment non-dumpable before parsing arguments and refuses the Tier 2 path if that protection was not established. Public flags, copied fingerprints, and ordinary SSH-shaped environment variables cannot select a Tier 2 row.
+Under Tier 2 the Tier 1 origination check is not consulted. The hidden `--accept-ssh` marker carries no value; the digest match uses `ORBIT_MCP_SSH_ACCEPTANCE`, which sshd installs with the generated per-key `environment=` option. The dedicated account's setgid Orbit login shell is therefore the first process to receive that environment, causing Linux to protect it in the kernel's exec path. Orbit then verifies the inherited non-dumpable state and real/effective group transition before reading the bearer. Its first-line `PR_SET_DUMPABLE=0` reinforces this state but does not and cannot close a pre-main window by itself. Public flags, copied fingerprints, and ordinary SSH-shaped environment variables cannot select a Tier 2 row.
 
 ## Requested, granted, effective
 
@@ -119,7 +119,7 @@ Invariants:
 Tier 1 leaves `machine_id` self-asserted. To make the caller identity authenticated, the destination pins it to the SSH key that authenticated, using a forced command in `authorized_keys`:
 
 ```
-environment="ORBIT_MCP_SSH_ACCEPTANCE=<destination-token>",command="/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha --operator",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA… caller@daniels-mac-mini
+environment="ORBIT_MCP_SSH_ACCEPTANCE=<destination-token>",command="/usr/local/libexec/orbit-mcp-ssh mcp serve --accept-ssh --caller hm_alpha --operator",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA… caller@daniels-mac-mini
 ```
 
 Invariants:
@@ -129,11 +129,22 @@ Invariants:
 3. The acceptance record also carries the fingerprint of the public key beside which the capability was emitted. A matched row with a different `ssh_key_fingerprint` refuses the session at establishment. `--caller-key-fingerprint` is not accepted: a copied fingerprint is caller text, not an observation. `SSH_USER_AUTH` remains an optional Tier 1 observation source and is not what upgrades an argv identity to `key-bound`.
 4. A pin is enforced under either tier. The operator wrote the fingerprint to have it checked, and a Tier 1 destination that happens to expose auth info can check it. What Tier 2 adds is that the *identity itself* stops being the caller's to choose.
 5. Tier 2 is opt-in. A destination running Tier 1 alone is a valid, documented configuration with a weaker guarantee, and the difference is legible in the audit trail rather than assumed — see `caller_identity` below.
-6. An acceptance invocation that omits `--caller`, lacks a protected environment, presents an unknown token, runs on an unsupported host, or names a caller other than the token record refuses before loading a grant.
+6. An acceptance invocation that omits `--caller`, lacks the credential-changing exec boundary, inherits ordinary dumpable state, presents an unknown token, runs on an unsupported host, or names a caller other than the token record refuses before loading a grant and before `CallerIdentityProof::KeyBound` can be stamped.
 
-`orbit mcp callers authorize --machine-id <hm_…> --key <path>` rotates the caller's acceptance capability, stores its digest and key fingerprint under `~/.orbit/mcp-ssh-acceptance/`, and emits the operator-requesting authorized-keys line. Install it only for a dedicated Linux login UID with no interactive/password/keyboard-interactive login, no unforced key, and no cron job, service, or other persistent process. The line must live in a root-owned `AuthorizedKeysFile` the account cannot read (for example `/etc/ssh/authorized_keys/%u`), and its per-key environment requires `PermitUserEnvironment yes` in a scoped `Match User` block. Root ownership protects the bearer at rest but is not, by itself, live same-UID isolation. The request remains capped by the callers-file row. Orbit does not edit or verify SSH login policy. Re-running the command invalidates the old capability; replace the root-managed line as the same rotation operation.
+Prepare the launcher before authorization (choose the installed Orbit path appropriate for the host):
 
-The rendered line carries `no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding` and the absolute path of the running `orbit`: a forced command runs without a login shell's `PATH`, and the MCP transport is one non-PTY stdio pipe that needs none of the capabilities those options close.
+```sh
+sudo groupadd --system orbit-mcp-launch
+sudo install --owner=root --group=orbit-mcp-launch --mode=2555 \
+  "$(command -v orbit)" /usr/local/libexec/orbit-mcp-ssh
+sudo usermod --shell /usr/local/libexec/orbit-mcp-ssh <dedicated-account>
+```
+
+`orbit mcp callers authorize --machine-id <hm_…> --key <path> --launcher /usr/local/libexec/orbit-mcp-ssh` rotates the caller's acceptance capability, stores its digest and key fingerprint under `~/.orbit/mcp-ssh-acceptance/`, validates the launcher, and emits the operator-requesting authorized-keys line. The launcher must be a root-owned, mode-2555 byte-for-byte copy of the running Orbit binary, setgid to a private group different from the login account's primary group, and configured as that account's login shell. This last condition is load-bearing: sshd always starts a forced command as `<login-shell> -c <command>`, so a normal shell would receive the bearer before Orbit. The protected Orbit shell recognizes only the exact generated command shape and feeds it to normal CLI parsing without a second exec. Orbit permanently drops the effective and saved launch group before opening task data. The private group must still have no members and grant no access to files, sockets, or services: its only job is to make Linux take the protected credential-changing exec path. `NoNewPrivs` and `fs.suid_dumpable=1` disable the boundary and fail closed.
+
+The line must live in a root-owned `AuthorizedKeysFile` the account cannot read (for example `/etc/ssh/authorized_keys/%u`), and its per-key environment requires `PermitUserEnvironment yes` in a scoped `Match User` block. The request remains capped by the callers-file row. Orbit does not edit or verify SSH login policy. After every Orbit upgrade, replace the launcher with the new binary while preserving its owner, group, and mode; then re-run `authorize` and replace the old root-managed line. Re-authorizing changes the stored digest immediately, so the old line stops authenticating before its file is replaced.
+
+The rendered line carries `no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding` and the validated absolute launcher path: a forced command runs without a login shell's `PATH`, and the MCP transport is one non-PTY stdio pipe that needs none of the capabilities those options close.
 
 ## Errors, audit, and diagnosis
 
@@ -163,4 +174,4 @@ A missing callers file must not silently preserve today's behavior, because toda
 
 ## Agent Signature
 
-Drafted by claude, 2026-08-29, from a read of `crates/orbit-mcp/src/remote/identity.rs`, `crates/orbit-mcp/src/federated/`, `crates/orbit-cli/src/command/mcp/`, and `crates/orbit-common/src/governance/authorization.rs`. Tier 1 implemented by claude, 2026-08-29 [ORB-11052]; the decision entry is [An MCP session's authority is declared by the destination, not requested by the caller](../4_decisions.md#an-mcp-sessions-authority-is-declared-by-the-destination-not-requested-by-the-caller). Tier 2 implemented by claude, 2026-08-29 [ORB-11053] in `crates/orbit-mcp/src/remote/ssh_auth.rs`, with the end-to-end demonstration in `crates/orbit-cli/tests/mcp_roundtrip.rs`; its decision entry is [A caller identity is only as strong as the key sshd checked for it](../4_decisions.md#a-caller-identity-is-only-as-strong-as-the-key-sshd-checked-for-it).
+Drafted by claude, 2026-08-29, from a read of `crates/orbit-mcp/src/remote/identity.rs`, `crates/orbit-mcp/src/federated/`, `crates/orbit-cli/src/command/mcp/`, and `crates/orbit-common/src/governance/authorization.rs`. Tier 1 implemented by claude, 2026-08-29 [ORB-11052]; the decision entry is [An MCP session's authority is declared by the destination, not requested by the caller](../4_decisions.md#an-mcp-sessions-authority-is-declared-by-the-destination-not-requested-by-the-caller). Tier 2 implemented by claude, 2026-08-29 [ORB-11053] in `crates/orbit-mcp/src/remote/ssh_auth.rs`, with its pre-userspace launch boundary corrected by codex, 2026-09-04 [ORB-11184] and demonstrated in `crates/orbit-cli/tests/mcp_roundtrip.rs`; its decision entry is [A caller identity is only as strong as the key sshd checked for it](../4_decisions.md#a-caller-identity-is-only-as-strong-as-the-key-sshd-checked-for-it).

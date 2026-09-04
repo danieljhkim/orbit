@@ -52,7 +52,7 @@ pub enum CallersSubcommand {
     /// Under that line sshd composes this machine's argv itself, so the caller
     /// identity stops being a label the caller chose and becomes something it
     /// had to hold a key to select. Tier 2 requires a dedicated Linux login
-    /// account with no ordinary command path, a root-managed
+    /// account, a protected setgid Orbit launcher, a root-managed
     /// `AuthorizedKeysFile`, and per-key environments enabled.
     Authorize(CallersAuthorizeArgs),
 }
@@ -83,6 +83,14 @@ pub struct CallersAuthorizeArgs {
     /// Path to the caller's *public* key, such as `~/.ssh/id_ed25519.pub`.
     #[arg(long, value_name = "PATH")]
     pub key: PathBuf,
+    /// Absolute path to a protected copy of this Orbit binary.
+    ///
+    /// The copy must be root-owned, mode 2555, setgid to a group other than
+    /// this account's primary group, byte-identical to the running Orbit, and
+    /// configured as the dedicated account's login shell. Linux then protects
+    /// the first bearer-bearing process during exec, before Orbit startup.
+    #[arg(long, value_name = "PATH")]
+    pub launcher: PathBuf,
 }
 
 impl CallersArgs {
@@ -167,7 +175,8 @@ fn check(path: &Path, machine_id: &str) -> CommandOut {
         None => println!(
             "identity: self-asserted — this row is selected by a name, so any caller that \
              reaches this machine can select it. `orbit mcp callers authorize --machine-id \
-             {machine_id} --key <key>.pub` prints the authorized_keys line that binds it to a key."
+             {machine_id} --key <key>.pub --launcher <protected-orbit>` prints the authorized_keys \
+             line that binds it to a key."
         ),
     }
     if let Some(workspaces) = &grant.workspaces {
@@ -256,35 +265,44 @@ fn authorize(global_root: &Path, callers_path: &Path, args: &CallersAuthorizeArg
     })?;
     let key = orbit_mcp::parse_public_key(&contents)?;
     let fingerprint = key.fingerprint()?;
+    let orbit_command = validate_ssh_launcher(&args.launcher)?;
     // Refuse malformed destination policy before rotating the capability and
     // invalidating an already-installed forced command.
     let file = orbit_mcp::load_callers(callers_path)?;
     let acceptance_token =
         orbit_mcp::issue_ssh_acceptance(global_root, &args.machine_id, &fingerprint)?;
-    // sshd runs a forced command without a login shell, so a bare `orbit`
-    // would depend on a PATH the line cannot count on.
-    let orbit_command = std::env::current_exe()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "orbit".to_string());
 
     println!(
         "{}",
-        key.authorized_keys_line(&orbit_command, &args.machine_id, &acceptance_token)
+        key.authorized_keys_line(
+            &orbit_command.to_string_lossy(),
+            &args.machine_id,
+            &acceptance_token
+        )
     );
 
     eprintln!(
-        "\nTier 2 requires Linux and a dedicated destination login account that cannot run any \
-         ordinary command: no interactive/password/keyboard-interactive login, no unforced SSH \
-         key, and no cron job, service, or other persistent process under that UID. A root-owned \
-         AuthorizedKeysFile alone is not this isolation boundary."
+        "\nTier 2 requires Linux, a dedicated destination login account, and the setgid launcher \
+         named in the generated command as that account's configured login shell. Keep the \
+         launcher's group private to that boundary and give it no file or service privileges. The \
+         Linux credential-changing login-shell exec is what hides the initial acceptance \
+         environment before userspace startup; Orbit's first-line prctl is only defense in depth."
     );
     eprintln!(
         "Install the line above in a root-owned AuthorizedKeysFile that the login account cannot \
          read (for example /etc/ssh/authorized_keys/%u). In a Match User block, set \
          PermitUserEnvironment yes so sshd accepts the generated per-key acceptance environment; \
-         restrict authentication to public keys from that forced-command-only file. Orbit seals \
-         the environment before parsing argv and fails closed when the Linux protection is absent. \
-         Orbit does not edit or verify login policy."
+         restrict authentication to public keys from that forced-command-only file. The launcher \
+         must be a root-owned, mode 2555 copy of the current Orbit binary, the login account's \
+         primary group must differ from the launcher's group, and `/etc/passwd` must name this \
+         launcher as that account's shell. Orbit fails closed if exec did not establish that \
+         protected state. Orbit does not edit login policy."
+    );
+    eprintln!(
+        "On every Orbit upgrade, replace the launcher with the new binary while preserving its \
+         root owner, private group, and mode 2555, then re-run this command and replace the old \
+         authorized_keys line. Re-authorizing rotates the acceptance value immediately; the old \
+         line no longer authenticates after the record changes."
     );
     eprintln!(
         "The forced command requests operator authority, but does not grant it: the matched row \
@@ -338,6 +356,152 @@ fn authorize(global_root: &Path, callers_path: &Path, args: &CallersAuthorizeArg
          root-managed entry as one rotation operation."
     );
     Ok(CommandOutput::Silent)
+}
+
+/// Validate the executable that will receive the bearer-bearing environment.
+///
+/// This check prevents setup from accidentally pointing at an ordinary Orbit
+/// binary, where `/proc/<pid>/environ` is readable before `main`. Ownership,
+/// mode, group transition, login-shell configuration, and exact binary
+/// contents are all verified before a new capability rotates into use.
+#[cfg(target_os = "linux")]
+fn validate_ssh_launcher(path: &Path) -> Result<PathBuf, OrbitError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    if !path.is_absolute() {
+        return Err(OrbitError::InvalidInput(
+            "`--launcher` must be an absolute path because sshd forced commands do not use a \
+             login-shell PATH"
+                .to_string(),
+        ));
+    }
+    if path
+        .as_os_str()
+        .to_string_lossy()
+        .contains(char::is_whitespace)
+    {
+        return Err(OrbitError::InvalidInput(
+            "`--launcher` may not contain whitespace because sshd passes the generated forced \
+             command to the account's login shell as one `-c` argument"
+                .to_string(),
+        ));
+    }
+    let launcher = path.canonicalize().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' cannot be resolved: {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = launcher.metadata().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' cannot be inspected: {error}",
+            launcher.display()
+        ))
+    })?;
+    let mode = metadata.permissions().mode();
+    if !metadata.is_file() || metadata.uid() != 0 || mode & 0o7777 != 0o2555 {
+        return Err(OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' must be a root-owned regular setgid executable with mode 2555",
+            launcher.display()
+        )));
+    }
+    // Safety: getgid only reads the process's real group credential.
+    if metadata.gid() == unsafe { libc::getgid() } {
+        return Err(OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' has the login account's real group {}; setgid exec would not \
+             create the required kernel credential transition",
+            launcher.display(),
+            metadata.gid()
+        )));
+    }
+    let current = std::env::current_exe().map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to locate the running Orbit binary while validating the SSH launcher: {error}"
+        ))
+    })?;
+    let current_bytes = std::fs::read(&current).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to read running Orbit binary '{}': {error}",
+            current.display()
+        ))
+    })?;
+    let launcher_bytes = std::fs::read(&launcher).map_err(|error| {
+        OrbitError::Io(format!(
+            "failed to read SSH MCP launcher '{}': {error}",
+            launcher.display()
+        ))
+    })?;
+    if current_bytes != launcher_bytes {
+        return Err(OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' is not a copy of the running Orbit binary; replace it before \
+             rotating the authorized_keys line",
+            launcher.display()
+        )));
+    }
+    let login_shell = configured_login_shell()?;
+    let login_shell = login_shell.canonicalize().map_err(|error| {
+        OrbitError::InvalidInput(format!(
+            "the current account's login shell '{}' cannot be resolved: {error}",
+            login_shell.display()
+        ))
+    })?;
+    if launcher != login_shell {
+        return Err(OrbitError::InvalidInput(format!(
+            "SSH MCP launcher '{}' is not this account's configured login shell '{}'; set the \
+             dedicated account's shell to the launcher before issuing a bearer-bearing line",
+            launcher.display(),
+            login_shell.display()
+        )));
+    }
+    Ok(launcher)
+}
+
+/// The current account's login shell from the system account database.
+///
+/// sshd always starts a forced command through that shell with `-c`. Tier 2
+/// therefore requires the protected Orbit copy to be the shell itself; a
+/// normal shell would receive the bearer before launching Orbit.
+#[cfg(target_os = "linux")]
+pub(super) fn configured_login_shell() -> Result<PathBuf, OrbitError> {
+    use std::ffi::CStr;
+
+    // Safety: getuid and sysconf have no pointer inputs or side effects.
+    let uid = unsafe { libc::getuid() };
+    let suggested = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
+    let buffer_len = usize::try_from(suggested).unwrap_or(16 * 1024).max(1024);
+    // Safety: `passwd` is a C POD whose pointer fields are populated by
+    // getpwuid_r into the live buffer below before any field is read.
+    let mut entry = unsafe { std::mem::zeroed::<libc::passwd>() };
+    let mut result = std::ptr::null_mut();
+    let mut buffer = vec![0u8; buffer_len];
+    // Safety: every pointer refers to live, correctly sized writable storage;
+    // getpwuid_r writes at most buffer.len() bytes and reports `result`.
+    let status = unsafe {
+        libc::getpwuid_r(
+            uid,
+            &mut entry,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut result,
+        )
+    };
+    if status != 0 || result.is_null() || entry.pw_shell.is_null() {
+        return Err(OrbitError::InvalidInput(format!(
+            "cannot resolve the login shell for destination uid {uid}; Tier 2 requires the \
+             protected launcher to be that account's shell"
+        )));
+    }
+    // Safety: a successful getpwuid_r returned pw_shell into the still-live
+    // NUL-terminated buffer.
+    let shell = unsafe { CStr::from_ptr(entry.pw_shell) };
+    Ok(PathBuf::from(shell.to_string_lossy().into_owned()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn validate_ssh_launcher(_path: &Path) -> Result<PathBuf, OrbitError> {
+    Err(OrbitError::InvalidInput(
+        "SSH MCP Tier 2 launchers are supported only on Linux".to_string(),
+    ))
 }
 
 /// Machines this one already names: the owners of its registered workspaces

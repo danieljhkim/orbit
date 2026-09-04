@@ -226,9 +226,10 @@ fn caller_authorization_rows() -> Vec<WorkspaceDoctorResult> {
                 unpinned.join(", ")
             ),
             remediation: Some(format!(
-                "Run `orbit mcp callers authorize --machine-id {} --key <caller-key>.pub`, \
-                 install the printed authorized_keys line, and add the fingerprint it reports to \
-                 the row.",
+                "Prepare the protected Linux login-shell launcher, then run `orbit mcp callers \
+                 authorize --machine-id {} --key <caller-key>.pub --launcher \
+                 <protected-orbit>`, install the printed authorized_keys line, and add the \
+                 fingerprint it reports to the row.",
                 unpinned.first().map_or("<machine-id>", String::as_str)
             )),
         },

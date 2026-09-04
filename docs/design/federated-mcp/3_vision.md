@@ -1,8 +1,8 @@
 ---
 title: Federated MCP — Vision
 owner: grok
-last_updated: 2026-08-29
-last_validated: 2026-08-29
+last_updated: 2026-09-04
+last_validated: 2026-09-04
 status: Draft
 feature: federated-mcp
 doc_role: vision
@@ -11,7 +11,7 @@ summary: Open questions for the proposed federated MCP mux: selector expiry, hea
 tags: [federated-mcp, mcp, host-registry, multi-host]
 paths: ["crates/orbit-mcp/**", "crates/orbit-registry/**", "crates/orbit-core/**"]
 related_features: [federated-mcp, host-registry, mcp-bridge, remote-access, mcp-session-context]
-related_artifacts: [ORB-11053, ORB-11052, ORB-11010, ORB-11009, ORB-11008]
+related_artifacts: [ORB-11184, ORB-11053, ORB-11052, ORB-11010, ORB-11009, ORB-11008]
 ---
 
 # Federated MCP — Vision
@@ -20,7 +20,7 @@ Forward-looking only. The contract in [specs/federated-workspace-mcp.md](./specs
 
 ## 1. Open Questions
 
-1. **Transport authentication.** ~~What authenticated principal does a destination Core receive on a mux-forwarded call?~~ **Resolved** by [specs/caller-authorization.md](./specs/caller-authorization.md), in two tiers. Tier 1 [ORB-11052] moved the authorization statement to the destination: `~/.orbit/mcp-callers.toml` declares each caller's ceiling, the caller's argv is a request, and the session holds the intersection. Tier 2 [ORB-11053, ORB-11134] answers the authentication half: under a forced command in the destination's own `authorized_keys`, sshd authenticates the key before running the line, the destination composes the caller and authority argv, and `SSH_ORIGINAL_COMMAND` is ignored entirely. The reusable acceptance bearer is not in that argv: sshd supplies it through a per-key environment, and the Linux CLI hides its initial environment from same-UID process inspection before parsing. `crates/orbit-cli/tests/mcp_roundtrip.rs` starts that legitimate path, verifies the live argv contains no bearer and the environment is unreadable to an ordinary same-UID process, then proves copied observable state cannot stamp `key-bound`. Three limits stay explicit. Tier 2 requires a dedicated login UID with no ordinary shell, unforced key, job, service, or other persistent process; a root-owned `AuthorizedKeysFile` is necessary at-rest protection, not the live isolation boundary. The protected environment path currently fail-closes outside Linux. And the identity is authenticated only for the *SSH* transport — `orbit mcp listen` authenticates nobody and keeps its hardcoded `agent`. Tier 2 remains opt-in: a Tier 1-only destination is valid with the weaker guarantee, which is why the tier that answered is recorded on every governed decision.
+1. **Transport authentication.** ~~What authenticated principal does a destination Core receive on a mux-forwarded call?~~ **Resolved** by [specs/caller-authorization.md](./specs/caller-authorization.md), in two tiers. Tier 1 [ORB-11052] moved the authorization statement to the destination: `~/.orbit/mcp-callers.toml` declares each caller's ceiling, the caller's argv is a request, and the session holds the intersection. Tier 2 [ORB-11053, ORB-11134, ORB-11184] answers the authentication half: under a forced command in the destination's own `authorized_keys`, sshd authenticates the key before running the line, the destination composes the caller and authority argv, and `SSH_ORIGINAL_COMMAND` is ignored entirely. The reusable acceptance bearer is not in argv. The dedicated account uses a root-owned, mode-2555 Orbit copy setgid to a private, privilege-free group as its login shell, so the shell process that first receives the sshd environment is already protected by Linux secure exec before its dynamic loader or Rust startup. Orbit recognizes the exact generated `-c` command without a second exec; its first-line `PR_SET_DUMPABLE=0` only verifies and reinforces the kernel boundary. `crates/orbit-cli/tests/mcp_roundtrip.rs` runs a separate same-UID `/proc` scanner across repeated protected startups and proves copied observable state cannot stamp `key-bound`. Tier 2 remains Linux-only and opt-in; its launcher must be refreshed on every Orbit upgrade, and re-authorizing rotates both the digest record and root-managed line. The identity is authenticated only for the *SSH* transport — `orbit mcp listen` authenticates nobody and keeps its hardcoded `agent`.
 
 2. **Selector expiry.** Does a host-qualified selector remain valid across destination catalog edits, host re-init, and mux restarts, or does it expire? If it expires, what is the caller-visible error, and how does that differ from `stale_route`?
 3. **Health freshness.** How old may host-reachability and checkout-health be when listed? Is the list a live probe, a cached projection with explicit freshness, or a last-known snapshot for unreachable hosts? The spec requires including unreachable hosts and requires routing to decide on live delivery rather than cached list health; it does not yet define probe cadence or staleness thresholds.
