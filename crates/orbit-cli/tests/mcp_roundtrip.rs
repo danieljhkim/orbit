@@ -1388,9 +1388,10 @@ capabilities = ["agent"]
 /// [ORB-11053] `SSH_ORIGINAL_COMMAND` is ignored entirely — not parsed, not
 /// merged, not used to derive a requested authority.
 ///
-/// The caller asks for operator in the only channel a forced command leaves it,
-/// and the file would grant operator. The session still holds agent alone,
-/// because the request comes from the argv *this machine* composed.
+/// The caller asks for agent in its original command while the destination's
+/// generated forced command requests operator, and the callers file permits
+/// both. The session still holds operator because the request comes from the
+/// argv *this machine* composed, not from `SSH_ORIGINAL_COMMAND`.
 // SSH MCP Tier 2 acceptance is a Linux-only deployment: the server refuses to
 // serve without the generated isolated-account setup, so this asserts on a
 // capability that does not exist on other platforms.
@@ -1407,32 +1408,28 @@ capabilities = ["agent", "operator"]
 "#,
     );
 
-    let Some(mut generated) = generated_forced_command(&workspace) else {
+    let Some(generated) = generated_forced_command(&workspace) else {
         return;
     };
-    let argv = &mut generated.argv;
-    argv.retain(|argument| argument != "--operator");
-    let forced_command = argv.join(" ");
+    let argv = &generated.argv;
     let mut command =
         McpWorkspace::orbit_program_command(Path::new(&argv[0]), &workspace.work, &workspace.home);
     command
-        .args(["-c", &forced_command])
+        .args(["-c", &generated.forced_command])
         .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
-        .env(
-            "SSH_ORIGINAL_COMMAND",
-            "orbit mcp serve --operator --remote-caller-machine-id hm_caller",
-        )
+        .env("SSH_ORIGINAL_COMMAND", "orbit mcp serve")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let child = command.spawn().expect("spawn destination-issued command");
     let mut client = McpClient::new(child);
     workspace.initialize(&mut client);
-    let denied = client.call_tool_err("orbit_workflow_run_list", json!({}));
+    let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
 
     assert_eq!(
-        denied["code"], "capability_denied",
-        "the caller's own command must contribute nothing to the requested authority: {denied}"
+        listed["items"],
+        json!([]),
+        "the caller's own command must contribute nothing to the requested authority: {listed}"
     );
 }
 
