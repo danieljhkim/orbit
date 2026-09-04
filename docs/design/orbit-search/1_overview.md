@@ -4,7 +4,7 @@ type: design
 title: "Semantic Search — Overview"
 owner: claude
 last_updated: 2026-08-13
-last_validated: 2026-08-09
+last_validated: 2026-09-04
 status: Draft
 feature: orbit-search
 doc_role: overview
@@ -79,7 +79,7 @@ The shipped index covers tasks plus explicitly indexed docs, including ADR desig
 | `orbit search` CLI + MCP | [2_design.md §6](./2_design.md) | [T20260510-10] |
 | Cross-workspace federated read + scope selector | [2_design.md §6.4](./2_design.md), [Federate the cross-workspace read; deny it inside a managed run](./4_decisions.md#federate-the-cross-workspace-read-deny-it-inside-a-managed-run) | [ORB-11027] |
 | Index-on-mutation + index command | [2_design.md §7](./2_design.md) | [T20260510-9] |
-| Existing task store API | [crates/orbit-store/src/file/task_store/v2/](../../../crates/orbit-store/src/file/task_store/v2/) | — |
+| Existing task store API | [crates/orbit-store/src/repository/task/v2/](../../../crates/orbit-store/src/repository/task/v2/) | — |
 | Concerns & honest limitations | [2_design.md §8](./2_design.md) | [T20260510-3] |
 | ADR log | [4_decisions.md](./4_decisions.md) | [T20260510-3] |
 | Open questions, prior work | [3_vision.md](./3_vision.md) | [T20260510-3] |

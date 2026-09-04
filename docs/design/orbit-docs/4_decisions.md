@@ -10,7 +10,7 @@ summary: "Orbit Docs decisions: locked frontmatter schema, `.orbit/` vs `docs/` 
 tags: [orbit-docs]
 related_features: [orbit-docs]
 related_artifacts: [ORB-00163, ORB-00206]
-last_validated: 2026-08-09
+last_validated: 2026-09-04
 ---
 
 # Orbit Docs — Decisions
