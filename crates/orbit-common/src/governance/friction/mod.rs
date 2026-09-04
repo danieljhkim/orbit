@@ -27,7 +27,7 @@ pub const DEFAULT_FRICTION_TAGS: &[(&str, &str)] = &[
         "skill-guidance",
         "Misleading or incorrect skill instructions",
     ),
-    ("tooling", "Orbit tool/CLI/MCP failures"),
+    ("tooling", "Tool, CLI, or MCP failures"),
 ];
 
 /// Return the default friction tag enum in schema-friendly literal form.

@@ -63,10 +63,7 @@ fn add_schema_matches_the_shipped_contract() {
     let schema = schema_for(FrictionVerb::Add);
 
     assert_eq!(schema.name, "orbit.friction.add");
-    assert_eq!(
-        schema.description,
-        "Append an Orbit friction report to the Orbit store via orbit.friction.*"
-    );
+    assert_eq!(schema.description, "Append a friction report");
     assert!(schema.builtin);
     assert_eq!(
         param_shape(&schema),
@@ -119,10 +116,7 @@ fn list_schema_matches_the_shipped_contract() {
     let schema = schema_for(FrictionVerb::List);
 
     assert_eq!(schema.name, "orbit.friction.list");
-    assert_eq!(
-        schema.description,
-        "List Orbit friction records from the Orbit store via orbit.friction.*"
-    );
+    assert_eq!(schema.description, "List friction records");
     assert_eq!(
         param_shape(&schema),
         vec![
@@ -173,7 +167,7 @@ fn aggregate_verbs_take_no_parameters() {
 
     assert_eq!(
         schema_for(FrictionVerb::Stats).description,
-        "Compute friction rates from the Orbit and task stores via orbit.friction.*"
+        "Compute friction rates from the friction and task stores"
     );
 }
 

@@ -1,4 +1,4 @@
-Append an Orbit friction report
+Append a friction report
 
 Usage: orbit friction add [OPTIONS] --body <BODY> --model <MODEL>
 

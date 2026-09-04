@@ -1,4 +1,4 @@
-Show a single Orbit friction record
+Show a single friction record
 
 Usage: orbit friction show [OPTIONS] <ID>
 

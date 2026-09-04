@@ -81,8 +81,8 @@ const ADD: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Add,
     name: "add",
     tool_name: "orbit.friction.add",
-    tool_description: "Append an Orbit friction report to the Orbit store via orbit.friction.*",
-    cli_about: "Append an Orbit friction report",
+    tool_description: "Append a friction report",
+    cli_about: "Append a friction report",
     params: &[
         ParamSpec {
             name: "body",
@@ -154,8 +154,8 @@ const LIST: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::List,
     name: "list",
     tool_name: "orbit.friction.list",
-    tool_description: "List Orbit friction records from the Orbit store via orbit.friction.*",
-    cli_about: "List Orbit friction records",
+    tool_description: "List friction records",
+    cli_about: "List friction records",
     params: &[
         text_param("model", "Optional model filter"),
         text_param(
@@ -186,8 +186,8 @@ const SHOW: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Show,
     name: "show",
     tool_name: "orbit.friction.show",
-    tool_description: "Fetch a single Orbit friction record by id",
-    cli_about: "Show a single Orbit friction record",
+    tool_description: "Fetch a single friction record by id",
+    cli_about: "Show a single friction record",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
     // `list` already returns the record bodies an agent needs; fetching one by
@@ -201,7 +201,7 @@ const STATS: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Stats,
     name: "stats",
     tool_name: "orbit.friction.stats",
-    tool_description: "Compute friction rates from the Orbit and task stores via orbit.friction.*",
+    tool_description: "Compute friction rates from the friction and task stores",
     cli_about: "Compute friction rates",
     params: &[],
     rejects_agent_field: false,
@@ -230,8 +230,8 @@ const UPDATE: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Update,
     name: "update",
     tool_name: "orbit.friction.update",
-    tool_description: "Update triage metadata for an Orbit friction record",
-    cli_about: "Update triage metadata for an Orbit friction record",
+    tool_description: "Update triage metadata for a friction record",
+    cli_about: "Update triage metadata for a friction record",
     params: &[
         ParamSpec {
             name: "id",
@@ -281,8 +281,8 @@ const RESOLVE: FrictionOperation = FrictionOperation {
     verb: FrictionVerb::Resolve,
     name: "resolve",
     tool_name: "orbit.friction.resolve",
-    tool_description: "Mark an Orbit friction record as resolved",
-    cli_about: "Mark an Orbit friction record as resolved",
+    tool_description: "Mark a friction record as resolved",
+    cli_about: "Mark a friction record as resolved",
     params: &[BARE_ID_PARAM],
     rejects_agent_field: false,
     // Resolution is an operator decision taken through the CLI / dashboard.
