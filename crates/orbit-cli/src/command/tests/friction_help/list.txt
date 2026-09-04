@@ -1,4 +1,4 @@
-List Orbit friction records
+List friction records
 
 Usage: orbit friction list [OPTIONS]
 

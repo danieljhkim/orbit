@@ -40,7 +40,7 @@ Solution:
    ```
 
 3. Re-run or re-check the blocked run. The next reserve attempt should either acquire a fresh reservation with `owner_run_id` set or reveal a different conflict.
-4. Record Orbit friction when the stale reservation required manual diagnosis or release.
+4. Record friction when the stale reservation required manual diagnosis or release.
 
 ## Stale Installed Job Or Workspace Catalog Drift
 

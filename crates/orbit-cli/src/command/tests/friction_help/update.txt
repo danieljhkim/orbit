@@ -1,4 +1,4 @@
-Update triage metadata for an Orbit friction record
+Update triage metadata for a friction record
 
 Usage: orbit friction update [OPTIONS] <ID>
 

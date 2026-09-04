@@ -1,15 +1,15 @@
-Report, list, and triage Orbit friction records
+Report, list, and triage friction records
 
 Usage: orbit friction [OPTIONS] <COMMAND>
 
 Commands:
-  add      Append an Orbit friction report
-  list     List Orbit friction records
-  show     Show a single Orbit friction record
+  add      Append a friction report
+  list     List friction records
+  show     Show a single friction record
   stats    Compute friction rates
   tags     List configured friction taxonomy tags
-  update   Update triage metadata for an Orbit friction record
-  resolve  Mark an Orbit friction record as resolved
+  update   Update triage metadata for a friction record
+  resolve  Mark a friction record as resolved
 
 Options:
       --root <ROOT>  Override the Orbit root directory (highest precedence)

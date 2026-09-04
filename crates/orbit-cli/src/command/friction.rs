@@ -23,7 +23,7 @@ use crate::command::{CommandOut, Execute, Payload};
 pub type FrictionInvocation = Invocation<FrictionVerb>;
 
 #[derive(Args)]
-#[command(about = "Report, list, and triage Orbit friction records")]
+#[command(about = "Report, list, and triage friction records")]
 pub struct FrictionCommand {
     #[command(subcommand)]
     pub command: FrictionInvocation,
