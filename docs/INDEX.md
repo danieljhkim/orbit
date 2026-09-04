@@ -25,6 +25,7 @@ CLI behavior, state layout, or recovery semantics change.
 | [Inspect the Audit Trail](./runbooks/audit-trail.md) | Query and interpret Orbit invocation, run, step, and activity audit history. |
 | [Recover a Corrupted Database](./runbooks/database-recovery.md) | Recover a corrupted Orbit SQLite database from backup, salvage, or regeneration. |
 | [Check Orbit Health](./runbooks/health-checks.md) | Check Orbit workspace, database, dashboard, log-sink, job-run, and routine-clock health. |
+| [Prepare a Linux Host for Sandboxed Dispatch](./runbooks/linux-sandbox.md) | Install and verify the Bubblewrap host prerequisite that Orbit's Linux sandbox fails closed without. |
 | [Inspect and Retain Logs](./runbooks/logging.md) | Locate, filter, rotate, and retain Orbit process and routine-sweep logs. |
 | [Release Orbit](./runbooks/release.md) | Cut and verify an Orbit release across agent plugins, Cargo, GitHub artifacts, Homebrew, and npm. |
 | [Inventory and Protect Orbit State](./runbooks/state-and-backup.md) | Locate Orbit state and perform WAL-safe backups, explicit task publication, restores, and task migrations. |
