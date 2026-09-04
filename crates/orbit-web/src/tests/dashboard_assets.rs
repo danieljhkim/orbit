@@ -617,6 +617,48 @@ fn dashboard_operations_are_typed_guarded_and_responsive() {
     assert!(router.contains(r#"classList.toggle("operations-active", top === "operations")"#));
 }
 
+/// The global `main` rule establishes the visible grid while this narrow
+/// Operations selector must win for an inactive HTML-hidden subview. Keep the
+/// tiny cascade model here rather than checking only for markup or a `hidden`
+/// attribute: the regression was precisely that the inactive main was still
+/// rendered after a display rule won the cascade.
+fn computed_operations_main_display(css: &str, hidden: bool, viewport_width: u16) -> &'static str {
+    let global_main_display = css.contains("main {\n        display: grid;");
+    let compact_main_display =
+        viewport_width <= 1000 && css.contains("main { grid-template-columns: 1fr !important; }");
+    let hidden_override = css.contains(
+        ".tab-pane[data-tab=\"operations\"] > main[hidden] { display: none !important; }",
+    );
+
+    if hidden && hidden_override {
+        "none"
+    } else if global_main_display || compact_main_display {
+        "grid"
+    } else {
+        "block"
+    }
+}
+
+#[test]
+fn dashboard_operations_subtabs_compute_exactly_one_rendered_main() {
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+
+    for viewport_width in [1280, 720, 480] {
+        for (route, hidden_states) in [("routines", [false, true]), ("auto-tasks", [true, false])] {
+            let visible = hidden_states
+                .into_iter()
+                .filter(|hidden| {
+                    computed_operations_main_display(css, *hidden, viewport_width) != "none"
+                })
+                .count();
+            assert_eq!(
+                visible, 1,
+                "#{route} must render exactly one Operations subview at {viewport_width}px"
+            );
+        }
+    }
+}
+
 /// ORB-10444: Scoreboard content stays reachable after the move — as a
 /// Diagnostics subtab whose markup (and therefore every id `scoreboard.js`
 /// renders into, so the scoreboard API contract is untouched) lives inside the
