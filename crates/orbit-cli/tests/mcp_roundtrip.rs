@@ -148,7 +148,11 @@ impl McpWorkspace {
     }
 
     fn orbit_command(work: &Path, home: &Path) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
+        Self::orbit_program_command(Path::new(env!("CARGO_BIN_EXE_orbit")), work, home)
+    }
+
+    fn orbit_program_command(program: &Path, work: &Path, home: &Path) -> Command {
+        let mut command = Command::new(program);
         command
             .current_dir(work)
             .env("PATH", stub_first_path(&Self::stub_bin_dir(home)))
@@ -209,14 +213,9 @@ impl McpWorkspace {
     #[cfg(target_os = "linux")]
     fn serve_with_generated_command(&self, generated: &GeneratedForcedCommand) -> McpClient {
         let argv = &generated.argv;
-        assert_eq!(
-            Path::new(&argv[0]),
-            Path::new(env!("CARGO_BIN_EXE_orbit")),
-            "the generated command must run the tested Orbit binary"
-        );
-        let mut command = Self::orbit_command(&self.work, &self.home);
+        let mut command = Self::orbit_program_command(Path::new(&argv[0]), &self.work, &self.home);
         command
-            .args(&argv[1..])
+            .args(["-c", &generated.forced_command])
             .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -999,15 +998,105 @@ const CALLER_PUBLIC_KEY: &str = "ssh-ed25519 \
 #[cfg(target_os = "linux")]
 struct GeneratedForcedCommand {
     argv: Vec<String>,
+    forced_command: String,
     acceptance_token: String,
 }
 
-/// Run the supported Tier 2 setup command and recover the complete argv sshd
-/// would execute from the rendered `authorized_keys` line.
+/// Install a metadata-valid copy of the tested binary whose setgid exec will
+/// change this account's effective group. Sandboxes that set `NoNewPrivs` or
+/// expose no mapped supplementary group cannot exercise the kernel boundary;
+/// those hosts leave the Linux deployment test to unrestricted CI.
 #[cfg(target_os = "linux")]
-fn generated_forced_command(workspace: &McpWorkspace) -> GeneratedForcedCommand {
+fn install_test_ssh_launcher(workspace: &McpWorkspace) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    if status.lines().any(|line| line == "NoNewPrivs:\t1") {
+        return None;
+    }
+    // Safety: the first call queries the required length; the second writes
+    // exactly that many gid_t entries into the allocated vector.
+    let group_count = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+    if group_count <= 0 {
+        return None;
+    }
+    let mut groups = vec![0 as libc::gid_t; group_count as usize];
+    let read = unsafe { libc::getgroups(group_count, groups.as_mut_ptr()) };
+    if read != group_count {
+        return None;
+    }
+    // Safety: getgid only reads the process's real group credential.
+    let real_group = unsafe { libc::getgid() };
+    let launcher_group = groups.into_iter().find(|group| *group != real_group)?;
+    let launcher = workspace.home.join("orbit-mcp-ssh-launcher");
+    std::fs::copy(env!("CARGO_BIN_EXE_orbit"), &launcher).expect("copy tested Orbit launcher");
+    let path = std::ffi::CString::new(launcher.as_os_str().as_encoded_bytes())
+        .expect("launcher path has no NUL");
+    // Safety: the path is a live NUL-terminated filesystem path; -1 preserves
+    // the owner and the selected gid is one of this process's groups.
+    if unsafe { libc::chown(path.as_ptr(), !0 as libc::uid_t, launcher_group) } != 0 {
+        return None;
+    }
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o2555))
+        .expect("protect test SSH launcher");
+    Some(launcher)
+}
+
+/// Use the production Tier 2 issuer and renderer to recover the complete
+/// command sshd passes to the protected login shell. The operator-facing CLI
+/// additionally verifies `/etc/passwd`, which an unprivileged test cannot
+/// change; the launch and acceptance path below are otherwise the shipped one.
+#[cfg(target_os = "linux")]
+fn generated_forced_command(workspace: &McpWorkspace) -> Option<GeneratedForcedCommand> {
+    let launcher = install_test_ssh_launcher(workspace)?;
     let key = workspace.home.join("caller.pub");
     std::fs::write(&key, format!("{CALLER_PUBLIC_KEY}\n")).expect("write caller public key");
+    let public_key = orbit_mcp::parse_public_key(CALLER_PUBLIC_KEY).expect("parse caller key");
+    let fingerprint = public_key.fingerprint().expect("fingerprint caller key");
+    let acceptance_token =
+        orbit_mcp::issue_ssh_acceptance(&workspace.home.join(".orbit"), "hm_caller", &fingerprint)
+            .expect("issue SSH acceptance");
+    let line = public_key.authorized_keys_line(
+        launcher.to_str().expect("utf8 launcher path"),
+        "hm_caller",
+        &acceptance_token,
+    );
+    let environment = line
+        .strip_prefix("environment=\"")
+        .and_then(|line| {
+            line.split_once("\",command=\"")
+                .map(|(environment, _)| environment)
+        })
+        .expect("an acceptance environment in the authorized_keys line");
+    let rendered_acceptance_token = environment
+        .strip_prefix(&format!("{}=", orbit_mcp::SSH_ACCEPTANCE_ENV))
+        .expect("the named SSH acceptance environment")
+        .to_string();
+    assert_eq!(rendered_acceptance_token, acceptance_token);
+    let forced_command = line
+        .split_once("\",command=\"")
+        .and_then(|(_, line)| line.split_once("\",").map(|(command, _)| command))
+        .expect("a forced command in the authorized_keys line");
+    Some(GeneratedForcedCommand {
+        argv: forced_command
+            .split_ascii_whitespace()
+            .map(ToOwned::to_owned)
+            .collect(),
+        forced_command: forced_command.to_string(),
+        acceptance_token,
+    })
+}
+
+/// [ORB-11184] Setup must reject the ordinary binary before it rotates the
+/// destination record. Otherwise the emitted line would carry the bearer into
+/// an initially dumpable process even though serving later fails closed.
+#[cfg(target_os = "linux")]
+#[test]
+fn authorize_refuses_an_unprotected_launcher_before_rotation() {
+    let workspace = McpWorkspace::init();
+    let key = workspace.home.join("caller.pub");
+    std::fs::write(&key, format!("{CALLER_PUBLIC_KEY}\n")).expect("write caller public key");
+
     let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
         .args([
             "mcp",
@@ -1017,44 +1106,25 @@ fn generated_forced_command(workspace: &McpWorkspace) -> GeneratedForcedCommand 
             "hm_caller",
             "--key",
             key.to_str().expect("utf8 key path"),
+            "--launcher",
+            env!("CARGO_BIN_EXE_orbit"),
         ])
         .output()
-        .expect("render authorized_keys line");
+        .expect("reject ordinary Orbit launcher");
+
     assert!(
-        output.status.success(),
-        "authorize failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "ordinary launcher must fail setup"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mode 2555"), "{stderr}");
     assert!(
-        stderr.contains("requests operator authority, but does not grant it"),
-        "the setup guidance must explain the generated request and callers-file ceiling: {stderr}"
+        !workspace
+            .home
+            .join(".orbit/mcp-ssh-acceptance/hm_caller.toml")
+            .exists(),
+        "launcher validation must precede acceptance rotation"
     );
-    let stdout = String::from_utf8(output.stdout).expect("utf8 authorized_keys line");
-    let line = stdout.lines().next().expect("one authorized_keys line");
-    let environment = line
-        .strip_prefix("environment=\"")
-        .and_then(|line| {
-            line.split_once("\",command=\"")
-                .map(|(environment, _)| environment)
-        })
-        .expect("an acceptance environment in the authorized_keys line");
-    let acceptance_token = environment
-        .strip_prefix(&format!("{}=", orbit_mcp::SSH_ACCEPTANCE_ENV))
-        .expect("the named SSH acceptance environment")
-        .to_string();
-    let forced_command = line
-        .split_once("\",command=\"")
-        .and_then(|(_, line)| line.split_once("\",").map(|(command, _)| command))
-        .expect("a forced command in the authorized_keys line");
-    GeneratedForcedCommand {
-        argv: forced_command
-            .split_ascii_whitespace()
-            .map(ToOwned::to_owned)
-            .collect(),
-        acceptance_token,
-    }
 }
 
 /// [ORB-11058] The supported Tier 2 setup requests the broad authority once,
@@ -1079,7 +1149,9 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
 "#
         ),
     );
-    let generated = generated_forced_command(&workspace);
+    let Some(generated) = generated_forced_command(&workspace) else {
+        return;
+    };
     let argv = &generated.argv;
     assert_eq!(&argv[1..4], ["mcp", "serve", "--accept-ssh"]);
     assert!(
@@ -1131,11 +1203,11 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
     );
 }
 
-/// [ORB-11134] The supported destination-authenticated path keeps its reusable
-/// bearer out of argv and seals the environment that carries it. An ordinary
-/// same-account command can copy every observable argument and SSH-shaped
-/// label from the live process, but still cannot reconstruct a key-bound
-/// session.
+/// [ORB-11184] A separate ordinary same-UID process scans every process's argv
+/// and environment continuously while the generated protected launcher starts
+/// repeated legitimate destinations. The kernel boundary exists at exec, so
+/// there is no pre-main interval in which the scanner can recover the bearer;
+/// copied public argv still cannot reconstruct a key-bound session.
 #[cfg(target_os = "linux")]
 #[test]
 fn process_metadata_does_not_supply_a_replayable_key_bound_identity() {
@@ -1151,27 +1223,88 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
 "#
         ),
     );
-    let generated = generated_forced_command(&workspace);
-    let mut legitimate = workspace.serve_with_generated_command(&generated);
-    let pid = legitimate.child.id();
-
-    let observable_argv = std::fs::read(format!("/proc/{pid}/cmdline"))
-        .expect("same-account argv remains observable");
-    assert!(
-        !observable_argv
-            .windows(generated.acceptance_token.len())
-            .any(|window| window == generated.acceptance_token.as_bytes()),
-        "the generated acceptance bearer leaked into /proc/{pid}/cmdline"
+    let generated = generated_forced_command(&workspace).expect(
+        "the Linux security regression requires an unrestricted runner where setgid is enabled \
+         and a mapped supplementary group is available",
     );
-    // Safety: geteuid only reads process credentials.
-    if unsafe { libc::geteuid() } != 0 {
-        let error = std::fs::read(format!("/proc/{pid}/environ"))
-            .expect_err("a same-UID process must not read the sealed acceptance environment");
-        assert_eq!(
-            error.kind(),
-            std::io::ErrorKind::PermissionDenied,
-            "{error}"
-        );
+    let mut legitimate = workspace.serve_with_generated_command(&generated);
+
+    let stop = workspace.home.join("stop-proc-scanner");
+    let scanner_script = r#"
+IFS= read -r needle
+IFS= read -r public_caller
+printf 'ready\n'
+sweeps=0
+saw_public_caller=0
+while [ ! -e "$1" ] || [ "$sweeps" -lt 100 ]; do
+  for process in /proc/[0-9]*; do
+    for field in cmdline environ; do
+      metadata="$process/$field"
+      if grep -a -F -q -- "$needle" "$metadata" 2>/dev/null; then
+        printf 'leak:%s\n' "$metadata"
+        exit 0
+      fi
+    done
+    if grep -a -F -q -- "$public_caller" "$process/cmdline" 2>/dev/null; then
+      saw_public_caller=1
+    fi
+  done
+  sweeps=$((sweeps + 1))
+done
+printf 'clear:%s:public=%s\n' "$sweeps" "$saw_public_caller"
+"#;
+    let mut scanner = Command::new("/bin/sh")
+        .args([
+            "-c",
+            scanner_script,
+            "orbit-proc-scanner",
+            stop.to_str().expect("utf8 scanner stop path"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn separate same-UID proc scanner");
+    let mut scanner_stdin = scanner.stdin.take().expect("scanner stdin");
+    writeln!(scanner_stdin, "{}", generated.acceptance_token).expect("send scanner needle");
+    writeln!(scanner_stdin, "hm_caller").expect("send observable caller label");
+    drop(scanner_stdin);
+    let mut scanner_stdout = BufReader::new(scanner.stdout.take().expect("scanner stdout"));
+    let mut ready = String::new();
+    scanner_stdout.read_line(&mut ready).expect("scanner ready");
+    assert_eq!(ready, "ready\n");
+
+    let mut repeated_launches = Vec::new();
+    for _ in 0..48 {
+        let argv = &generated.argv;
+        let child = McpWorkspace::orbit_program_command(
+            Path::new(&argv[0]),
+            &workspace.work,
+            &workspace.home,
+        )
+        .args(["-c", generated.forced_command.as_str()])
+        .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start repeated legitimate protected destination");
+        repeated_launches.push(child);
+    }
+    std::fs::write(&stop, "stop\n").expect("stop proc scanner");
+    let mut scan_result = String::new();
+    scanner_stdout
+        .read_to_string(&mut scan_result)
+        .expect("read proc scanner result");
+    let scanner_output = scanner.wait_with_output().expect("wait for proc scanner");
+    assert!(scanner_output.status.success(), "proc scanner failed");
+    assert!(
+        scan_result.starts_with("clear:") && scan_result.ends_with(":public=1\n"),
+        "a separate same-UID scanner recovered the reusable acceptance value: {scan_result}"
+    );
+    for mut child in repeated_launches {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     let replay = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
@@ -1189,7 +1322,7 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
         "observable argv must not authenticate"
     );
     assert!(
-        String::from_utf8_lossy(&replay.stderr).contains("not protected"),
+        String::from_utf8_lossy(&replay.stderr).contains("did not enter through"),
         "the replay must fail before a KeyBound identity is stamped: {}",
         String::from_utf8_lossy(&replay.stderr)
     );
@@ -1245,7 +1378,7 @@ capabilities = ["agent"]
             .expect("run forged orbit mcp serve");
         assert!(!output.status.success(), "forged acceptance must fail");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("not issued by this destination"),
+            String::from_utf8_lossy(&output.stderr).contains("did not enter through"),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -1274,12 +1407,16 @@ capabilities = ["agent", "operator"]
 "#,
     );
 
-    let mut generated = generated_forced_command(&workspace);
+    let Some(mut generated) = generated_forced_command(&workspace) else {
+        return;
+    };
     let argv = &mut generated.argv;
     argv.retain(|argument| argument != "--operator");
-    let mut command = McpWorkspace::orbit_command(&workspace.work, &workspace.home);
+    let forced_command = argv.join(" ");
+    let mut command =
+        McpWorkspace::orbit_program_command(Path::new(&argv[0]), &workspace.work, &workspace.home);
     command
-        .args(&argv[1..])
+        .args(["-c", &forced_command])
         .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
         .env(
             "SSH_ORIGINAL_COMMAND",
@@ -1367,14 +1504,17 @@ ssh_key_fingerprint = "{OTHER_KEY_FINGERPRINT}"
 "#
         ),
     );
-    let generated = generated_forced_command(&workspace);
+    let Some(generated) = generated_forced_command(&workspace) else {
+        return;
+    };
     let argv = &generated.argv;
-    let output = McpWorkspace::orbit_command(&workspace.work, &workspace.home)
-        .args(&argv[1..])
-        .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
-        .stdin(Stdio::null())
-        .output()
-        .expect("run orbit mcp serve");
+    let output =
+        McpWorkspace::orbit_program_command(Path::new(&argv[0]), &workspace.work, &workspace.home)
+            .args(["-c", generated.forced_command.as_str()])
+            .env(orbit_mcp::SSH_ACCEPTANCE_ENV, &generated.acceptance_token)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run orbit mcp serve");
 
     assert!(!output.status.success(), "a key mismatch must fail closed");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1403,7 +1543,9 @@ ssh_key_fingerprint = "{CALLER_KEY_FINGERPRINT}"
         ),
     );
 
-    let generated = generated_forced_command(&workspace);
+    let Some(generated) = generated_forced_command(&workspace) else {
+        return;
+    };
     let mut client = workspace.serve_with_generated_command(&generated);
     let listed = client.call_tool_ok("orbit_workflow_run_list", json!({}));
     assert_eq!(listed["items"], json!([]));

@@ -43,7 +43,7 @@ fn the_rendered_line_forces_this_machines_own_argv() {
     let key = parse_public_key(KEY).expect("a public key parses");
 
     let line = key.authorized_keys_line(
-        "/usr/local/bin/orbit",
+        "/usr/local/libexec/orbit-mcp-ssh",
         "hm_alpha",
         ".orbit-ssh-destination-capability",
     );
@@ -51,7 +51,7 @@ fn the_rendered_line_forces_this_machines_own_argv() {
     assert!(
         line.starts_with(
             "environment=\"ORBIT_MCP_SSH_ACCEPTANCE=.orbit-ssh-destination-capability\",\
-             command=\"/usr/local/bin/orbit mcp serve --accept-ssh --caller hm_alpha \
+             command=\"/usr/local/libexec/orbit-mcp-ssh mcp serve --accept-ssh --caller hm_alpha \
              --operator\","
         ),
         "the destination composes the whole operator request, absolute path included: {line}"

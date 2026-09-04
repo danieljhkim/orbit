@@ -183,7 +183,7 @@ fn remote_caller_identity(
     else {
         return Err(OrbitError::UnauthorizedCaller(
             "SSH MCP acceptance did not name a caller; regenerate the authorized_keys line with \
-             `orbit mcp callers authorize`"
+             `orbit mcp callers authorize --launcher <path>`"
                 .to_string(),
         ));
     };

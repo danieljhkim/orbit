@@ -1,4 +1,8 @@
+#[cfg(target_os = "linux")]
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::{Args, Subcommand, ValueEnum};
@@ -11,51 +15,128 @@ use super::callers::CallersArgs;
 use super::listen::ListenArgs;
 use super::setup::{InitArgs, RemoveArgs};
 
-/// True only when the process environment was made non-observable before CLI
-/// parsing. A public flag cannot set this bit.
-static SSH_ACCEPTANCE_ENV_SEALED: AtomicBool = AtomicBool::new(false);
+/// True only when Linux reported that `execve` itself entered a protected
+/// credential-transition state and Orbit reinforced it before CLI parsing.
+/// A public flag cannot set this bit.
+static SSH_ACCEPTANCE_LAUNCH_VERIFIED: AtomicBool = AtomicBool::new(false);
+static SSH_ACCEPTANCE_LOGIN_SHELL_VERIFIED: AtomicBool = AtomicBool::new(false);
+static SSH_ACCEPTANCE_TOKEN: OnceLock<String> = OnceLock::new();
 
-/// Seal an sshd-provided acceptance bearer before any ordinary CLI startup.
+/// Verify the kernel boundary around an sshd-provided acceptance bearer.
 ///
-/// Linux exposes another same-UID process's initial environment through
-/// `/proc/<pid>/environ` while the process is dumpable. `PR_SET_DUMPABLE=0`
-/// moves this process behind the kernel's ptrace-access check. The call happens
-/// at the first line of `main`, before logging, signal setup, or argument
-/// parsing. Processes without the bearer have their previous dumpable state
-/// restored immediately, so ordinary Orbit commands retain normal debugging
-/// and core-dump behavior.
-pub(crate) fn seal_ssh_acceptance_environment() {
+/// The generated Tier 2 account must use a setgid Orbit copy, whose group
+/// differs from the login account's real group, as its login shell. Linux
+/// applies its secure-exec dumpability policy as part of that `execve`, before
+/// the dynamic loader or Rust startup can expose the initial environment
+/// through `/proc`. This first Rust operation verifies the inherited state,
+/// permanently drops the otherwise privilege-free launch group, and selects
+/// the strict non-dumpable value as defense in depth. It does not claim to
+/// protect an ordinary, initially dumpable process retroactively.
+pub(crate) fn verify_ssh_acceptance_launch_boundary() {
     #[cfg(target_os = "linux")]
     {
+        let Some(token) = std::env::var(orbit_mcp::SSH_ACCEPTANCE_ENV).ok() else {
+            return;
+        };
         // Safety: these prctl operations read or set one process-local integer
         // attribute and do not dereference any pointers.
-        let previous = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
-        let sealed = previous >= 0
-            // Safety: see above. Zero is the kernel-defined non-dumpable state.
-            && unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } == 0;
-        if std::env::var_os(orbit_mcp::SSH_ACCEPTANCE_ENV).is_some() {
-            SSH_ACCEPTANCE_ENV_SEALED.store(sealed, Ordering::Release);
-        } else if sealed && previous != 0 {
-            // Safety: restore the process attribute captured above.
-            let _ = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, previous) };
+        let inherited_dumpable = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
+        // Safety: credential getters have no pointers or side effects.
+        let (same_user, real_group, effective_group) = unsafe {
+            (
+                libc::getuid() == libc::geteuid(),
+                libc::getgid(),
+                libc::getegid(),
+            )
+        };
+        let credential_transition = same_user && real_group != effective_group;
+        // Linux uses 0 or the administrator-selected suid_dumpable value 2 for
+        // a protected credential-changing exec. Value 1 is the ordinary
+        // same-UID-readable state reproduced by ORB-11184.
+        let protected_at_exec = credential_transition && matches!(inherited_dumpable, 0 | 2);
+        // Safety: the real group is one of this process's existing group IDs;
+        // setting all three IDs to it permanently discards the setgid launch
+        // credential before Orbit opens or creates any task data.
+        let launch_group_dropped =
+            unsafe { libc::setresgid(real_group, real_group, real_group) } == 0;
+        // Safety: see above. Zero is the strict kernel-defined non-dumpable state.
+        let reinforced = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) } == 0;
+        let verified = protected_at_exec && launch_group_dropped && reinforced;
+        SSH_ACCEPTANCE_LAUNCH_VERIFIED.store(verified, Ordering::Release);
+        if verified {
+            let _ = SSH_ACCEPTANCE_TOKEN.set(token);
         }
+        // Safety: this is the first operation in single-threaded process
+        // startup. Removing the inherited value here prevents later command
+        // children from receiving the reusable bearer.
+        unsafe { std::env::remove_var(orbit_mcp::SSH_ACCEPTANCE_ENV) };
     }
 }
 
-/// Read the Tier 2 bearer only after the kernel has hidden this process's
-/// environment from ordinary processes under the destination login UID.
-fn sealed_ssh_acceptance_token() -> Result<String, OrbitError> {
-    if !SSH_ACCEPTANCE_ENV_SEALED.load(Ordering::Acquire) {
+/// Adapt sshd's login-shell invocation into Orbit's ordinary CLI argv.
+///
+/// OpenSSH always invokes a forced command as `<login-shell> -c <command>`.
+/// The protected Orbit copy must itself be that login shell, or an ordinary
+/// shell would receive the bearer before the setgid exec. Only the exact shape
+/// emitted by `callers authorize` is adapted; every other `-c` invocation is
+/// left for clap to refuse.
+pub(crate) fn normalize_ssh_login_shell_args(
+    args: impl IntoIterator<Item = OsString>,
+) -> Vec<OsString> {
+    let args = args.into_iter().collect::<Vec<_>>();
+    #[cfg(target_os = "linux")]
+    {
+        if SSH_ACCEPTANCE_TOKEN.get().is_none() || args.len() != 3 || args[1] != OsStr::new("-c") {
+            return args;
+        }
+        let Some(command) = args[2].to_str() else {
+            return args;
+        };
+        let fields = command.split_ascii_whitespace().collect::<Vec<_>>();
+        if fields.len() != 7
+            || fields[1..4] != ["mcp", "serve", "--accept-ssh"]
+            || fields[4] != "--caller"
+            || fields[6] != "--operator"
+        {
+            return args;
+        }
+        let Ok(current_exe) = std::env::current_exe().and_then(std::fs::canonicalize) else {
+            return args;
+        };
+        let Ok(command_exe) = std::fs::canonicalize(fields[0]) else {
+            return args;
+        };
+        if current_exe != command_exe {
+            return args;
+        }
+        SSH_ACCEPTANCE_LOGIN_SHELL_VERIFIED.store(true, Ordering::Release);
+        let mut normalized = Vec::with_capacity(fields.len());
+        normalized.push(args[0].clone());
+        normalized.extend(fields[1..].iter().map(OsString::from));
+        normalized
+    }
+    #[cfg(not(target_os = "linux"))]
+    args
+}
+
+/// Read the Tier 2 bearer only after verifying that the kernel hid the initial
+/// process metadata before any userspace startup ran.
+fn protected_ssh_acceptance_token() -> Result<String, OrbitError> {
+    if !SSH_ACCEPTANCE_LAUNCH_VERIFIED.load(Ordering::Acquire)
+        || !SSH_ACCEPTANCE_LOGIN_SHELL_VERIFIED.load(Ordering::Acquire)
+    {
         return Err(OrbitError::UnauthorizedCaller(
-            "SSH MCP acceptance environment is not protected on this host; Tier 2 requires the \
-             generated isolated-account SSH deployment on Linux"
+            "SSH MCP acceptance did not enter through the generated Linux setgid login-shell \
+             boundary; install a fresh protected launcher as the dedicated account's shell and \
+             regenerate the authorized_keys line with `orbit mcp callers authorize --launcher \
+             <path>`"
                 .to_string(),
         ));
     }
-    std::env::var(orbit_mcp::SSH_ACCEPTANCE_ENV).map_err(|_| {
+    SSH_ACCEPTANCE_TOKEN.get().cloned().ok_or_else(|| {
         OrbitError::UnauthorizedCaller(
             "SSH MCP acceptance was not supplied by sshd; regenerate and install the \
-             authorized_keys line with `orbit mcp callers authorize`"
+             authorized_keys line with `orbit mcp callers authorize --launcher <path>`"
                 .to_string(),
         )
     })
@@ -183,12 +264,12 @@ pub struct ServeArgs {
     #[arg(long, conflicts_with = "mode")]
     pub operator: bool,
     /// Treat this session as SSH-originated after validating the destination
-    /// capability carried in sshd-provided protected process state.
+    /// capability carried across the generated Linux setgid login-shell boundary.
     ///
     /// Meaningful only inside the forced command printed by `orbit mcp callers
     /// authorize`. The bearer is deliberately not an argument value: the
-    /// generated key entry supplies it through an environment option, and
-    /// Orbit seals that environment before parsing argv.
+    /// generated key entry supplies it through an environment option to a
+    /// credential-changing executable that the kernel protects at exec.
     #[arg(long, hide = true, conflicts_with = "mode")]
     pub accept_ssh: bool,
     /// The calling machine's identity, as this machine wrote it beside the
@@ -270,7 +351,7 @@ impl ServeArgs {
                 if self.accept_ssh {
                     SshAcceptance::ForcedCommand {
                         caller: self.caller,
-                        acceptance_token: sealed_ssh_acceptance_token()?,
+                        acceptance_token: protected_ssh_acceptance_token()?,
                     }
                 } else {
                     SshAcceptance::Environment

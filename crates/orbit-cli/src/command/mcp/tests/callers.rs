@@ -103,7 +103,7 @@ fn seeding_reads_registry_owners_and_configured_destinations() {
 }
 
 #[test]
-fn authorize_names_both_the_caller_and_its_key() {
+fn authorize_names_the_caller_key_and_protected_launcher() {
     match parse(&[
         "callers",
         "authorize",
@@ -111,22 +111,42 @@ fn authorize_names_both_the_caller_and_its_key() {
         "hm_alpha",
         "--key",
         "/home/op/.ssh/id_ed25519.pub",
+        "--launcher",
+        "/usr/local/libexec/orbit-mcp-ssh",
     ]) {
         CallersSubcommand::Authorize(args) => {
             assert_eq!(args.machine_id, "hm_alpha");
             assert_eq!(args.key, Path::new("/home/op/.ssh/id_ed25519.pub"));
+            assert_eq!(args.launcher, Path::new("/usr/local/libexec/orbit-mcp-ssh"));
         }
         _ => panic!("expected `authorize`"),
     }
 }
 
 #[test]
-fn authorize_needs_a_key_to_bind_the_identity_to() {
+fn authorize_needs_a_key_and_protected_launcher() {
     // Without a key there is nothing to bind, and a line with only a machine
     // ID would read as a grant while authenticating nobody [ORB-11053].
     for argv in [
         ["callers", "authorize", "--machine-id", "hm_alpha"].as_slice(),
-        ["callers", "authorize", "--key", "/tmp/k.pub"].as_slice(),
+        [
+            "callers",
+            "authorize",
+            "--machine-id",
+            "hm_alpha",
+            "--key",
+            "/tmp/k.pub",
+        ]
+        .as_slice(),
+        [
+            "callers",
+            "authorize",
+            "--machine-id",
+            "hm_alpha",
+            "--launcher",
+            "/usr/local/libexec/orbit-mcp-ssh",
+        ]
+        .as_slice(),
         ["callers", "authorize"].as_slice(),
     ] {
         assert!(
@@ -147,6 +167,7 @@ fn authorize_refuses_a_machine_id_that_is_not_one() {
     let args = CallersAuthorizeArgs {
         machine_id: "daniels-mac-mini".to_string(),
         key: key.path().to_path_buf(),
+        launcher: PathBuf::from("/usr/local/libexec/orbit-mcp-ssh"),
     };
 
     let error = authorize(
