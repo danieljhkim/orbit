@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.0
+
+### Breaking Changes
+
+- **SSH MCP caller authorization requires a protected launcher**: `orbit mcp callers authorize` now requires `--launcher` and no longer falls back to the current executable; configure the validated protected launcher before authorizing callers. ([ORB-11184])
+
+### Highlights
+
+- **Accurate task-flow lifecycle reporting**: `orbit task flow` now derives outflow and boundary openness from recorded transitions, including rejected tasks that later reopen. ([ORB-11183])
+- **Safer direct lock reservations**: direct task-lock reservations canonicalize in-workspace selectors and reject outside-workspace paths, so they reliably conflict with task-scoped locks. ([ORB-11163])
+- **Selected roots reach sweep execution**: `orbit sweep` now honors an explicit `--root` or `ORBIT_ROOT`, including when the process HOME points elsewhere. ([ORB-11165])
+
 ## 0.17.1
 
 ### Highlights
