@@ -5,10 +5,12 @@
 //! checkout lags origin. The only Git write this module will perform is a
 //! fast-forward of a clean primary that already sits on the landing branch.
 
+use std::io;
 use std::path::Path;
 use std::process::Command;
 
 use orbit_common::fs::git::{CurrentBranchStatus, current_branch, run_git};
+use orbit_common::fs::io::with_exclusive_file_lock;
 use orbit_engine::DispatchError;
 use serde_json::{Value, json};
 
@@ -166,23 +168,36 @@ pub(super) fn resolve_source_snapshot(
 
     let base_branch = requested_base_branch(runtime, input);
     let base_branch = normalize_base_branch(action, &base_branch)?;
-    let (source_ref, fetched_remote) = if has_origin_remote(action, workspace_root)? {
-        fetch_origin_branch(action, workspace_root, &base_branch)?;
-        (format!("origin/{base_branch}"), true)
-    } else {
-        (base_branch.clone(), false)
-    };
-    let source_revision = rev_parse_commit(action, workspace_root, &source_ref)?;
-    let head = rev_parse_commit(action, workspace_root, "HEAD")?;
-    let fast_forwarded = align_clean_primary(
-        action,
-        workspace_root,
-        &base_branch,
-        &source_ref,
-        &source_revision,
-        &head,
-        fetched_remote,
-    )?;
+    let has_origin = has_origin_remote(action, workspace_root)?;
+
+    // Concurrent `prepare_task_pilot` calls against the same shared primary
+    // (permitted up to `max_active_runs` by the job spec) each fetch the same
+    // remote-tracking ref and, when the primary is clean and fast-forwardable,
+    // each fast-forward it with `git merge --ff-only`. Both the ref-update and
+    // the merge are check-then-act git writes that race under git's own
+    // locking (`refs/remotes/origin/<branch>` lock, `.git/index.lock`); the
+    // loser's benign lock contention would otherwise be misreported as
+    // source-staleness. A workspace-scoped advisory lock serializes the whole
+    // fetch-then-align sequence per primary so a blocked caller re-evaluates
+    // against the (possibly already fast-forwarded) HEAD instead of racing
+    // the winner.
+    let lock_target = workspace_root
+        .join(".git")
+        .join("orbit-task-pilot-align-primary");
+    let (source_ref, _fetched_remote, source_revision, fast_forwarded) =
+        with_exclusive_file_lock(&lock_target, "task-pilot align primary", || {
+            resolve_source_snapshot_locked(action, workspace_root, &base_branch, has_origin)
+        })
+        .map_err(|error| match error {
+            AlignLockError::Dispatch(error) => error,
+            AlignLockError::Io(error) => action_failed(
+                action,
+                format!(
+                    "failed to acquire task-pilot align lock in '{}': {error}",
+                    workspace_root.display()
+                ),
+            ),
+        })?;
 
     Ok(Some(SourceSnapshot {
         base_branch,
@@ -190,6 +205,39 @@ pub(super) fn resolve_source_snapshot(
         source_revision,
         fast_forwarded,
     }))
+}
+
+fn resolve_source_snapshot_locked(
+    action: &str,
+    workspace_root: &Path,
+    base_branch: &str,
+    has_origin: bool,
+) -> Result<(String, bool, String, bool), AlignLockError> {
+    let (source_ref, fetched_remote) = if has_origin {
+        fetch_origin_branch(action, workspace_root, base_branch)
+            .map_err(AlignLockError::Dispatch)?;
+        (format!("origin/{base_branch}"), true)
+    } else {
+        (base_branch.to_string(), false)
+    };
+    let source_revision =
+        rev_parse_commit(action, workspace_root, &source_ref).map_err(AlignLockError::Dispatch)?;
+    let head =
+        rev_parse_commit(action, workspace_root, "HEAD").map_err(AlignLockError::Dispatch)?;
+    let fast_forwarded = if head == source_revision {
+        false
+    } else {
+        align_clean_primary_locked(
+            action,
+            workspace_root,
+            base_branch,
+            &source_ref,
+            &source_revision,
+            &head,
+            fetched_remote,
+        )?
+    };
+    Ok((source_ref, fetched_remote, source_revision, fast_forwarded))
 }
 
 pub(super) fn requested_base_branch(runtime: &OrbitRuntime, input: &Value) -> String {
@@ -223,7 +271,27 @@ fn normalize_base_branch(action: &str, base: &str) -> Result<String, DispatchErr
     Ok(branch.to_string())
 }
 
-fn align_clean_primary(
+/// Local-error wrapper so [`with_exclusive_file_lock`] (which requires
+/// `E: From<io::Error>`) can carry either lock-acquisition failures or the
+/// module's own [`DispatchError`] out of the locked closure.
+enum AlignLockError {
+    Io(io::Error),
+    Dispatch(DispatchError),
+}
+
+impl From<io::Error> for AlignLockError {
+    fn from(error: io::Error) -> Self {
+        AlignLockError::Io(error)
+    }
+}
+
+/// Runs the dirty/branch/ancestor checks and, when they pass, the
+/// `git merge --ff-only` write. Called only while
+/// [`resolve_source_snapshot`]'s workspace lock is held, so `head` (read
+/// immediately beforehand, under the same lock) reflects the primary's true
+/// current state rather than a value a concurrent caller may have already
+/// moved past.
+fn align_clean_primary_locked(
     action: &str,
     workspace: &Path,
     base_branch: &str,
@@ -231,26 +299,25 @@ fn align_clean_primary(
     source_revision: &str,
     head: &str,
     fetched_remote: bool,
-) -> Result<bool, DispatchError> {
-    if head == source_revision {
-        return Ok(false);
-    }
-
-    let dirty = working_tree_status(action, workspace)?;
+) -> Result<bool, AlignLockError> {
+    let dirty = working_tree_status(action, workspace).map_err(AlignLockError::Dispatch)?;
     let branch = current_branch(workspace)
-        .map_err(|error| action_failed(action, format!("read current branch: {error}")))?;
+        .map_err(|error| action_failed(action, format!("read current branch: {error}")))
+        .map_err(AlignLockError::Dispatch)?;
     let on_landing_branch =
         matches!(branch, CurrentBranchStatus::Named(ref name) if name == base_branch);
-    let can_fast_forward = is_ancestor(action, workspace, head, source_revision)?;
+    let can_fast_forward =
+        is_ancestor(action, workspace, head, source_revision).map_err(AlignLockError::Dispatch)?;
 
     if dirty.is_empty() && on_landing_branch && can_fast_forward {
         let merge = git(
             action,
             workspace,
             &["merge", "--ff-only", "--no-edit", source_revision],
-        )?;
+        )
+        .map_err(AlignLockError::Dispatch)?;
         if !merge.success {
-            return Err(source_stale(
+            return Err(AlignLockError::Dispatch(source_stale(
                 action,
                 base_branch,
                 source_ref,
@@ -258,11 +325,12 @@ fn align_clean_primary(
                 head,
                 fetched_remote,
                 &format!("clean fast-forward failed: {}", merge.stderr.trim()),
-            ));
+            )));
         }
-        let after = rev_parse_commit(action, workspace, "HEAD")?;
+        let after =
+            rev_parse_commit(action, workspace, "HEAD").map_err(AlignLockError::Dispatch)?;
         if after != source_revision {
-            return Err(source_stale(
+            return Err(AlignLockError::Dispatch(source_stale(
                 action,
                 base_branch,
                 source_ref,
@@ -270,7 +338,7 @@ fn align_clean_primary(
                 &after,
                 fetched_remote,
                 "fast-forward completed but HEAD is not the pinned source revision",
-            ));
+            )));
         }
         return Ok(true);
     }
@@ -295,7 +363,7 @@ fn align_clean_primary(
     } else {
         "primary is not at the verified landing-branch revision".to_string()
     };
-    Err(source_stale(
+    Err(AlignLockError::Dispatch(source_stale(
         action,
         base_branch,
         source_ref,
@@ -303,7 +371,7 @@ fn align_clean_primary(
         head,
         fetched_remote,
         &reason,
-    ))
+    )))
 }
 
 fn source_stale(
