@@ -251,7 +251,7 @@ fn dashboard_shipped_javascript_observes_history_routes_and_aggregate_requests()
         r#"
 const nodes = [];
 class Node {
-  constructor(id = "") { this.id = id; this.children = []; this.dataset = {}; this.style = {}; this.listeners = {}; this.className = ""; this._text = ""; this.parentNode = null; this.hidden = false; nodes.push(this); }
+  constructor(id = "") { this.id = id; this.children = []; this.dataset = {}; this.style = { setProperty: () => {} }; this.listeners = {}; this.className = ""; this._text = ""; this.parentNode = null; this.hidden = false; nodes.push(this); }
   appendChild(child) { if (child == null) return child; this.children.push(child); child.parentNode = this; return child; }
   insertBefore(child, before) { const index = this.children.indexOf(before); if (index < 0) return this.appendChild(child); this.children.splice(index, 0, child); child.parentNode = this; return child; }
   removeChild(child) { this.children = this.children.filter((candidate) => candidate !== child); child.parentNode = null; return child; }
@@ -1647,6 +1647,11 @@ fn dashboard_scoreboard_highlights_are_accessible_and_honest() {
         "empty Review must distinguish no events from incomplete coverage"
     );
     assert!(
+        scoreboard.contains("coverage?.failure_incidents?.availability === \"unavailable\"")
+            && scoreboard.contains("failure-incident coverage is unavailable for this window"),
+        "empty Operations must distinguish no events from incomplete failure-incident coverage"
+    );
+    assert!(
         scoreboard.contains("orbit.task.* tool-call count")
             && scoreboard.contains("raw failed tool calls over total tool calls")
             && scoreboard.contains("append-only friction reports filed by this agent")
@@ -1680,6 +1685,111 @@ fn dashboard_scoreboard_highlights_are_accessible_and_honest() {
             "scoreboard assets must stay project-agnostic; found {banned}"
         );
     }
+}
+
+/// ORB-11207: ORB-11201 made `/api/scoreboard` emit `null` (not `0`) for
+/// `failure_incidents`/`failure_incident_events` when the underlying audit
+/// query fails, plus a `coverage.failure_incidents` note. The dashboard used
+/// to coerce that `null` to `0`, rendering it as an indistinguishable `0/0`
+/// and letting the activity filter drop the row and the section badge claim
+/// observed-zero activity — reproducing exactly the confusion ORB-11201
+/// fixed. Exercised with the executable Node harness in the ORB-11196 style
+/// since the dashboard has no JS test runner.
+#[test]
+fn dashboard_scoreboard_renders_unavailable_failure_incidents_not_a_measured_zero() {
+    run_dashboard_javascript_test(
+        r#"
+const nodes = [];
+class Node {
+  constructor(id = "") { this.id = id; this.children = []; this.dataset = {}; this.style = { setProperty: () => {} }; this.listeners = {}; this.className = ""; this._text = ""; this.parentNode = null; this.hidden = false; nodes.push(this); }
+  appendChild(child) { if (child == null) return child; this.children.push(child); child.parentNode = this; return child; }
+  insertBefore(child, before) { const index = this.children.indexOf(before); if (index < 0) return this.appendChild(child); this.children.splice(index, 0, child); child.parentNode = this; return child; }
+  removeChild(child) { this.children = this.children.filter((candidate) => candidate !== child); child.parentNode = null; return child; }
+  prepend(child) { this.children.unshift(child); child.parentNode = this; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this); }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  setAttribute(name, value) { this[name] = String(value); }
+  get textContent() { return this._text + this.children.map((child) => child.textContent || "").join(""); }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  set innerHTML(value) { this.textContent = value; }
+  get innerHTML() { return this.textContent; }
+  get firstChild() { return this.children[0] || null; }
+  get lastElementChild() { return this.children[this.children.length - 1] || null; }
+  get classList() { const self = this; return { add: (...c) => { self.className = `${self.className} ${c.join(" ")}`.trim(); }, remove: () => {}, toggle: (c, on) => { if (on) this.addClass(c); } }; }
+  addClass(c) { if (!this.className.split(/\\s+/).includes(c)) this.className = `${this.className} ${c}`.trim(); }
+  querySelectorAll() { return []; }
+  querySelector() { return null; }
+  contains(node) { return this === node || this.children.includes(node); }
+  focus() {}
+  closest() { return null; }
+}
+globalThis.Node = Node;
+const byId = new Map();
+const get = (id) => byId.get(id) || (byId.set(id, new Node(id)), byId.get(id));
+globalThis.document = {
+  body: new Node("body"), hidden: false,
+  getElementById: get, createElement: () => new Node(), createElementNS: () => new Node(), createTextNode: (text) => Object.assign(new Node(), { textContent: text }), createDocumentFragment: () => new Node(),
+  querySelectorAll: () => [], querySelector: () => new Node(), addEventListener: () => {},
+};
+const location = new URL("http://dashboard.test/");
+globalThis.window = { location, innerHeight: 900, addEventListener: () => {}, matchMedia: () => ({ addEventListener: () => {}, matches: false }), localStorage: { getItem: () => null, setItem: () => {} } };
+globalThis.history = { replaceState: (_, __, url) => { location.href = String(url); } };
+Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: () => Promise.resolve() } }, configurable: true });
+globalThis.requestAnimationFrame = (fn) => fn();
+globalThis.setInterval = () => 0;
+globalThis.EventSource = class { constructor() {} close() {} };
+
+const { renderScoreboard } = await import("./scoreboard.js");
+
+// A quiet agent whose failure-incident fields are `null`: the audit query
+// failed for this window, so the source is unavailable, not a measured zero.
+function quietAgentWithUnavailableFailureIncidents() {
+  return {
+    tasks_created: 0, tasks_planned: 0, tasks_completed: 0,
+    tool_calls_by_surface: { graph: 0, task: 0 },
+    tool_calls: 0, failed_tool_calls: 0,
+    friction: { reported: 0 },
+    failure_incidents: null,
+    unexpected_failure_incidents: null,
+    failure_incident_events: null,
+  };
+}
+const summary = {
+  window: "24h",
+  agents: {
+    codex: quietAgentWithUnavailableFailureIncidents(),
+    claude: quietAgentWithUnavailableFailureIncidents(),
+    gemini: quietAgentWithUnavailableFailureIncidents(),
+    grok: quietAgentWithUnavailableFailureIncidents(),
+  },
+  coverage: {
+    failure_incidents: {
+      availability: "unavailable",
+      detail: "Audit failure-incident query failed for the requested window; failure_incidents, unexpected_failure_incidents, and failure_incident_events are omitted (null) rather than shown as zero.",
+    },
+  },
+};
+
+renderScoreboard(summary);
+
+const body = get("scoreboard-body");
+const table = body.children[0].children[0];
+if (!table || table.className !== "sb2-matrix") throw new Error("expected the scoreboard matrix table to render");
+const tbody = table.children[2];
+
+const failureRow = tbody.children.find((tr) => tr.dataset.key === "scoreboard-Operations-failure_incidents");
+if (!failureRow) throw new Error("the failure_incidents row must not be hidden by the activity filter when its source is unavailable");
+const rowText = failureRow.textContent;
+if (!rowText.includes("unavailable")) throw new Error(`expected an explicit unavailable indicator, got: ${rowText}`);
+if (rowText.includes("0/0")) throw new Error(`must not render an unavailable source as a measured 0/0, got: ${rowText}`);
+
+const operationsDivider = tbody.children.find((tr) => tr.className === "group" && tr.textContent.includes("Operations"));
+if (!operationsDivider) throw new Error("the Operations section divider must be present");
+if (operationsDivider.textContent.includes("no observed tool calls or friction this window")) {
+  throw new Error("the Operations badge must not assert observed-zero activity when failure-incident coverage is unavailable");
+}
+"#,
+    );
 }
 
 async fn response_body(response: Response) -> String {
