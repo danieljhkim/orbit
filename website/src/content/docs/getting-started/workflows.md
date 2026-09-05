@@ -13,7 +13,7 @@ different branch.
 
 ## `orbit run ship`
 
-Submit backlog tasks or one or more named tasks through the gated shipment pipeline. The default mode opens PRs; `--mode local` ships in-place. The command returns a run ID immediately, while dependency and lock waits happen inside the job.
+Submit backlog tasks or one or more named tasks through the gated shipment pipeline. The default mode opens PRs; `--mode local` uses the local-only delivery path. The command returns a run ID immediately, while dependency and lock waits happen inside the job.
 
 ```bash
 orbit run ship
@@ -66,6 +66,10 @@ Two limits are worth knowing:
 Submission stays asynchronous either way: the command prints the durable run ID
 and returns without knowing the eventual outcome. Follow it with
 `orbit run show <RUN_ID>`.
+
+For an operator workflow that prepares pilot context, explicitly authorizes
+backlog work, runs a bounded drain, and handles recovery, see [Run a Continuous
+Delivery Window](../how-to/continuous-delivery/).
 
 ## Direct Job Execution
 

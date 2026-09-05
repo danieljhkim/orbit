@@ -76,6 +76,7 @@ export default defineConfig({
             { slug: 'how-to/write-activity', label: 'Write an Activity' },
             { slug: 'how-to/scoping-rules', label: 'Choose Scopes' },
             { slug: 'how-to/mcp-integration', label: 'Set Up MCP' },
+            { slug: 'how-to/continuous-delivery', label: 'Run Continuous Delivery' },
           ],
         },
         {
