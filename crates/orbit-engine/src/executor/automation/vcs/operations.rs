@@ -9,6 +9,7 @@ pub(crate) const PR_LIST: &str = "pr.list";
 pub(crate) const PR_CREATE: &str = "pr.create";
 pub(crate) const PR_VIEW: &str = "pr.view";
 pub(crate) const PR_MERGE: &str = "pr.merge";
+pub(crate) const PR_STATUS: &str = "pr.status";
 
 const DEFAULT_TIMEOUT_MS: u64 = 15_000;
 const SLOW_TIMEOUT_MS: u64 = 30_000;
@@ -26,6 +27,7 @@ pub(crate) fn run(operation: &str, input: &Value) -> Result<Value, OrbitError> {
         PR_CREATE => pr_create(input),
         PR_VIEW => pr_view(input),
         PR_MERGE => pr_merge(input),
+        PR_STATUS => pr_status(input),
         other => Err(OrbitError::InvalidInput(format!(
             "unknown private automation VCS operation '{other}'"
         ))),
@@ -173,12 +175,19 @@ fn pr_merge(input: &Value) -> Result<Value, OrbitError> {
             )));
         }
     };
-    let args = vec![
+    // `--auto` queues GitHub's own auto-merge, which still waits for every
+    // required check and branch protection. There is deliberately no
+    // administrative bypass (`--admin`) in this surface.
+    let auto = input.get("auto").and_then(Value::as_bool).unwrap_or(false);
+    let mut args = vec![
         "pr".to_string(),
         "merge".to_string(),
         selector.to_string(),
         strategy_flag.to_string(),
     ];
+    if auto {
+        args.push("--auto".to_string());
+    }
     let result = execute(
         "gh",
         args,
@@ -190,6 +199,42 @@ fn pr_merge(input: &Value) -> Result<Value, OrbitError> {
         "stdout": result.stdout,
         "stderr": result.stderr,
     }))
+}
+
+/// Read the merge-relevant state of a PR.
+///
+/// Separate from [`pr_view`], whose field set is fixed to the review-body
+/// concerns its callers need. Completion asks a different question — is this PR
+/// actually merged, and if not, what is holding it — so it selects the merge
+/// state fields instead of widening a shared projection.
+fn pr_status(input: &Value) -> Result<Value, OrbitError> {
+    let selector = required_string(input, "pr")?;
+    let workspace_path = required_string(input, "workspace_path")?;
+    if !valid_pr_selector(selector) {
+        return Err(OrbitError::InvalidInput(format!(
+            "invalid private automation VCS PR selector '{selector}'; expected a number or GitHub PR URL"
+        )));
+    }
+    let args = vec![
+        "pr".to_string(),
+        "view".to_string(),
+        selector.to_string(),
+        "--json".to_string(),
+        "number,state,mergedAt,mergeable,mergeStateStatus,url".to_string(),
+    ];
+    let result = execute(
+        "gh",
+        args,
+        Some(Path::new(workspace_path)),
+        DEFAULT_TIMEOUT_MS,
+        "PR status",
+    )?;
+    let pull_request: Value = serde_json::from_str(&result.stdout).map_err(|error| {
+        OrbitError::Execution(format!(
+            "private automation VCS PR status returned invalid JSON: {error}"
+        ))
+    })?;
+    Ok(json!({ "pull_request": pull_request }))
 }
 
 fn execute(

@@ -113,6 +113,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
         include_str!("../../assets/activities/pr_prepare.yaml"),
     ),
     (
+        "pr_complete",
+        include_str!("../../assets/activities/pr_complete.yaml"),
+    ),
+    (
         "pr_promote",
         include_str!("../../assets/activities/pr_promote.yaml"),
     ),
@@ -140,6 +144,10 @@ pub(crate) const DEFAULT_ACTIVITY_FILES: &[(&str, &str)] = &[
     (
         "step_failure_recovery",
         include_str!("../../assets/activities/step_failure_recovery.yaml"),
+    ),
+    (
+        "task_complete",
+        include_str!("../../assets/activities/task_complete.yaml"),
     ),
     (
         "task_pilot",
@@ -286,7 +294,9 @@ backend = "cli"
             ("git_rebase", "git_rebase"),
             ("pr_prepare", "pr_prepare"),
             ("pr_failure_handoff", "pr_failure_handoff"),
+            ("pr_complete", "pr_complete"),
             ("pr_promote", "pr_promote"),
+            ("task_complete", "task_complete"),
             ("release_locks", "release_locks"),
             ("list_triage_candidates", "list_triage_candidates"),
             ("scan_unresolved_work", "scan_unresolved_work"),

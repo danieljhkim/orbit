@@ -1,7 +1,7 @@
 //! `orbit run auto` workspace logistics entrypoint.
 
 use clap::Args;
-use orbit_core::OrbitRuntime;
+use orbit_core::{CompletionPolicy, OrbitRuntime};
 
 use crate::command::{CommandOut, CommandOutput, Execute};
 use crate::parse::parse_duration_seconds;
@@ -14,10 +14,14 @@ pub(super) const AUTO_WORKFLOW: &str = "auto";
 #[command(
     about = "Drain the workspace backlog for a window (loose leaves, plus one epic)",
     override_usage = "orbit run auto [OPTIONS]",
-    after_help = "Examples:\n  orbit run auto\n  orbit run auto --for 4h\n  orbit run auto --for 4h --concurrency 8\n\n\
+    after_help = "Examples:\n  orbit run auto\n  orbit run auto --for 4h\n  orbit run auto --for 4h --concurrency 8\n  orbit run auto --for 4h --complete\n\n\
                   The drain re-lists the whole backlog every pass and keeps `--concurrency`\n\
                   tasks in flight, starting a replacement as each one finishes rather than\n\
                   waiting for the batch. An epic root runs alongside the leaves, one at a time.\n\n\
+                  `--complete` is blanket authorization: it applies to every task the drain\n\
+                  admits for the whole window, including work that reaches the backlog after\n\
+                  the run starts. The drain is asynchronous, so this prints the durable run ID\n\
+                  and returns without knowing the eventual outcome.\n\n\
                   Inspect submitted runs with `orbit run history -j workspace_auto_pipeline` and\n\
                   `orbit run show <RUN_ID>`."
 )]
@@ -32,6 +36,13 @@ pub struct AutoCommand {
     /// not a batch size. Defaults to 5.
     #[arg(long, value_name = "N")]
     pub concurrency: Option<u32>,
+    /// Authorize this drain to finish delivery and move the tasks it ships to
+    /// `done`, instead of leaving them in `review` for a separate approval.
+    /// This is blanket authorization for every task the drain admits during its
+    /// whole window, not just the backlog visible right now. Off by default,
+    /// and it never approves `proposed` work for the backlog.
+    #[arg(long)]
+    pub complete: bool,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -48,9 +59,15 @@ impl Execute for AutoCommand {
             .as_deref()
             .map(parse_duration_seconds)
             .transpose()?;
+        let completion = if self.complete {
+            CompletionPolicy::Done
+        } else {
+            CompletionPolicy::Review
+        };
         let invoke = runtime.submit_workspace_auto_run(
             for_seconds,
             self.concurrency,
+            completion,
             None,
             self.claim_token.as_deref(),
         )?;

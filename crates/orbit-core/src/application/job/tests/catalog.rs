@@ -789,6 +789,18 @@ fn pr_pipeline_models_handoff_phases_as_ordered_activity_checkpoints() {
                 "activity:pr_promote",
                 Some("step_failure_recovery")
             ),
+            // ORB-11187: completion is two more ordered checkpoints after the
+            // review handoff, reached only under explicit authorization.
+            (
+                "complete_pr",
+                "activity:pr_complete",
+                Some("step_failure_recovery")
+            ),
+            (
+                "complete_no_diff",
+                "activity:pr_complete",
+                Some("step_failure_recovery")
+            ),
         ]
     );
 
@@ -1397,7 +1409,8 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
     );
     let asset = load_job_asset(yaml).expect("epic pipeline parses");
     assert_eq!(asset.spec.max_active_runs, 1);
-    assert_eq!(asset.spec.steps.len(), 13);
+    // ORB-11187 added the two authorized PR completion steps.
+    assert_eq!(asset.spec.steps.len(), 15);
     let root_step_ids = asset
         .spec
         .steps
@@ -1418,6 +1431,10 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
             "pr_open",
             "promote_pr",
             "promote_pr_no_diff",
+            // ORB-11187: authorized PR completion, between the review handoff
+            // and the local-mode delivery steps.
+            "complete_pr",
+            "complete_pr_no_diff",
             "merge",
             "mark_done",
         ]
@@ -1606,7 +1623,7 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
         "review"
     );
 
-    let merge = &asset.spec.steps[11];
+    let merge = &asset.spec.steps[13];
     assert_eq!(
         merge.when.as_deref(),
         Some("{{ steps.resolve_ship_input.output.mode }} == local")
@@ -1625,7 +1642,7 @@ fn epic_pipeline_opens_one_stable_worktree_and_drains_children_serially() {
         "{{ steps.resolve_ship_input.output.base_branch }}"
     );
 
-    let mark_done = &asset.spec.steps[12];
+    let mark_done = &asset.spec.steps[14];
     assert_eq!(
         mark_done.when.as_deref(),
         Some("{{ steps.resolve_ship_input.output.mode }} == local")
@@ -1892,4 +1909,217 @@ fn malformed_job_assets_remain_hard_catalog_errors() {
         .expect_err("malformed job should fail catalog loading");
     assert!(err.to_string().contains("malformed.yaml"), "{err}");
     assert!(err.to_string().contains("parse"), "{err}");
+}
+
+/// [ORB-11187] The completion policy is one shared input threaded through every
+/// job boundary rather than parallel per-surface behavior. This pins both ends:
+/// each pipeline defaults it to `review`, and each dispatching pipeline forwards
+/// its own `input.completion` to its children.
+#[test]
+fn completion_policy_defaults_to_review_and_propagates_across_job_boundaries() {
+    fn job(name: &str) -> JobV2 {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(job_name, yaml)| (*job_name == name).then_some(*yaml))
+            .unwrap_or_else(|| panic!("default job {name} exists"));
+        load_job_asset(yaml)
+            .unwrap_or_else(|error| panic!("parse {name}: {error}"))
+            .spec
+    }
+
+    // Every pipeline that participates must default to the review-ending
+    // behavior, so an omitted policy can never be read as authorization.
+    for name in [
+        "workspace_auto_pipeline",
+        "task_auto_pipeline",
+        "task_gate_pipeline",
+        "task_local_pipeline",
+        "task_pr_pipeline",
+        "epic_pipeline",
+    ] {
+        assert_eq!(
+            job(name).default_input.as_ref().expect("default input")["completion"],
+            "review",
+            "{name} must default to ending successful work at review"
+        );
+    }
+
+    // workspace auto -> task auto (detached leaves) and -> epic. Both are read
+    // from `input`, not from a step output captured once, so every drain
+    // iteration forwards the same authorization to newly discovered work.
+    let workspace_auto = job("workspace_auto_pipeline");
+    let drain = workspace_auto
+        .steps
+        .iter()
+        .find(|step| step.id == "drain")
+        .expect("workspace auto drain loop");
+    let JobV2StepBody::Loop { loop_ } = &drain.body else {
+        panic!("workspace auto drain must be a loop");
+    };
+    let ship_leaves = loop_
+        .steps
+        .iter()
+        .find(|step| step.id == "ship_leaves")
+        .expect("ship_leaves step");
+    let JobV2StepBody::FanOut { fan_out, .. } = &ship_leaves.body else {
+        panic!("ship_leaves must be a fan-out");
+    };
+    let JobV2StepBody::TargetRef(leaf_invoke) = &fan_out.worker.body else {
+        panic!("leaf worker must reference invoke_detached");
+    };
+    assert_eq!(
+        leaf_invoke.default_input.as_ref().expect("leaf input")["run_input"]["completion"],
+        "{{ input.completion }}",
+        "detached leaves must inherit the drain's completion authorization"
+    );
+
+    let start_epic = loop_
+        .steps
+        .iter()
+        .find(|step| step.id == "start_epic")
+        .expect("start_epic step");
+    let JobV2StepBody::TargetRef(start_epic) = &start_epic.body else {
+        panic!("start_epic must reference invoke_detached");
+    };
+    assert_eq!(
+        start_epic.default_input.as_ref().expect("epic input")["run_input"]["completion"],
+        "{{ input.completion }}"
+    );
+
+    // task auto -> gate.
+    let task_auto = job("task_auto_pipeline");
+    let dispatch = task_auto
+        .steps
+        .iter()
+        .find(|step| step.id == "dispatch")
+        .expect("task auto dispatch");
+    let JobV2StepBody::FanOut { fan_out, .. } = &dispatch.body else {
+        panic!("task auto dispatch must be a fan-out");
+    };
+    let JobV2StepBody::TargetRef(gate_invoke) = &fan_out.worker.body else {
+        panic!("gate worker must reference invoke_and_wait");
+    };
+    assert_eq!(
+        gate_invoke.default_input.as_ref().expect("gate input")["run_input"]["completion"],
+        "{{ input.completion }}"
+    );
+
+    // gate -> leaf.
+    let gate = job("task_gate_pipeline");
+    let dispatch_child = gate
+        .steps
+        .iter()
+        .find(|step| step.id == "dispatch_child")
+        .expect("gate dispatch_child");
+    let JobV2StepBody::TargetRef(dispatch_child) = &dispatch_child.body else {
+        panic!("gate dispatch_child must reference invoke_and_wait");
+    };
+    assert_eq!(
+        dispatch_child.default_input.as_ref().expect("child input")["run_input"]["completion"],
+        "{{ input.completion }}"
+    );
+}
+
+/// [ORB-11187] Local completion must be unreachable unless every publication
+/// step this invocation required already succeeded, so the terminal transition
+/// is ordered after both the merge and the push.
+#[test]
+fn local_pipeline_completes_tasks_only_after_merge_and_push() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_local_pipeline").then_some(*yaml))
+        .expect("task local pipeline default exists");
+    let asset = load_job_asset(yaml).expect("parse task local pipeline");
+    let step_ids = asset
+        .spec
+        .steps
+        .iter()
+        .map(|step| step.id.as_str())
+        .collect::<Vec<_>>();
+    let index = |id: &str| {
+        step_ids
+            .iter()
+            .position(|candidate| *candidate == id)
+            .unwrap_or_else(|| panic!("task local pipeline has a {id} step"))
+    };
+
+    assert!(
+        index("merge") < index("complete_tasks"),
+        "a failed merge must fail the run before any task can reach done"
+    );
+    assert!(
+        index("push") < index("complete_tasks"),
+        "a failed push must fail the run before any task can reach done"
+    );
+
+    let complete = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "complete_tasks")
+        .expect("complete_tasks step");
+    assert_eq!(
+        complete.when.as_deref(),
+        Some("{{ input.completion }} == done"),
+        "completion must be gated on the explicit authorization"
+    );
+    let JobV2StepBody::Loop { loop_ } = &complete.body else {
+        panic!("complete_tasks must be a loop over the bundle");
+    };
+    let JobV2StepBody::TargetRef(complete_one) = &loop_.steps[0].body else {
+        panic!("complete_tasks must reference task_complete");
+    };
+    assert_eq!(complete_one.target, "activity:task_complete");
+}
+
+/// [ORB-11187] PR-mode completion runs after the PR is opened, is gated on the
+/// authorization, and routes no-diff work down a path that needs no PR.
+#[test]
+fn pr_pipelines_complete_only_when_authorized_and_handle_no_diff_without_a_pr() {
+    for job_name in ["task_pr_pipeline", "epic_pipeline"] {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (*name == job_name).then_some(*yaml))
+            .unwrap_or_else(|| panic!("default job {job_name} exists"));
+        let asset =
+            load_job_asset(yaml).unwrap_or_else(|error| panic!("parse {job_name}: {error}"));
+
+        let (complete_id, no_diff_id) = if job_name == "task_pr_pipeline" {
+            ("complete_pr", "complete_no_diff")
+        } else {
+            ("complete_pr", "complete_pr_no_diff")
+        };
+
+        let complete = asset
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == complete_id)
+            .unwrap_or_else(|| panic!("{job_name} has a {complete_id} step"));
+        let when = complete.when.as_deref().unwrap_or_default();
+        assert!(
+            when.contains("{{ input.completion }} == done"),
+            "{job_name} completion must be gated on the authorization: {when}"
+        );
+        let JobV2StepBody::TargetRef(complete) = &complete.body else {
+            panic!("{job_name} {complete_id} must reference pr_complete");
+        };
+        assert_eq!(complete.target, "activity:pr_complete");
+
+        let no_diff = asset
+            .spec
+            .steps
+            .iter()
+            .find(|step| step.id == no_diff_id)
+            .unwrap_or_else(|| panic!("{job_name} has a {no_diff_id} step"));
+        let JobV2StepBody::TargetRef(no_diff) = &no_diff.body else {
+            panic!("{job_name} {no_diff_id} must reference pr_complete");
+        };
+        let input = no_diff.default_input.as_ref().expect("no-diff input");
+        assert_eq!(input["no_diff_expected"], true);
+        assert!(
+            input.get("pr_number").is_none(),
+            "{job_name} no-diff completion must not require a nonexistent PR"
+        );
+    }
 }

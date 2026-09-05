@@ -70,6 +70,24 @@ not a rewrite of failed history.
 Inspect any of them with `orbit job show <id>` before invoking — the step list is
 the contract.
 
+### The `completion` input
+
+Every pipeline above that ships a task takes a `completion` input, defaulting to
+`review`. `orbit run ship --complete` / `orbit run auto --complete` set it to
+`done` on the submitted run, and it propagates unchanged through
+`workspace_auto_pipeline` → `task_auto_pipeline` → `task_gate_pipeline` → the
+leaf pipelines, and into `epic_pipeline`. Because the workspace drain reads it
+from its own input each iteration, work discovered mid-window inherits the same
+authorization.
+
+Under `completion: done`, the leaf pipelines gain a terminal step
+(`task_complete`, or `pr_complete` for PR mode) that performs the guarded
+`review -> done` transition — in local mode only after the merge and push steps
+succeeded, and in PR mode only after the PR is verified merged. A run submitted
+without the flag carries no `completion` key at all, so its persisted input is
+identical to a pre-`--complete` submission. See
+[orchestration.md](orchestration.md) for the authorization semantics.
+
 ## Cancelling
 
 ```bash

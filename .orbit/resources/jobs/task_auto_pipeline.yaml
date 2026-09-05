@@ -40,6 +40,9 @@ spec:
     # ORB-10644: forwarded to each gate run; empty means the base is the
     # landing branch.
     landing_branch: ""
+    # ORB-11187: forwarded to each gate run. `review` is the default everywhere;
+    # `done` is explicit per-invocation operator authorization (`--complete`).
+    completion: review
     max_bundles: 10
     concurrency: 5
     max_bundle_size: 5
@@ -74,6 +77,7 @@ spec:
               base_branch: "{{ input.base_branch }}"
               base_sync: "{{ input.base_sync }}"
               landing_branch: "{{ input.landing_branch }}"
+              completion: "{{ input.completion }}"
       fan_in:
         join:
           mode: all

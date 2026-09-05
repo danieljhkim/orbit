@@ -53,6 +53,10 @@ spec:
     poll_sleep_seconds: 30
     # Waited when nothing is admissible at all.
     idle_sleep_seconds: 60
+    # ORB-11187: read from `input` inside the drain loop, so every iteration
+    # forwards it — work that entered the backlog after a windowed
+    # `orbit run auto --complete` started inherits the same authorization.
+    completion: review
 
   steps:
     - id: resolve_ship_input
@@ -95,6 +99,7 @@ spec:
                     task_ids: "{{ item.task_ids }}"
                     mode: "{{ steps.resolve_ship_input.output.mode }}"
                     base_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
+                    completion: "{{ input.completion }}"
             fan_in:
               join:
                 mode: all
@@ -110,6 +115,7 @@ spec:
               job_name: epic_pipeline
               run_input:
                 epic_task_id: "{{ steps.admissible.output.epic_task_id }}"
+                completion: "{{ input.completion }}"
 
           - id: window
             target: activity:drain_window

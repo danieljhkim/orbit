@@ -406,6 +406,13 @@ pub(crate) fn run_deterministic(
     }
 }
 
+/// [ORB-11187] This activity resolves the *workspace's* shipping defaults —
+/// mode and base branch. Completion authority is deliberately not among them:
+/// it is granted per invocation by an operator and reaches the pipelines through
+/// run input, so no workspace configuration can silently turn it on.
+const COMPLETION_IS_NEVER_WORKSPACE_RESOLVED: crate::application::workflow::CompletionPolicy =
+    crate::application::workflow::CompletionPolicy::Review;
+
 fn resolve_workspace_ship_input(
     runtime: &OrbitRuntime,
     action: &str,
@@ -415,6 +422,7 @@ fn resolve_workspace_ship_input(
             binding.ship_mode,
             runtime.workflow_base_branch(),
             &[],
+            COMPLETION_IS_NEVER_WORKSPACE_RESOLVED,
         )
         .map_err(|error| DispatchError::DeterministicActionFailed {
             action: action.to_string(),
@@ -426,6 +434,7 @@ fn resolve_workspace_ship_input(
         crate::application::workflow::ShipMode::Local,
         runtime.workflow_base_branch(),
         &[],
+        COMPLETION_IS_NEVER_WORKSPACE_RESOLVED,
     )
     .map_err(|error| DispatchError::DeterministicActionFailed {
         action: action.to_string(),

@@ -70,7 +70,9 @@ pub use application::search::{
     task_selectors_contain_path,
 };
 pub use application::task::{LockContentionHotspot, LockContentionReport};
-pub use application::workflow::{ShipMode, build_ship_input, find_workflow, resolved_ship_mode};
+pub use application::workflow::{
+    CompletionPolicy, ShipMode, build_ship_input, find_workflow, resolved_ship_mode,
+};
 pub use application::workspace_sync::{
     ManagedArtifactOutcome, ManagedArtifactScope, ManagedArtifactSyncAction,
     WorkspaceManagedArtifactSyncReport, reconcile_workspace_managed_artifacts,
