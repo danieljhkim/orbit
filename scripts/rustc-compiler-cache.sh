@@ -6,8 +6,10 @@
 # cache degrades to ordinary rustc. [ORB-11259]
 set -euo pipefail
 
-STABLE_SRC="/tmp/orbit-workspace"
-STABLE_TGT="/tmp/orbit-build"
+# Tests may override these aliases to avoid sharing host-global /tmp paths.
+# Managed Linux sandboxes use the defaults below.
+STABLE_SRC="${ORBIT_COMPILER_CACHE_STABLE_SRC:-/tmp/orbit-workspace}"
+STABLE_TGT="${ORBIT_COMPILER_CACHE_STABLE_TGT:-/tmp/orbit-build}"
 
 debug() {
   if [[ "${ORBIT_COMPILER_CACHE_DEBUG:-}" == "1" ]]; then
