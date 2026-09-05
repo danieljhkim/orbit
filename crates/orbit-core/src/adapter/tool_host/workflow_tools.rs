@@ -85,6 +85,7 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
         terminal_only,
         since,
         limit: Some(parse_limit(&input)?),
+        ..Default::default()
     })?;
     let items = runs
         .iter()

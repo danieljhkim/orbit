@@ -11,7 +11,7 @@ use orbit_types::workflow::{
 };
 use rusqlite::TransactionBehavior;
 
-use crate::contracts::{JobRunQuery, JobRunStepParams, JobRunStoreBackend};
+use crate::contracts::{JobRunOrder, JobRunQuery, JobRunStepParams, JobRunStoreBackend};
 use crate::fs::path_safety::validate_path_stem;
 use crate::{Store, parse_timestamp};
 
@@ -437,11 +437,12 @@ impl Store {
         query: &JobRunQuery,
     ) -> Result<Vec<JobRun>, OrbitError> {
         let (where_clause, mut params) = job_run_filter_sql(workspace_id, query);
+        let order_clause = job_run_order_sql(query.order_by);
         let mut sql = format!(
             "SELECT run_id, job_id, attempt, state, scheduled_at, started_at, finished_at, \
              duration_ms, created_at, pid, pid_start_time, input_json, retry_source_run_id, \
              knowledge_metrics_json, resolved_crew, COALESCE(crew_model, implementer_model) \
-             FROM job_runs WHERE {where_clause} ORDER BY created_at DESC, run_id ASC"
+             FROM job_runs WHERE {where_clause} ORDER BY {order_clause}"
         );
         if let Some(limit) = query.limit {
             sql.push_str(&format!(" LIMIT ?{}", params.len() + 1));
@@ -723,6 +724,21 @@ fn job_run_filter_sql(
         params.push(Box::new(created_since.to_rfc3339()));
     }
     (conditions.join(" AND "), params)
+}
+
+/// `ORDER BY` clause for a bounded [`JobRunQuery`], matched to
+/// [`JobRunOrder`]. `run_id ASC` breaks ties deterministically in both
+/// variants; timestamps are stored as fixed-width RFC 3339 text, so a
+/// lexical `DESC` sort matches chronological order. `CreatedAt` is covered by
+/// `idx_job_runs_workspace_created`; `Recency` is a query-time expression
+/// over the same rows the `workspace_id` prefix of that index already
+/// narrows to, so a per-workspace sort stays cheap without a dedicated index
+/// [ORB-11251].
+fn job_run_order_sql(order_by: JobRunOrder) -> &'static str {
+    match order_by {
+        JobRunOrder::CreatedAt => "created_at DESC, run_id ASC",
+        JobRunOrder::Recency => "COALESCE(finished_at, started_at, created_at) DESC, run_id ASC",
+    }
 }
 
 /// Run ids per `IN (...)` list, under SQLite's bound-parameter cap.

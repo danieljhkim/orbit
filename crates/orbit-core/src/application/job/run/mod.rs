@@ -27,4 +27,4 @@ pub(crate) use owner::{RunOwnerLiveness, run_owner_liveness};
 pub use projection::{
     ActivityInvocationEvidence, job_run_to_json, job_run_to_json_with_activity_provenance,
 };
-pub use types::{JobRunCancelResult, JobRunListParams};
+pub use types::{JobRunCancelResult, JobRunListParams, JobRunOrder};

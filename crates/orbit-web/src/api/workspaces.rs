@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use axum::extract::State;
 use axum::response::{IntoResponse, Json, Response};
 use chrono::{DateTime, Utc};
-use orbit_core::application::job::{JobRunListParams, job_run_to_json};
+use orbit_core::application::job::{JobRunListParams, JobRunOrder, job_run_to_json};
 use orbit_core::{DEFAULT_TASK_LIST_LIMIT, JobRun, JobRunState, OrbitRuntime};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -106,6 +106,12 @@ impl AllJobRunsState {
 /// Unavailable sources remain in the response instead of being represented as
 /// an empty workspace, allowing the dashboard to distinguish partial data from
 /// a genuine zero-run result.
+///
+/// Each per-workspace query already asks the store to order and truncate by
+/// [`JobRunOrder::Recency`] — the same `run_timestamp` this handler later
+/// merge-sorts by — so an old, long-running run that only just finished
+/// cannot be dropped by a workspace's `limit` before its recency ever gets
+/// compared (ORB-11251).
 pub(super) async fn list_all_job_runs(
     State(state): State<DashboardState>,
     axum::extract::Query(query): axum::extract::Query<AllJobRunsQuery>,
@@ -205,6 +211,7 @@ fn workspace_job_runs(
         runtime.list_job_runs(JobRunListParams {
             state,
             limit: Some(limit),
+            order_by: JobRunOrder::Recency,
             ..Default::default()
         })
     };

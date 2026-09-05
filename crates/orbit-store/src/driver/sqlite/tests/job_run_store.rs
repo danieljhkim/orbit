@@ -2,7 +2,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use orbit_types::workflow::{JobRun, JobRunState, JobRunStep, JobTargetType};
 
 use crate::Store;
-use crate::contracts::JobRunQuery;
+use crate::contracts::{JobRunOrder, JobRunQuery};
 
 fn at(minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 5, 1, 0, minute, 0)
@@ -148,5 +148,49 @@ fn count_and_durations_ignore_the_page_limit() {
             .count_job_runs_for_workspace("ws", &terminal_since)
             .expect("count"),
         10
+    );
+}
+
+/// [ORB-11251] `CreatedAt` orders and truncates by `created_at`, so a run
+/// created earlier but still running the longest can be limited away before
+/// its later `finished_at` is ever considered. `Recency` orders and
+/// truncates by `finished_at`/`started_at`/`created_at` instead, so the same
+/// bounded query surfaces the run that most recently finished — the
+/// ordering the dashboard displays — rather than dropping it under `LIMIT`.
+#[test]
+fn recency_order_truncates_by_finish_time_not_creation_time() {
+    let store = Store::open_in_memory().expect("open store");
+    let mut old_long_running =
+        run_with_steps("jrun-old-long-running", JobRunState::Success, at(0), 1);
+    old_long_running.finished_at = Some(at(50));
+    let mut new_short_running =
+        run_with_steps("jrun-new-short-running", JobRunState::Success, at(10), 1);
+    new_short_running.finished_at = Some(at(20));
+    insert_run_with_steps(&store, "ws", &old_long_running);
+    insert_run_with_steps(&store, "ws", &new_short_running);
+
+    let by_created_at = JobRunQuery {
+        limit: Some(1),
+        ..JobRunQuery::default()
+    };
+    let top_by_created_at = store
+        .list_job_runs_for_workspace("ws", &by_created_at)
+        .expect("list by created_at");
+    assert_eq!(
+        top_by_created_at[0].run_id, "jrun-new-short-running",
+        "created_at DESC ranks the newer-created run first, even though it finished earlier"
+    );
+
+    let by_recency = JobRunQuery {
+        limit: Some(1),
+        order_by: JobRunOrder::Recency,
+        ..JobRunQuery::default()
+    };
+    let top_by_recency = store
+        .list_job_runs_for_workspace("ws", &by_recency)
+        .expect("list by recency");
+    assert_eq!(
+        top_by_recency[0].run_id, "jrun-old-long-running",
+        "recency ordering must select the most-recently-finished run before LIMIT applies"
     );
 }

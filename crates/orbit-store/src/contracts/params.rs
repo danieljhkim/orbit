@@ -385,4 +385,19 @@ pub struct JobRunQuery {
     pub terminal_only: bool,
     pub created_since: Option<DateTime<Utc>>,
     pub limit: Option<usize>,
+    /// Which timestamp `limit` truncates against. Defaults to `CreatedAt` so
+    /// existing CLI/history callers keep their current ordering.
+    pub order_by: JobRunOrder,
+}
+
+/// Which timestamp a bounded [`JobRunQuery`] orders and truncates by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JobRunOrder {
+    /// `created_at DESC, run_id ASC` — the historical list/CLI default.
+    #[default]
+    CreatedAt,
+    /// The same "most recent activity" timestamp displayed runs are ranked
+    /// by: `finished_at`, else `started_at`, else `created_at`, each DESC
+    /// with `run_id ASC` as the deterministic tiebreak.
+    Recency,
 }

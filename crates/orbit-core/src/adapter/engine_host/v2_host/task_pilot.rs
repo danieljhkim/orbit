@@ -190,6 +190,7 @@ fn active_task_pilot_preparations(
                 terminal_only: false,
                 created_since: None,
                 limit: None,
+                ..Default::default()
             })
             .map_err(|error| {
                 action_failed(action, format!("list active task-pilot runs: {error}"))
