@@ -175,6 +175,7 @@ impl OrbitRuntime {
             terminal_only: false,
             created_since: None,
             limit: Some(RESUME_LINEAGE_SCAN_LIMIT),
+            ..Default::default()
         })?;
         // Descendants can appear in any order relative to their parents, so
         // grow the set to a fixpoint rather than in a single pass.

@@ -74,6 +74,7 @@ pub(super) async fn list_job_runs(Ws(runtime): Ws, Query(q): Query<JobRunListQue
         terminal_only: matches!(state, Some(JobRunListState::Terminal)),
         since: q.since,
         limit: Some(limit),
+        ..Default::default()
     };
     match runtime.list_job_runs(params) {
         Ok(runs) => {

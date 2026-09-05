@@ -300,6 +300,89 @@ async fn job_runs_all_preserves_workspace_identity_order_bounds_and_unavailable_
     );
 }
 
+/// [ORB-11251] The store truncates each workspace's contribution to the
+/// aggregate list with `LIMIT` before this handler ever merges or re-sorts
+/// anything. If that per-workspace truncation still used `created_at`, an
+/// old run that only just finished after a newer run already completed
+/// could be dropped before its recency was ever compared to that newer
+/// run's — even though the dashboard's own recency contract ranks it first.
+/// This proves the top displayed run across two workspaces is selected by
+/// that same recency ordering *before* the per-workspace limit is applied,
+/// not after.
+#[tokio::test]
+async fn job_runs_all_selects_top_by_recency_before_per_workspace_limit() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+
+    let alpha = OrbitRuntime::from_roots(&global_root, &alpha_orbit).expect("alpha runtime");
+    let beta = OrbitRuntime::from_roots(&global_root, &beta_orbit).expect("beta runtime");
+    let now = Utc::now();
+
+    // Alpha holds both contenders: an old, long-running task that only just
+    // finished, and a newer task that finished earlier. Under a naive
+    // `created_at`-then-`LIMIT` query, the older/longer-running run would
+    // never make it out of alpha's own per-workspace page.
+    let mut old_long_running = seed_run(
+        &alpha,
+        "jrun-old-long-running",
+        "aggregate",
+        JobRunState::Success,
+    );
+    old_long_running.created_at = now - Duration::hours(2);
+    old_long_running.scheduled_at = old_long_running.created_at;
+    old_long_running.started_at = Some(old_long_running.created_at);
+    old_long_running.finished_at = Some(now);
+    write_seeded_run(&alpha, &old_long_running);
+
+    let mut new_short_running = seed_run(
+        &alpha,
+        "jrun-new-short-running",
+        "aggregate",
+        JobRunState::Success,
+    );
+    new_short_running.created_at = now - Duration::hours(1);
+    new_short_running.scheduled_at = new_short_running.created_at;
+    new_short_running.started_at = Some(new_short_running.created_at);
+    new_short_running.finished_at = Some(now - Duration::minutes(90));
+    write_seeded_run(&alpha, &new_short_running);
+
+    // Beta holds an unrelated run that finished before either alpha run, so
+    // the merge across workspaces stays exercised without becoming the top
+    // result itself.
+    let mut beta_run = seed_run(&beta, "jrun-beta-older", "aggregate", JobRunState::Success);
+    beta_run.created_at = now - Duration::hours(3);
+    beta_run.scheduled_at = beta_run.created_at;
+    beta_run.started_at = Some(beta_run.created_at);
+    beta_run.finished_at = Some(now - Duration::hours(2) - Duration::minutes(30));
+    write_seeded_run(&beta, &beta_run);
+
+    let entries = vec![
+        workspace_entry("alpha", alpha_repo, alpha_orbit, true),
+        workspace_entry("beta", beta_repo, beta_orbit, true),
+    ];
+    let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
+
+    let response = router()
+        .with_state(state)
+        .oneshot(get("/job-runs/all?limit=1"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let rows = body["items"].as_array().expect("items");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]["run_id"],
+        json!("jrun-old-long-running"),
+        "the run that finished most recently must win, even though another run in the \
+         same workspace was created more recently"
+    );
+    assert_eq!(rows[0]["workspace_id"], json!("alpha"));
+}
+
 /// ORB-10008: workspace selection failures surface over HTTP as clean 4xx
 /// JSON bodies (unknown -> 404, inactive -> 400, no default -> 400), never a
 /// 500 or a panic.

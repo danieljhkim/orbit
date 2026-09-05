@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+pub use orbit_store::contracts::JobRunOrder;
 use orbit_types::workflow::JobRunState;
 use serde::Serialize;
 
@@ -14,6 +15,9 @@ pub struct JobRunListParams {
     pub terminal_only: bool,
     pub since: Option<DateTime<Utc>>,
     pub limit: Option<usize>,
+    /// Which timestamp `limit` truncates against. Defaults to `CreatedAt` so
+    /// existing CLI/history callers keep their current ordering.
+    pub order_by: JobRunOrder,
 }
 
 /// Result of a job run cancellation attempt.

@@ -135,6 +135,7 @@ impl OrbitRuntime {
                     terminal_only: false,
                     created_since: None,
                     limit: Some(1),
+                    ..Default::default()
                 })
                 .ok()
                 .and_then(|runs| runs.into_iter().next());
