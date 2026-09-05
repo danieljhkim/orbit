@@ -70,7 +70,7 @@ bounded partitions, and its apply step persists only selectors it validated.
 ```bash
 orbit job show task_pilot_pipeline
 orbit run job task_pilot_pipeline                                  # zero-input discovery
-orbit run job task_pilot_pipeline --input task_ids=<id>,<id>       # audit exactly these
+orbit run job task_pilot_pipeline --input 'task_ids=["<id>","<id>"]' # audit exactly these
 ```
 
 Zero-input mode discovers only `proposed`/`backlog` tasks in the invoking
@@ -84,6 +84,8 @@ partitions concurrently, and returns selector proposals plus duplicate,
 already-landed, dependency, and conflicting-decision warnings. An enabled
 workspace routine may already run the zero-input job every few hours — an extra
 run before a large dispatch is still appropriate.
+The task-pilot pipeline never promotes tasks or dispatches them; promotion and
+shipping remain separate operator-authorized steps.
 
 ## Keeping parallel runs off each other
 
