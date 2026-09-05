@@ -1,4 +1,5 @@
 mod backlog_exclusion;
+mod ci_failure_admission;
 mod ci_failure_tasks;
 mod cli_executor;
 mod dependabot_alert_tasks;

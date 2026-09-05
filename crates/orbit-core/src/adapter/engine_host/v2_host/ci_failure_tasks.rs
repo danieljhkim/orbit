@@ -1,19 +1,19 @@
-//! `file_ci_failure_tasks` — turn one CI evidence snapshot into ordinary
-//! backlog tasks.
+//! `file_ci_failure_tasks` — turn one CI evidence snapshot into quarantined
+//! proposed tasks.
 //!
 //! The snapshot arrives from the host-owned `collect_ci_evidence` step, which
 //! ran `gh` outside any agent sandbox. Everything below is a pure function of
 //! that JSON plus the workspace's open tasks: cluster the current failures by
 //! root cause, drop the clusters a still-open task already covers, and file
-//! what is left as `backlog` bug tasks whose descriptions carry the evidence
-//! inline.
+//! what is left as `proposed` bug tasks whose descriptions carry the evidence
+//! inline. The CI sweep then pilots and revalidates those tasks before a
+//! separate admission boundary may expose them to backlog auto-drain.
 //!
-//! A filed task is deliberately unremarkable. It ships through the existing
-//! task PR pipeline with the ordinary agent baseline and no `required_tools`:
-//! the agent never has to query GitHub, because the answer is already in the
-//! description. Verification needs no new stage either — the fix opens a normal
-//! PR, CI runs on it, and if the failure is still current the next sweep sees
-//! it again.
+//! A filed task deliberately has no `required_tools`: the pilot and eventual
+//! implementation never have to query GitHub, because the original evidence
+//! is already in the description. It is not executable until a successful
+//! pilot has applied valid selectors, found the failure relevant to current
+//! integration code, and exercised explicit sweep promotion authority.
 //!
 //! # Two keys, on purpose
 //!
@@ -160,6 +160,7 @@ where
             "clusters": 0,
             "filed_count": 0,
             "filed": [],
+            "pilot_candidates": [],
             "skipped_existing": [],
             "skipped_over_cap": [],
             "audit": audit,
@@ -232,6 +233,7 @@ where
             "clusters": 0,
             "filed_count": 0,
             "filed": [],
+            "pilot_candidates": [],
             "skipped_existing": [],
             "skipped_over_cap": [],
             "audit": audit,
@@ -240,6 +242,8 @@ where
     }
 
     let mut filed = Vec::new();
+    let mut pilot_candidates = Vec::new();
+    let mut pilot_candidate_ids = BTreeSet::new();
     let mut skipped_existing = Vec::new();
     let mut skipped_over_cap = Vec::new();
     // Two clusters in one snapshot can share a failure key when the same root
@@ -274,14 +278,50 @@ where
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let duplicate_tasks = duplicate_matches
+        .iter()
+        .map(|duplicate_match| {
+            duplicate_match
+                .as_ref()
+                .map(|matched| {
+                    runtime.get_task(&matched.task_id).map_err(|error| {
+                        retryable_pipeline_error(
+                            "pilot_candidate_lookup",
+                            &audit,
+                            vec![json!({
+                                "stage": "registration",
+                                "operation": "reload_duplicate_task",
+                                "task_id": matched.task_id,
+                                "retryable": true,
+                                "message": bounded_error(&error.to_string()),
+                            })],
+                        )
+                    })
+                })
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    for (cluster, duplicate_match) in clusters.iter().zip(duplicate_matches) {
+    for ((cluster, duplicate_match), duplicate_task) in
+        clusters.iter().zip(duplicate_matches).zip(duplicate_tasks)
+    {
         if let Some(DuplicateTaskMatch {
             task_id,
             match_kind,
             evidence,
         }) = duplicate_match
         {
+            if let Some(existing) = duplicate_task {
+                let expected_key_tag =
+                    format!("{CI_FAILURE_KEY_TAG_PREFIX}{}", cluster.failure_key);
+                if existing.status == TaskStatus::Proposed
+                    && existing.tags.iter().any(|tag| tag == CI_FAILURE_TAG)
+                    && existing.tags.iter().any(|tag| tag == &expected_key_tag)
+                    && pilot_candidate_ids.insert(task_id.clone())
+                {
+                    pilot_candidates.push(cluster.filing_entry(&task_id));
+                }
+            }
             skipped_existing.push(json!({
                 "failure_key": cluster.failure_key,
                 "cluster_key": cluster.cluster_key,
@@ -339,7 +379,10 @@ where
             priority: TaskPriority::High,
             complexity: TaskComplexity::Unassessed,
             task_type: Some(TaskType::Bug),
-            status: Some(TaskStatus::Backlog),
+            // Filing is quarantine, not dispatch authorization. The
+            // task-pilot apply boundary is the only CI-sweep path that may
+            // promote a relevant, selector-backed repair to backlog.
+            status: Some(TaskStatus::Proposed),
             system_created: true,
             ..TaskAddParams::default()
         })
@@ -358,16 +401,10 @@ where
             )
         })?;
         filed_keys.insert(cluster.failure_key.clone());
-        filed.push(json!({
-            "task_id": task_id,
-            "failure_key": cluster.failure_key,
-            "cluster_key": cluster.cluster_key,
-            "workflow": cluster.workflow,
-            "job": cluster.job,
-            "step": cluster.step,
-            "tested_commit": cluster.tested_commit,
-            "run_urls": cluster.run_urls(),
-        }));
+        let filing = cluster.filing_entry(&task_id);
+        pilot_candidate_ids.insert(task_id);
+        pilot_candidates.push(filing.clone());
+        filed.push(filing);
     }
 
     let final_audit = filing_audit(audit, &filed, &skipped_existing);
@@ -377,6 +414,7 @@ where
         "clusters": clusters.len(),
         "filed_count": filed.len(),
         "filed": filed,
+        "pilot_candidates": pilot_candidates,
         "skipped_existing": skipped_existing,
         "skipped_over_cap": skipped_over_cap,
         "max_tasks": max_tasks,
@@ -534,6 +572,19 @@ impl FailureCluster {
             .iter()
             .filter_map(|run| run.get("run_id").cloned())
             .collect()
+    }
+
+    fn filing_entry(&self, task_id: &str) -> Value {
+        json!({
+            "task_id": task_id,
+            "failure_key": self.failure_key,
+            "cluster_key": self.cluster_key,
+            "workflow": self.workflow,
+            "job": self.job,
+            "step": self.step,
+            "tested_commit": self.tested_commit,
+            "run_urls": self.run_urls(),
+        })
     }
 
     fn title(&self) -> String {

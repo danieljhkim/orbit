@@ -223,7 +223,7 @@ fn one_regression_across_push_and_pull_request_runs_becomes_one_task() {
 }
 
 #[test]
-fn a_filed_task_is_an_ordinary_backlog_bug_carrying_usable_evidence() {
+fn a_filed_task_is_a_proposed_bug_carrying_usable_evidence() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let log = "ci\ttest\t2026-08-30T01:00:00Z assertion failed: left == right\n";
 
@@ -245,7 +245,7 @@ fn a_filed_task_is_an_ordinary_backlog_bug_carrying_usable_evidence() {
         .expect("one filed task");
     let task = runtime.get_task(&task_id).expect("read filed task");
 
-    assert_eq!(task.status, TaskStatus::Backlog);
+    assert_eq!(task.status, TaskStatus::Proposed);
     assert_eq!(task.task_type, orbit_types::task::TaskType::Bug);
     // No `github.*` requirement: the evidence is in the description, so the
     // task ships on the ordinary agent baseline.
@@ -427,6 +427,11 @@ fn a_second_sweep_over_a_still_red_run_does_not_file_a_second_task() {
 
     assert_eq!(second["outcome"], json!("current_failures"));
     assert_eq!(second["filed_count"], json!(0));
+    assert_eq!(
+        second["pilot_candidates"][0]["task_id"],
+        json!(task_id.clone()),
+        "a proposed task whose prior pilot did not admit it must remain retryable"
+    );
     let skipped = second["skipped_existing"].as_array().expect("skipped");
     assert!(!skipped.is_empty());
     assert!(
@@ -462,6 +467,15 @@ fn a_closed_task_does_not_suppress_a_recurrence() {
         .first()
         .cloned()
         .expect("first sweep files one task");
+    runtime
+        .update_task(
+            &task_id,
+            TaskUpdateParams {
+                status: Some(TaskStatus::Backlog),
+                ..TaskUpdateParams::default()
+            },
+        )
+        .expect("admit the first task before completing it");
     runtime
         .update_task(
             &task_id,

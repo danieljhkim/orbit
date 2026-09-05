@@ -7,7 +7,10 @@
 # tasks, including non-empty selectors.
 # Preparation never promotes or dispatches a task. Each read-only pilot
 # receives at most five tasks. The all-join makes any failed partition
-# fail the run before the context-only deterministic apply step can execute.
+# fail the run before the deterministic apply step can execute. Apply normally
+# changes only context_files. A CI sweep may pass its exact filing record plus
+# literal promotion authority; only then can apply promote a warning-free,
+# selector-backed proposed repair to backlog.
 #
 # Crew resolution
 # - The pilot step names the `system` crew directly, so this definition states
@@ -36,6 +39,8 @@ spec:
     base_branch: agent-main
     max_tasks: 50
     max_partition_size: 5
+    promotion_authorized: false
+    ci_sweep_filing: null
 
   steps:
     - id: prepare
@@ -71,3 +76,5 @@ spec:
         prepared: "{{ steps.prepare.output }}"
         results: "{{ steps.pilot_results.output }}"
         workspace_path: "{{ steps.prepare.output.workspace_path }}"
+        promotion_authorized: "{{ input.promotion_authorized }}"
+        ci_sweep_filing: "{{ input.ci_sweep_filing }}"
