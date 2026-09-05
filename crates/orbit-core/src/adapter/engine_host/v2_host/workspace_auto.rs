@@ -8,9 +8,11 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
+use crate::runtime::engine::crew::CrewAllowlist;
+
 use super::backlog_exclusion::{
-    BacklogTaskExclusionReason, EpicFamilyMembership, backlog_snapshot, epic_family_membership,
-    list_backlog_tasks, sort_tasks_for_automatic_dispatch,
+    BacklogTaskExclusionReason, EpicFamilyMembership, allowlist_from_input, backlog_snapshot,
+    epic_family_membership, list_backlog_tasks, sort_tasks_for_automatic_dispatch,
 };
 
 /// The job that supervises one epic root. `classify_workspace_auto_tasks`
@@ -129,7 +131,11 @@ pub(super) fn classify_workspace_auto_tasks(
         // root's status also closes the window between a detached submit and
         // the child's `worktree_setup` moving that root to `in-progress`.
         Some(_) => None,
-        None => next_admissible_epic_root(runtime, action)?,
+        None => next_admissible_epic_root(
+            runtime,
+            action,
+            allowlist_from_input(runtime, action, input)?.as_ref(),
+        )?,
     };
 
     let has_leaves = !loose_task_dispatches.is_empty();
@@ -170,6 +176,7 @@ pub fn explain_workspace_auto_readiness(
     task_ids: &[String],
     max_active_leaf_runs: Option<u32>,
     limit: usize,
+    allowed_crews: &[String],
 ) -> Result<Value, OrbitError> {
     if !(1..=MAX_READINESS_LIMIT).contains(&limit) {
         return Err(OrbitError::InvalidInput(format!(
@@ -185,8 +192,15 @@ pub fn explain_workspace_auto_readiness(
         ));
     }
 
-    let snapshot = backlog_snapshot(runtime, "explain_workspace_auto_readiness")
-        .map_err(|error| OrbitError::Execution(format!("read readiness snapshot: {error}")))?;
+    // Validated here, before any snapshot work, so a typo reads the same way
+    // it would on `orbit run auto --allow-crew`.
+    let allowlist = runtime.crew_allowlist(allowed_crews)?;
+    let snapshot = backlog_snapshot(
+        runtime,
+        "explain_workspace_auto_readiness",
+        allowlist.as_ref(),
+    )
+    .map_err(|error| OrbitError::Execution(format!("read readiness snapshot: {error}")))?;
     let live_leaves = read_live_leaf_runs(runtime)?;
     let active_epic = read_active_epic_run(runtime)?;
     let claimed_by_task =
@@ -221,8 +235,12 @@ pub fn explain_workspace_auto_readiness(
         .map(|excluded| (excluded.id.as_str(), excluded))
         .collect::<BTreeMap<_, _>>();
     let next_epic = if active_epic.is_none() {
-        next_admissible_epic_root(runtime, "explain_workspace_auto_readiness")
-            .map_err(|error| OrbitError::Execution(format!("read epic readiness: {error}")))?
+        next_admissible_epic_root(
+            runtime,
+            "explain_workspace_auto_readiness",
+            allowlist.as_ref(),
+        )
+        .map_err(|error| OrbitError::Execution(format!("read epic readiness: {error}")))?
     } else {
         None
     };
@@ -287,6 +305,11 @@ pub fn explain_workspace_auto_readiness(
             }
             if let Some(excluded) = excluded_by_id.get(task.id.as_str()) {
                 match excluded.reason {
+                    BacklogTaskExclusionReason::CrewNotAllowed => {
+                        object.insert("reason".to_string(), Value::String("crew_not_allowed".to_string()));
+                        object.insert("crew".to_string(), json!(excluded.crew));
+                        object.insert("allowed_crews".to_string(), json!(allowlist.as_ref().map(CrewAllowlist::names)));
+                    }
                     BacklogTaskExclusionReason::EpicChild => {
                         object.insert("reason".to_string(), Value::String("epic_managed".to_string()));
                     }
@@ -358,8 +381,9 @@ impl OrbitRuntime {
         task_ids: &[String],
         max_active_leaf_runs: Option<u32>,
         limit: usize,
+        allowed_crews: &[String],
     ) -> Result<Value, OrbitError> {
-        explain_workspace_auto_readiness(self, task_ids, max_active_leaf_runs, limit)
+        explain_workspace_auto_readiness(self, task_ids, max_active_leaf_runs, limit, allowed_crews)
     }
 }
 
@@ -493,10 +517,12 @@ fn read_active_epic_run(runtime: &OrbitRuntime) -> Result<Option<ActiveEpicRun>,
     }))
 }
 
-/// The highest-priority `backlog` epic root whose dependencies are satisfied.
+/// The highest-priority `backlog` epic root whose dependencies are satisfied
+/// and whose effective crew this run's window permits [ORB-11242].
 fn next_admissible_epic_root(
     runtime: &OrbitRuntime,
     action: &str,
+    allowlist: Option<&CrewAllowlist>,
 ) -> Result<Option<String>, DispatchError> {
     let all_tasks = runtime.stores().tasks().list_tasks().map_err(|err| {
         DispatchError::DeterministicActionFailed {
@@ -523,6 +549,11 @@ fn next_admissible_epic_root(
             task.status == TaskStatus::Backlog
                 && epic_family_membership(task, &task_lookup) == Some(EpicFamilyMembership::Root)
                 && task_dependencies_ready(task, &status_by_id)
+                && allowlist.is_none_or(|allowlist| {
+                    runtime
+                        .effective_task_crew(task)
+                        .is_ok_and(|crew| allowlist.permits(&crew))
+                })
         })
         .collect::<Vec<_>>();
     sort_tasks_for_automatic_dispatch(&mut backlog_epics);

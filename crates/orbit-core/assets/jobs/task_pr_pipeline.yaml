@@ -38,6 +38,11 @@ spec:
     # explicit per-invocation operator authorization to also merge the PR and
     # complete the tasks, which only happens after the merge is verified.
     completion: review
+    # ORB-11242: the run-scoped crew restriction the auto-drain admitting this
+    # run applied. Empty means unrestricted. This is the innermost carrier: the
+    # agent activities below resolve their crew against this run input, so the
+    # dispatch gate refuses a crew the window excluded before a provider starts.
+    allowed_crews: []
     title: null
     body: null
 

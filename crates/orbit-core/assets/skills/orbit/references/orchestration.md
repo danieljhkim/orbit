@@ -23,6 +23,7 @@ orbit run ship <task-id> ...        # ship exactly these
 orbit run ship --mode local         # implement in a worktree, merge to the base; no PR
 orbit run auto --for 2h             # drain the backlog for a window
 orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
+orbit run auto --for 2h --allow-crew opus,sonnet  # ... using only these crews
 orbit run readiness                        # explain current auto-drain eligibility, read-only
 orbit run readiness TASK-123 --json        # explain selected task IDs as JSON
 orbit run ship <task-id> --complete  # ... and also carry it through to `done`
@@ -42,13 +43,39 @@ It keeps `--concurrency` tasks in flight (5 by default) and re-lists the whole
 backlog every pass, so a slot is refilled as soon as its own task finishes and a
 task filed mid-window starts without waiting for the batch around it.
 
+`--allow-crew` restricts one drain to the crews you name — the lever for a
+provider that is unavailable, rate-limited, or out of budget. It is opt-in and
+scoped to that run's window:
+
+- Names must be crews this workspace configures. An unknown or empty one fails
+  the command; nothing is dispatched, and no configuration is written.
+- Scope is the run and everything it admits: the leaf and epic pipelines it
+  starts inherit the same restriction, and the check runs again at each activity
+  against the crew that was *actually* resolved — including an activity that
+  names `workflow.system_crew` — so an excluded provider cannot be reached
+  through an alias. Matching is by effective configured identity, so a differently
+  named crew resolving to the same provider/model is permitted; naming a wrapper
+  is not itself provider usage. Precedence is unchanged: explicit > task.crew >
+  `[workflow].default_crew`, and the allowlist gates the winner rather than
+  choosing one.
+- A backlog task whose crew is excluded is **skipped, not remapped**. It stays in
+  `backlog` on its own crew, and `orbit run readiness --allow-crew ...` reports it
+  as `crew_not_allowed` with the crew it would have run as. Moving that work to a
+  permitted crew is an operator decision — reassign the task, then it drains
+  normally. Everything permitted keeps filling the slots at the usual rate.
+- It governs only what this drain *starts*. Tasks another invocation already has
+  in flight keep running to completion; nothing is cancelled. It carries no
+  completion or promotion authority, and there is no automatic fallback to a
+  different provider.
+
 Runs are asynchronous: these commands return once the run is durable, printing a
 run ID. They do not claim the eventual outcome.
 
 `orbit run readiness` is the diagnostic counterpart to auto-drain. It reads a
 bounded snapshot of the explicit workspace and reports each selected backlog
 task as ready or waiting, naming unmet dependency IDs/statuses, context-lock
-holders, epic management, live child-run claims, and capacity saturation. It
+holders, epic management, live child-run claims, capacity saturation, and — with
+`--allow-crew` — crew exclusion. It
 never creates a run, reconciles stale runs, reserves files, or mutates a task.
 Its answer can change immediately after the snapshot, so `eligible` means
 "would be admitted by this snapshot", never a guarantee that work will start.

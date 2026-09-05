@@ -12,7 +12,7 @@ const DEFAULT_LIMIT: usize = 50;
 #[command(
     about = "Explain why backlog tasks can or cannot start in auto-drain",
     override_usage = "orbit run readiness [<TASK_ID>...] [OPTIONS]",
-    after_help = "Examples:\n  orbit run readiness\n  orbit run readiness TASK-123 TASK-124\n  orbit run readiness --concurrency 8 --json\n\nThis is a read-only snapshot. It does not reserve work, reconcile stale runs,\nsubmit a run, or mutate tasks; an eligible task is not guaranteed to start."
+    after_help = "Examples:\n  orbit run readiness\n  orbit run readiness TASK-123 TASK-124\n  orbit run readiness --concurrency 8 --json\n  orbit run readiness --allow-crew opus,sonnet\n\nThis is a read-only snapshot. It does not reserve work, reconcile stale runs,\nsubmit a run, or mutate tasks; an eligible task is not guaranteed to start.\n\n`--allow-crew` previews the same restriction `orbit run auto --allow-crew` would\napply: excluded tasks report `crew_not_allowed` with the crew they would run as,\nand the rest keep filling the free slots."
 )]
 pub struct ReadinessCommand {
     /// Optional task IDs to explain. Omit to inspect a bounded backlog snapshot.
@@ -24,6 +24,10 @@ pub struct ReadinessCommand {
     /// Maximum tasks to explain, including an explicit selection (1-500).
     #[arg(long, default_value_t = DEFAULT_LIMIT, value_name = "N")]
     pub limit: usize,
+    /// Evaluate as if the drain were restricted to these configured crews.
+    /// Repeatable and comma-separated; omitted, no crew restriction applies.
+    #[arg(long = "allow-crew", value_name = "CREW", value_delimiter = ',')]
+    pub allow_crew: Vec<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -32,8 +36,12 @@ pub struct ReadinessCommand {
 impl Execute for ReadinessCommand {
     fn execute(self, runtime: &OrbitRuntime) -> CommandOut {
         validate_task_ids(&self.task_ids)?;
-        let payload =
-            runtime.workspace_auto_readiness(&self.task_ids, self.concurrency, self.limit)?;
+        let payload = runtime.workspace_auto_readiness(
+            &self.task_ids,
+            self.concurrency,
+            self.limit,
+            &self.allow_crew,
+        )?;
         readiness_payload(payload)
     }
 }
@@ -71,8 +79,12 @@ fn readiness_lines(payload: &Value) -> Vec<String> {
             let task_id = task["task_id"].as_str().unwrap_or("-");
             let reason = task["reason"].as_str().unwrap_or("unknown");
             let eligible = task["eligible"].as_bool().unwrap_or(false);
+            let crew = task["crew"]
+                .as_str()
+                .map(|crew| format!(" crew={crew}"))
+                .unwrap_or_default();
             lines.push(format!(
-                "{task_id}: {} ({reason})",
+                "{task_id}: {} ({reason}){crew}",
                 if eligible { "eligible" } else { "waiting" }
             ));
         }

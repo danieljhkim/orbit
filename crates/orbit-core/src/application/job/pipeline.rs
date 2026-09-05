@@ -174,11 +174,21 @@ impl OrbitRuntime {
     /// `task_auto_pipeline` children may be live at once. Omitted, the job's
     /// own default applies — this only forwards an explicit override, so the
     /// default lives in one place, next to the loop that reads it.
+    ///
+    /// [ORB-11242] `allowed_crews` is the run-scoped crew restriction. Empty
+    /// means unrestricted, which is what every caller predating it gets. Names
+    /// are resolved against this host's `[crews.*]` registry *here*, before a
+    /// run record exists, so an unknown or blank name fails the submission
+    /// rather than quietly shrinking what a live drain admits; the canonical
+    /// registry names are what gets persisted and forwarded. It gates what the
+    /// drain may *start* — it does not touch workspace configuration, reassign
+    /// a task's crew, or cancel work another invocation already has in flight.
     pub fn submit_workspace_auto_run(
         &self,
         for_seconds: Option<u64>,
         max_active_leaf_runs: Option<u32>,
         completion: crate::application::workflow::CompletionPolicy,
+        allowed_crews: &[String],
         actor: Option<&str>,
         claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
@@ -187,32 +197,40 @@ impl OrbitRuntime {
             crate::application::workflow::AUTO_WORKFLOW_ALIAS,
         )
         .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'auto'".to_string()))?;
-        let mut input = json!({ "for_seconds": for_seconds.unwrap_or(0) });
-        // [ORB-11187] Blanket authorization: the drain re-lists the backlog
-        // every pass, so this policy governs every task admitted for the whole
-        // window, not only the ones visible at submission.
-        if completion.completes()
-            && let Some(object) = input.as_object_mut()
-        {
-            object.insert(
-                "completion".to_string(),
-                Value::String(completion.as_input_value().to_string()),
-            );
-        }
-        if let Some(max_active_leaf_runs) = max_active_leaf_runs {
-            if max_active_leaf_runs == 0 {
+        let input = workspace_auto_run_input(
+            for_seconds,
+            max_active_leaf_runs,
+            completion,
+            &self.canonical_auto_drain_crews(allowed_crews)?,
+        )?;
+        self.submit_pipeline_run(workflow.job_id, input, None, actor)
+    }
+
+    /// Canonicalize an operator-supplied crew allowlist, rejecting blank or
+    /// unconfigured names [ORB-11242].
+    ///
+    /// Canonical registry names are persisted rather than the operator's
+    /// spelling, so the durable run input says exactly which configured crews
+    /// the window permits regardless of the alias that was typed.
+    pub(super) fn canonical_auto_drain_crews(
+        &self,
+        allowed_crews: &[String],
+    ) -> Result<Vec<String>, OrbitError> {
+        let mut canonical: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for name in allowed_crews {
+            if name.trim().is_empty() {
                 return Err(OrbitError::InvalidInput(
-                    "concurrency must be at least 1".to_string(),
+                    "crew name in the auto-drain allowlist must not be empty".to_string(),
                 ));
             }
-            if let Some(object) = input.as_object_mut() {
-                object.insert(
-                    "max_active_leaf_runs".to_string(),
-                    json!(max_active_leaf_runs),
-                );
-            }
+            let Some(resolved) = self.canonical_crew_name(Some(name))? else {
+                return Err(OrbitError::InvalidInput(
+                    "crew name in the auto-drain allowlist must not be empty".to_string(),
+                ));
+            };
+            canonical.insert(resolved);
         }
-        self.submit_pipeline_run(workflow.job_id, input, None, actor)
+        Ok(canonical.into_iter().collect())
     }
 
     /// The duplicate-dispatch refusal for the newest non-terminal run already
@@ -1619,6 +1637,52 @@ fn pipeline_run_is_runnable(runs: &[JobRun], run_id: &str, max_active_runs: u32)
 fn input_hash(input: &Value) -> String {
     let encoded = serde_json::to_vec(input).unwrap_or_default();
     format!("{:x}", Sha256::digest(encoded))
+}
+
+/// The durable input one workspace drain carries for its whole window.
+///
+/// Every key here is *omitted* unless the caller asked for it, so a run's
+/// persisted input records only the deviations from the job's own defaults —
+/// which is what makes an omitted option indistinguishable from the behavior
+/// that predated it. Pure, so the durable contract this shape represents can
+/// be asserted without submitting a run.
+pub(super) fn workspace_auto_run_input(
+    for_seconds: Option<u64>,
+    max_active_leaf_runs: Option<u32>,
+    completion: crate::application::workflow::CompletionPolicy,
+    allowed_crews: &[String],
+) -> Result<Value, OrbitError> {
+    if max_active_leaf_runs == Some(0) {
+        return Err(OrbitError::InvalidInput(
+            "concurrency must be at least 1".to_string(),
+        ));
+    }
+    let mut input = serde_json::Map::new();
+    input.insert(
+        "for_seconds".to_string(),
+        json!(for_seconds.unwrap_or_default()),
+    );
+    // [ORB-11187] Blanket authorization: the drain re-lists the backlog every
+    // pass, so this policy governs every task admitted for the whole window,
+    // not only the ones visible at submission.
+    if completion.completes() {
+        input.insert(
+            "completion".to_string(),
+            Value::String(completion.as_input_value().to_string()),
+        );
+    }
+    if let Some(max_active_leaf_runs) = max_active_leaf_runs {
+        input.insert(
+            "max_active_leaf_runs".to_string(),
+            json!(max_active_leaf_runs),
+        );
+    }
+    // [ORB-11242] Carried by the run itself, so every pipeline it admits
+    // inherits the same window without re-deriving it from configuration.
+    if !allowed_crews.is_empty() {
+        input.insert("allowed_crews".to_string(), json!(allowed_crews));
+    }
+    Ok(Value::Object(input))
 }
 
 /// Test-only substitute for the detached worker program.

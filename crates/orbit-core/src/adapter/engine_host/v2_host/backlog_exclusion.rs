@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::OrbitRuntime;
+use crate::runtime::engine::crew::CrewAllowlist;
 use crate::runtime::task::locks::lock_context_files_for_task;
 
 const MAX_TASK_PARENT_CHAIN_DEPTH: usize = 32;
@@ -17,12 +18,23 @@ pub(super) struct BacklogTaskExclusion {
     pub(super) id: String,
     pub(super) reason: BacklogTaskExclusionReason,
     pub(super) conflicts: Vec<BacklogTaskConflict>,
+    /// The crew the task would have dispatched as, on a
+    /// [`BacklogTaskExclusionReason::CrewNotAllowed`] exclusion. Naming the
+    /// *effective* crew — not the raw `task.crew`, which is often unset and
+    /// inherited — is what makes the exclusion actionable [ORB-11242].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) crew: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum BacklogTaskExclusionReason {
     ContextLockConflict,
+    /// The run window permits a set of crews and this task's effective crew is
+    /// not one of them [ORB-11242]. The task is left in `backlog` exactly as
+    /// it is — never silently re-crewed — and the remaining eligible work
+    /// keeps filling the drain's slots.
+    CrewNotAllowed,
     EpicChild,
     EpicRoot,
     GroupMemberConflict,
@@ -124,7 +136,11 @@ pub(super) fn list_backlog_tasks(
         // list into the lookup, then clone only the backlog tasks that survive
         // the filter — tens of clones on a large workspace instead of one per
         // task, and one copy held rather than two.
-        let snapshot = backlog_snapshot(runtime, action)?;
+        let snapshot = backlog_snapshot(
+            runtime,
+            action,
+            allowlist_from_input(runtime, action, input)?.as_ref(),
+        )?;
         (snapshot.admissible_leaves, Some(snapshot.excluded))
     } else {
         let tasks = explicit_task_ids
@@ -177,9 +193,25 @@ pub(super) fn list_backlog_tasks(
     Ok(Value::Object(payload))
 }
 
+/// The run-scoped crew allowlist carried on a deterministic action's input
+/// [ORB-11242]. Absent or empty means unrestricted.
+pub(super) fn allowlist_from_input(
+    runtime: &OrbitRuntime,
+    action: &str,
+    input: &Value,
+) -> Result<Option<CrewAllowlist>, DispatchError> {
+    runtime.crew_allowlist_from_input(input).map_err(|error| {
+        DispatchError::DeterministicActionFailed {
+            action: action.to_string(),
+            message: format!("resolve run crew allowlist: {error}"),
+        }
+    })
+}
+
 pub(super) fn backlog_snapshot(
     runtime: &OrbitRuntime,
     action: &str,
+    allowlist: Option<&CrewAllowlist>,
 ) -> Result<BacklogSnapshot, DispatchError> {
     let task_lookup: BTreeMap<String, Task> = runtime
         .stores()
@@ -213,6 +245,34 @@ pub(super) fn backlog_snapshot(
         .collect();
     sort_tasks_for_automatic_dispatch(&mut backlog);
     let mut excluded = Vec::new();
+    // [ORB-11242] The crew filter runs first so an excluded task reports the
+    // reason an operator can act on — reassign it, or run a drain that permits
+    // its crew — rather than a downstream epic/lock reason that would not
+    // explain why a permitted-looking task never started. Everything that
+    // survives keeps its ordinary priority/age order, so the remaining crews
+    // go on filling the drain's slots at the usual rate.
+    if let Some(allowlist) = allowlist {
+        backlog.retain(|task| {
+            match runtime.effective_task_crew(task) {
+                Ok(crew) if allowlist.permits(&crew) => true,
+                // An unresolvable crew fails closed under an explicit
+                // restriction: the drain cannot show it is permitted, and
+                // guessing would spend a budget the operator scoped.
+                resolution => {
+                    excluded.push(BacklogTaskExclusion {
+                        id: task.id.clone(),
+                        reason: BacklogTaskExclusionReason::CrewNotAllowed,
+                        conflicts: Vec::new(),
+                        crew: Some(match resolution {
+                            Ok(crew) => crew.name,
+                            Err(error) => format!("<unresolved: {error}>"),
+                        }),
+                    });
+                    false
+                }
+            }
+        });
+    }
     backlog.retain(|task| {
         let Some(membership) = epic_family_membership(task, &task_lookup) else {
             return true;
@@ -224,6 +284,7 @@ pub(super) fn backlog_snapshot(
                 EpicFamilyMembership::Child => BacklogTaskExclusionReason::EpicChild,
             },
             conflicts: Vec::new(),
+            crew: None,
         });
         false
     });
@@ -261,6 +322,7 @@ pub(super) fn backlog_snapshot(
                             .get(&task.id)
                             .cloned()
                             .unwrap_or_else(|| trigger_conflicts.clone()),
+                        crew: None,
                     });
                 } else {
                     kept.push(task);

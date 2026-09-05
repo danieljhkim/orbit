@@ -22,6 +22,11 @@ pub(super) const AUTO_WORKFLOW: &str = "auto";
                   admits for the whole window, including work that reaches the backlog after\n\
                   the run starts. The drain is asynchronous, so this prints the durable run ID\n\
                   and returns without knowing the eventual outcome.\n\n\
+                  `--allow-crew` restricts this one run to the named crews, for its window\n\
+                  only. It edits no configuration and reassigns nothing: a backlog task whose\n\
+                  crew is excluded is simply not started, and `orbit run readiness --allow-crew`\n\
+                  names it. To actually move that work, reassign its crew yourself. Tasks a\n\
+                  different invocation already has in flight keep running.\n\n\
                   Inspect submitted runs with `orbit run history -j workspace_auto_pipeline` and\n\
                   `orbit run show <RUN_ID>`."
 )]
@@ -43,6 +48,15 @@ pub struct AutoCommand {
     /// and it never approves `proposed` work for the backlog.
     #[arg(long)]
     pub complete: bool,
+    /// Restrict this run to these configured crews, e.g. when a provider is
+    /// unavailable or its budget is spent. Repeatable and comma-separated.
+    /// Every name must be configured here; an unknown or empty one fails
+    /// before anything is dispatched. Omitted, the drain runs every crew, as
+    /// before. This is scoped to this run's window only — no workspace
+    /// configuration is changed, no task is reassigned, and nothing another
+    /// invocation is already running is cancelled.
+    #[arg(long = "allow-crew", value_name = "CREW", value_delimiter = ',')]
+    pub allow_crew: Vec<String>,
     /// Output as JSON.
     #[arg(long)]
     pub json: bool,
@@ -68,6 +82,7 @@ impl Execute for AutoCommand {
             for_seconds,
             self.concurrency,
             completion,
+            &self.allow_crew,
             None,
             self.claim_token.as_deref(),
         )?;
