@@ -72,12 +72,16 @@ fn codex_only_seeds_the_codex_family_and_system() {
     let contents = seed_contents(&seed_for(&["codex"]));
     let parsed = parsed_config(&contents);
 
-    assert_eq!(crew_names(&parsed), vec!["luna", "sol", "system", "terra"]);
+    assert_eq!(
+        crew_names(&parsed),
+        vec!["astra", "luna", "sol", "system", "terra"]
+    );
+    assert_crew(&parsed, "astra", "codex", "gpt-6-astra");
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");
-    assert_default_crew(&parsed, Some("sol"));
+    assert_default_crew(&parsed, Some("astra"));
 }
 
 #[test]
@@ -86,8 +90,8 @@ fn gemini_only_seeds_gemini_and_a_system_crew() {
     let parsed = parsed_config(&contents);
 
     assert_eq!(crew_names(&parsed), vec!["gemini", "system"]);
-    assert_crew(&parsed, "gemini", "gemini", "gemini-3.7-flash");
-    assert_crew(&parsed, "system", "gemini", "gemini-3.7-flash");
+    assert_crew(&parsed, "gemini", "gemini", "gemini-3.8-flash");
+    assert_crew(&parsed, "system", "gemini", "gemini-3.8-flash");
     assert_default_crew(&parsed, Some("gemini"));
 }
 
@@ -136,7 +140,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_eq!(
         crew_names(&parsed),
         vec![
-            "fable", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
+            "astra", "fable", "grok", "luna", "opus", "sol", "sonnet", "system", "terra"
         ]
     );
     assert_default_crew(&parsed, Some("opus"));
@@ -146,6 +150,7 @@ fn multi_provider_seed_includes_each_available_family_and_excludes_unavailable()
     assert_crew(&parsed, "sol", "codex", "gpt-5.6-sol");
     assert_crew(&parsed, "terra", "codex", "gpt-5.6-terra");
     assert_crew(&parsed, "luna", "codex", "gpt-5.6-luna");
+    assert_crew(&parsed, "astra", "codex", "gpt-6-astra");
     assert_crew(&parsed, "grok", "grok", "grok-4.6");
     // codex outranks claude and grok in the system-lane preference order.
     assert_crew(&parsed, "system", "codex", "gpt-5.6-luna");

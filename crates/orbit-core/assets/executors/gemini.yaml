@@ -16,6 +16,6 @@ spec:
   sandbox: macos-sandbox-exec
   model_pair_override:
     strong: gemini-3.1-pro
-    weak: gemini-3.7-flash
+    weak: gemini-3.8-flash
   model_flag: "-m"
   env: {}

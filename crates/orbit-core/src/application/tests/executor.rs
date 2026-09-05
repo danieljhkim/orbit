@@ -327,3 +327,21 @@ fn shipped_claude_executor_pair_matches_model_defaults() {
     assert_eq!(pair.strong, CLAUDE_DEFAULT_STRONG);
     assert_eq!(pair.weak, CLAUDE_DEFAULT_WEAK);
 }
+
+/// The Gemini executor asset carries the Flash/default lane while the strong
+/// pin remains independently controlled by the centralized defaults.
+#[test]
+fn shipped_gemini_executor_pair_matches_model_defaults() {
+    use orbit_common::model_defaults::{GEMINI_PAIR_STRONG, GEMINI_PAIR_WEAK};
+
+    let (_name, yaml) = DEFAULT_EXECUTOR_FILES
+        .iter()
+        .find(|(name, _)| *name == "gemini")
+        .expect("gemini executor asset present");
+    let def = parse_default_executor("gemini", yaml).expect("parse gemini executor");
+    let pair = def
+        .model_pair_override()
+        .expect("gemini executor declares a model pair");
+    assert_eq!(pair.strong, GEMINI_PAIR_STRONG);
+    assert_eq!(pair.weak, GEMINI_PAIR_WEAK);
+}
