@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use orbit_common::OrbitError;
+use orbit_types::identity::ReasoningEffort;
 use orbit_types::telemetry::InvocationTrace;
 
 use crate::runtime::{AgentRuntime, ProviderRegistry, resolve_runtime};
@@ -26,6 +27,7 @@ pub enum ProviderOptions {
 pub struct AgentConfig {
     pub command: String,
     pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub provider_key: &'static str,
     pub provider_options: ProviderOptions,
 }
@@ -50,6 +52,7 @@ impl AgentConfig {
         Ok(Self {
             command,
             model: model.map(ToString::to_string),
+            reasoning_effort: None,
             provider_key: factory.key(),
             provider_options: factory.options_from_config(config)?,
         })
@@ -58,6 +61,22 @@ impl AgentConfig {
     pub fn with_model(mut self, model: Option<&str>) -> Self {
         self.model = model.map(ToString::to_string);
         self
+    }
+
+    /// Attach the effort resolved from a crew after verifying the selected
+    /// provider owns the corresponding CLI contract.
+    pub fn with_reasoning_effort(
+        mut self,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) -> Result<Self, OrbitError> {
+        if reasoning_effort.is_some() && self.provider_key != "codex" {
+            return Err(OrbitError::InvalidInput(format!(
+                "provider '{}' does not support configured reasoning effort",
+                self.provider_key
+            )));
+        }
+        self.reasoning_effort = reasoning_effort;
+        Ok(self)
     }
 }
 

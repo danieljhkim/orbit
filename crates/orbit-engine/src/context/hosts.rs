@@ -547,6 +547,7 @@ pub trait RuntimeHost: Send + Sync {
 pub struct CrewConfig {
     pub provider: Option<Provider>,
     pub model: Option<String>,
+    pub reasoning_effort: Option<orbit_types::identity::ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

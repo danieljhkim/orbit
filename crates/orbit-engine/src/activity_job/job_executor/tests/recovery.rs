@@ -213,6 +213,7 @@ fn recovery_agent_loop_uses_run_crew_config() {
     let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
         provider: Some(Provider::Gemini),
         model: Some(TEST_GEMINI_MODEL.to_string()),
+        reasoning_effort: None,
     });
     let ctx = recovery_exec_ctx(&host);
     let recovery = agent_loop_recovery_activity(recovery_agent_loop_spec(Provider::Claude, None));
@@ -237,6 +238,7 @@ fn step_failure_recovery_uses_the_lane_middleweight_config() {
         let host = RecoveryHost::empty().with_recovery_config(CrewConfig {
             provider: Some(provider),
             model: Some(model.to_string()),
+            reasoning_effort: None,
         });
         let ctx = recovery_exec_ctx(&host);
         let recovery = step_failure_recovery_agent_loop_activity(recovery_agent_loop_spec(
@@ -675,6 +677,7 @@ fn recovery_agent_loop_spec(provider: Provider, model: Option<&str>) -> AgentLoo
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: model.map(str::to_string),
+        reasoning_effort: None,
         max_iterations: 1,
         backend: None,
         provider,

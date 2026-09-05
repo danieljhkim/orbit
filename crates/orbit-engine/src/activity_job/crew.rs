@@ -5,6 +5,7 @@
 //! The host returns the selected assignment and this module applies it over the
 //! inline activity baseline field by field.
 
+use orbit_types::identity::ReasoningEffort;
 use orbit_types::workflow::activity_job::{AgentLoopSpec, Provider};
 use serde_json::Value;
 
@@ -17,6 +18,7 @@ use crate::context::RuntimeHost;
 pub struct ResolvedAgentSettings {
     pub provider: Provider,
     pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// A run-scoped restriction on the crews this run may launch [ORB-11242]. The
@@ -108,10 +110,12 @@ pub(crate) fn resolve_from_config(
     ResolvedAgentSettings {
         provider: config.provider.unwrap_or(inline.provider),
         model: config.model.clone().or_else(|| inline.model.clone()),
+        reasoning_effort: config.reasoning_effort.or(inline.reasoning_effort),
     }
 }
 
 pub fn apply_resolved_settings(spec: &mut AgentLoopSpec, resolved: &ResolvedAgentSettings) {
     spec.provider = resolved.provider;
     spec.model = resolved.model.clone();
+    spec.reasoning_effort = resolved.reasoning_effort;
 }

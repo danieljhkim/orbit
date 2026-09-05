@@ -340,6 +340,7 @@ impl RuntimeHost for TestHost {
         Ok(Some(CrewConfig {
             provider: Some(Provider::Codex),
             model: Some(TEST_CODEX_MODEL.to_string()),
+            reasoning_effort: None,
         }))
     }
 
@@ -373,6 +374,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec(
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: None,
+        reasoning_effort: None,
         max_iterations: 1,
         backend: None,
         provider: Provider::Codex,
@@ -399,6 +401,7 @@ pub(in crate::activity_job::cli_runner) fn test_agent_loop_spec_for(
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: None,
+        reasoning_effort: None,
         max_iterations: 1,
         backend: None,
         provider,

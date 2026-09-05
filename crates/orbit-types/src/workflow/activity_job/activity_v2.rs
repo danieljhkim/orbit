@@ -1,6 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::identity::ReasoningEffort;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -55,6 +56,11 @@ pub struct AgentLoopSpec {
     /// Optional model override (provider-specific name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Optional provider-specific reasoning effort resolved from the selected
+    /// crew. The agent configuration boundary rejects it for providers that
+    /// do not support the Codex effort contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
     /// Upper bound on loop iterations. **Inert.**
     ///
     /// It bound only the engine-driven HTTP loop, which was retired with the

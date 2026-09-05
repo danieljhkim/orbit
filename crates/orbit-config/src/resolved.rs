@@ -20,8 +20,10 @@ use orbit_common::model_defaults::{
 };
 use orbit_common::security::child_env::{allowlisted_child_env, inherited_child_env};
 use orbit_common::security::redaction::redact_home_dir;
-use orbit_types::identity::{Crew, CrewAssignment};
-use orbit_types::workflow::activity_job::{RETIRED_BACKEND_MIGRATION, check_retired_backend_value};
+use orbit_types::identity::{Crew, CrewAssignment, ReasoningEffort};
+use orbit_types::workflow::activity_job::{
+    Provider, RETIRED_BACKEND_MIGRATION, check_retired_backend_value,
+};
 
 use crate::ConfigRoots;
 use crate::layering::{load_layered_resolved, value_at_path};
@@ -236,6 +238,7 @@ fn crew_assignment(model: &str, provider: &str) -> CrewAssignment {
     CrewAssignment {
         model: model.to_string(),
         provider: provider.to_string(),
+        effort: None,
     }
 }
 
@@ -391,7 +394,40 @@ fn crew_assignment_from_raw(crew: &str, raw: &RawCrewEntry) -> Result<CrewAssign
     Ok(CrewAssignment {
         model: required_crew_field(crew, "model", raw.model.as_deref())?,
         provider: required_crew_field(crew, "provider", raw.provider.as_deref())?,
+        effort: crew_effort_from_raw(crew, raw.effort.as_deref(), raw.provider.as_deref())?,
     })
+}
+
+/// Validate the one provider-specific crew setting at config admission.
+///
+/// Codex maps these values directly to its documented
+/// `model_reasoning_effort` config key. Other Orbit CLI providers do not share
+/// that argument contract, so accepting the key for them would silently
+/// downgrade a configured request.
+fn crew_effort_from_raw(
+    crew: &str,
+    raw_effort: Option<&str>,
+    raw_provider: Option<&str>,
+) -> Result<Option<ReasoningEffort>, OrbitError> {
+    let Some(raw_effort) = raw_effort else {
+        return Ok(None);
+    };
+    let effort = raw_effort
+        .parse::<ReasoningEffort>()
+        .map_err(|error| OrbitError::InvalidInput(format!("[crews.{crew}].{error}")))?;
+    let provider = required_crew_field(crew, "provider", raw_provider)?;
+    let provider = Provider::resolve_name(&provider).map_err(|_| {
+        OrbitError::InvalidInput(format!(
+            "[crews.{crew}].effort requires provider = \"codex\"; provider '{provider}' is unsupported"
+        ))
+    })?;
+    if provider.provider != Provider::Codex {
+        return Err(OrbitError::InvalidInput(format!(
+            "[crews.{crew}].effort is supported only for provider = \"codex\"; '{}' cannot receive effort '{effort}'",
+            provider.provider
+        )));
+    }
+    Ok(Some(effort))
 }
 
 /// [ORB-10801] `[crews.<name>] backend` selected the agent execution backend.

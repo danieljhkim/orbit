@@ -3,6 +3,7 @@
 use super::*;
 
 use orbit_common::test_fixtures::TEST_CLAUDE_MODEL;
+use orbit_types::identity::ReasoningEffort;
 use orbit_types::workflow::activity_job::{AgentLoopSpec, OnDenial, Provider};
 use std::sync::Mutex;
 
@@ -100,6 +101,7 @@ fn inline_agent_loop_spec() -> AgentLoopSpec {
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: Some(TEST_CLAUDE_MODEL.to_string()),
+        reasoning_effort: None,
         max_iterations: 1,
         backend: None,
         provider: Provider::Claude,
@@ -139,6 +141,7 @@ fn config(provider: Provider, model: &str) -> CrewConfig {
     CrewConfig {
         provider: Some(provider),
         model: Some(model.to_string()),
+        reasoning_effort: None,
     }
 }
 
@@ -206,7 +209,14 @@ fn crew_resolution_does_not_apply_to_deterministic_specs() {
 fn system_crew_marker_routes_to_the_configured_system_crew() {
     let host = CrewHost::new([
         ("run-default", config(Provider::Claude, "run-model")),
-        ("system", config(Provider::Codex, "system-model")),
+        (
+            "system",
+            CrewConfig {
+                provider: Some(Provider::Codex),
+                model: Some("system-model".to_string()),
+                reasoning_effort: Some(ReasoningEffort::Max),
+            },
+        ),
     ])
     .with_system_crew("system");
     let ctx = exec_ctx(&host);
@@ -217,6 +227,7 @@ fn system_crew_marker_routes_to_the_configured_system_crew() {
         .expect("configured host returns an override");
     assert_eq!(overridden.provider, Provider::Codex);
     assert_eq!(overridden.model.as_deref(), Some("system-model"));
+    assert_eq!(overridden.reasoning_effort, Some(ReasoningEffort::Max));
     assert_eq!(host.observed(), vec!["system"]);
 }
 

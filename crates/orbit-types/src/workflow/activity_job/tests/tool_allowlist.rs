@@ -176,6 +176,7 @@ fn agent_loop_activity(
             tools,
             on_denial: OnDenial::Terminate,
             model: None,
+            reasoning_effort: None,
             max_iterations: 1,
             backend: None,
             provider: Provider::default(),
