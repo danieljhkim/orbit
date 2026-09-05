@@ -1080,6 +1080,46 @@
   {
     "active": true,
     "builtin": true,
+    "description": "Adjust how many tasks a running workspace drain keeps in flight, without replacing its run. The run ID, deadline, completion authorization, and already-dispatched children are preserved; a lower ceiling stops new admissions until enough children finish and cancels nothing.",
+    "enabled": true,
+    "name": "orbit.workflow.run.workers",
+    "parameters": [
+      {
+        "description": "Job run ID.",
+        "name": "id",
+        "param_type": "string",
+        "required": true
+      },
+      {
+        "description": "New ceiling on tasks in flight, from 1 to the ship job's own active-run limit.",
+        "name": "concurrency",
+        "param_type": "integer",
+        "required": true
+      },
+      {
+        "description": "Optional note recorded with the change.",
+        "name": "reason",
+        "param_type": "string",
+        "required": false
+      },
+      {
+        "description": "Apply only if the run's ceiling is still at this revision, so a concurrent adjustment is reported rather than overwritten.",
+        "name": "if_revision",
+        "param_type": "integer",
+        "required": false
+      },
+      {
+        "description": "Token for this workspace's exclusive claim, required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+        "name": "claim_token",
+        "param_type": "string",
+        "required": false
+      }
+    ],
+    "status": "active"
+  },
+  {
+    "active": true,
+    "builtin": true,
     "description": "Submit an explicit set of tasks to the ship workflow and return its durable run ID.",
     "enabled": true,
     "name": "orbit.workflow.ship",
