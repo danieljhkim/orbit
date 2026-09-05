@@ -36,8 +36,8 @@ fn built_in_crews_use_standard_model_specific_names() {
     assert_eq!(
         crews.keys().map(String::as_str).collect::<Vec<_>>(),
         vec![
-            "copilot", "cursor", "fable", "gemini", "grok", "luna", "opus", "sol", "sonnet",
-            "system", "terra"
+            "astra", "copilot", "cursor", "fable", "gemini", "grok", "luna", "opus", "sol",
+            "sonnet", "system", "terra"
         ]
     );
     for (name, provider, model) in [
@@ -47,7 +47,8 @@ fn built_in_crews_use_standard_model_specific_names() {
         ("sol", "codex", "gpt-5.6-sol"),
         ("terra", "codex", "gpt-5.6-terra"),
         ("luna", "codex", "gpt-5.6-luna"),
-        ("gemini", "gemini", "gemini-3.7-flash"),
+        ("astra", "codex", "gpt-6-astra"),
+        ("gemini", "gemini", "gemini-3.8-flash"),
         ("grok", "grok", "grok-4.6"),
         ("copilot", "copilot", "claude-sonnet-4.5"),
         ("cursor", "cursor", "gpt-5"),

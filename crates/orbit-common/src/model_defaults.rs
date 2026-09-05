@@ -50,23 +50,26 @@ pub const CODEX_TERRA_MODEL: &str = "gpt-5.6-terra";
 /// Codex model used by the standard Luna crew.
 pub const CODEX_LUNA_MODEL: &str = "gpt-5.6-luna";
 
-/// Default codex model (Terra remains the provider and QA default).
-pub const CODEX_DEFAULT_MODEL: &str = CODEX_TERRA_MODEL;
+/// Codex model used by the standard Astra crew and provider default.
+pub const CODEX_ASTRA_MODEL: &str = "gpt-6-astra";
+
+/// Default codex model (Astra is the provider default).
+pub const CODEX_DEFAULT_MODEL: &str = CODEX_ASTRA_MODEL;
 
 /// Default codex "weak" model used by the executor model pair.
 pub const CODEX_DEFAULT_WEAK: &str = "gpt-5.4-mini";
 
 /// Default gemini model for the provider-default map.
-pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3.7-flash";
+pub const GEMINI_DEFAULT_MODEL: &str = "gemini-3.8-flash";
 
 /// Default gemini model seeded into crew roles.
-pub const GEMINI_CREW_MODEL: &str = "gemini-3.7-flash";
+pub const GEMINI_CREW_MODEL: &str = "gemini-3.8-flash";
 
 /// Default gemini "strong" model used by the executor model pair.
 pub const GEMINI_PAIR_STRONG: &str = "gemini-3.1-pro";
 
 /// Default gemini "weak" model used by the executor model pair.
-pub const GEMINI_PAIR_WEAK: &str = "gemini-3.7-flash";
+pub const GEMINI_PAIR_WEAK: &str = "gemini-3.8-flash";
 
 /// Default Grok Build model (the canonical model listed by `grok models`).
 pub const GROK_DEFAULT_MODEL: &str = "grok-4.6";

@@ -153,7 +153,7 @@ fn default_crew_name(seed: &ConfigSeed) -> Option<&'static str> {
         .first()
         .map(|family| match *family {
             "claude" => "opus",
-            "codex" => "sol",
+            "codex" => "astra",
             "gemini" => "gemini",
             "grok" => "grok",
             "copilot" => "copilot",

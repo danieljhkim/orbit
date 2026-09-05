@@ -106,7 +106,7 @@ fn system_crew_prompt_offers_only_detected_cheap_tier_options() {
     assert!(transcript.contains("gpt-5.6-luna"));
     assert!(transcript.contains("sonnet"));
     assert!(transcript.contains("grok-4.6"));
-    assert!(transcript.contains("gemini-3.7-flash"));
+    assert!(transcript.contains("gemini-3.8-flash"));
     assert!(transcript.contains("System crew [1]: "));
     assert!(!transcript.contains("Custom"));
     assert!(!transcript.contains("gpt-5.6-sol"));
