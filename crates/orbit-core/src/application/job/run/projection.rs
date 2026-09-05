@@ -3,6 +3,18 @@
 use orbit_types::workflow::{JobRun, PipelineState};
 use serde_json::{Value, json};
 
+/// Durable provider/model evidence for one completed agent invocation.
+///
+/// This is intentionally separate from a run's resolved crew: the crew is the
+/// routing decision made before dispatch, while this evidence says what the
+/// provider actually reported after an activity ran.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActivityInvocationEvidence {
+    pub activity_id: String,
+    pub provider: String,
+    pub model: Option<String>,
+}
+
 /// Project a job run and its optional persisted state for operator-facing APIs.
 ///
 /// Child-dispatch lineage is historical and remains visible after a run reaches
@@ -23,6 +35,11 @@ pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
     let waiting_on_locks = state
         .and_then(|state| state.waiting_on_locks.as_ref())
         .filter(|values| !values.is_empty());
+    let requested_crew = run
+        .input
+        .as_ref()
+        .and_then(|input| input.get("crew"))
+        .and_then(Value::as_str);
 
     json!({
         "child_dispatches": child_dispatches,
@@ -42,8 +59,13 @@ pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
         "error_code": last.and_then(|step| step.error_code.as_deref()),
         "error_message": last.and_then(|step| step.error_message.as_deref()),
         "knowledge_metrics": run.knowledge_metrics,
+        "requested_crew": requested_crew,
         "resolved_crew": run.resolved_crew,
         "crew_model": run.crew_model,
+        "resolved_run_crew": {
+            "crew": run.resolved_crew,
+            "model": run.crew_model,
+        },
         "steps": run.steps.iter().map(|step| json!({
             "step_index": step.step_index,
             "target_type": step.target_type.to_string(),
@@ -59,4 +81,51 @@ pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
         })).collect::<Vec<_>>(),
         "created_at": run.created_at.to_rfc3339(),
     })
+}
+
+/// Add activity-level provider/model evidence to the stable job-run projection.
+///
+/// Missing evidence is explicit. It is not filled from the resolved run crew,
+/// because that would turn a requested route into a false claim about token
+/// usage. A deterministic workflow wrapper has no activity evidence of its
+/// own.
+pub fn job_run_to_json_with_activity_provenance(
+    run: &JobRun,
+    state: Option<&PipelineState>,
+    evidence: &[ActivityInvocationEvidence],
+) -> Value {
+    let mut value = job_run_to_json(run, state);
+    let activities = run
+        .steps
+        .iter()
+        .filter(|step| step.target_type.to_string() == "activity")
+        .map(|step| {
+            let invocations = evidence
+                .iter()
+                .filter(|record| record.activity_id == step.target_id)
+                .map(|record| {
+                    json!({
+                        "provider": record.provider,
+                        "model": record.model,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let status = if invocations.is_empty() {
+                if step.started_at.is_some() {
+                    "unavailable"
+                } else {
+                    "not_started"
+                }
+            } else {
+                "recorded"
+            };
+            json!({
+                "activity_id": step.target_id,
+                "actual_status": status,
+                "invocations": invocations,
+            })
+        })
+        .collect::<Vec<_>>();
+    value["activity_provenance"] = Value::Array(activities);
+    value
 }

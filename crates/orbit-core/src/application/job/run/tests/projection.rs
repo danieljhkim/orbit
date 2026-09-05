@@ -2,11 +2,14 @@
 
 use chrono::Utc;
 use orbit_types::workflow::{
-    ChildDispatch, ChildDispatchPhase, JobRun, JobRunState, PipelineState,
+    ChildDispatch, ChildDispatchPhase, JobRun, JobRunState, JobRunStep, JobTargetType,
+    PipelineState,
 };
 use serde_json::{Value, json};
 
-use super::super::projection::job_run_to_json;
+use super::super::projection::{
+    ActivityInvocationEvidence, job_run_to_json, job_run_to_json_with_activity_provenance,
+};
 
 fn test_run(state: JobRunState) -> JobRun {
     let now = Utc::now();
@@ -79,5 +82,91 @@ fn terminal_run_keeps_child_lineage_but_drops_waiting_reasons() {
     assert_eq!(
         value["child_dispatches"][0]["child_run_id"],
         json!("jrun-child")
+    );
+}
+
+#[test]
+fn projection_separates_requested_resolved_and_actual_activity_identity() {
+    let mut run = test_run(JobRunState::Success);
+    run.input = Some(json!({ "crew": "luna" }));
+    run.resolved_crew = Some("luna".to_string());
+    run.crew_model = Some("gpt-5.6-luna".to_string());
+    run.steps = vec![
+        JobRunStep {
+            step_index: 0,
+            target_type: JobTargetType::Activity,
+            target_id: "system".to_string(),
+            state: JobRunState::Success,
+            started_at: Some(Utc::now()),
+            finished_at: Some(Utc::now()),
+            duration_ms: Some(1),
+            exit_code: Some(0),
+            agent_response_json: None,
+            error_code: None,
+            error_message: None,
+        },
+        JobRunStep {
+            step_index: 1,
+            target_type: JobTargetType::Activity,
+            target_id: "implement".to_string(),
+            state: JobRunState::Success,
+            started_at: Some(Utc::now()),
+            finished_at: Some(Utc::now()),
+            duration_ms: Some(1),
+            exit_code: Some(0),
+            agent_response_json: None,
+            error_code: None,
+            error_message: None,
+        },
+        JobRunStep {
+            step_index: 2,
+            target_type: JobTargetType::Activity,
+            target_id: "queued".to_string(),
+            state: JobRunState::Pending,
+            started_at: None,
+            finished_at: None,
+            duration_ms: None,
+            exit_code: None,
+            agent_response_json: None,
+            error_code: None,
+            error_message: None,
+        },
+    ];
+
+    let value = job_run_to_json_with_activity_provenance(
+        &run,
+        None,
+        &[
+            ActivityInvocationEvidence {
+                activity_id: "system".to_string(),
+                provider: "claude".to_string(),
+                model: Some("fable".to_string()),
+            },
+            ActivityInvocationEvidence {
+                activity_id: "implement".to_string(),
+                provider: "codex".to_string(),
+                model: Some("gpt-5.6-luna".to_string()),
+            },
+        ],
+    );
+
+    assert_eq!(value["requested_crew"], "luna");
+    assert_eq!(value["resolved_run_crew"]["model"], "gpt-5.6-luna");
+    assert_eq!(value["activity_provenance"][0]["actual_status"], "recorded");
+    assert_eq!(
+        value["activity_provenance"][0]["invocations"][0]["provider"],
+        "claude"
+    );
+    assert_eq!(
+        value["activity_provenance"][0]["invocations"][0]["model"],
+        "fable"
+    );
+    assert_eq!(
+        value["activity_provenance"][1]["invocations"][0]["provider"],
+        "codex"
+    );
+    assert_eq!(
+        value["activity_provenance"][2]["actual_status"],
+        "not_started"
     );
 }

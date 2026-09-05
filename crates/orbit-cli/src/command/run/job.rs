@@ -1,5 +1,9 @@
-use orbit_core::application::job::job_run_to_json;
-use orbit_core::{JobRun, OrbitError, OrbitRuntime, PipelineInvokeResult, PipelineWaitEntry};
+use orbit_core::application::job::{
+    ActivityInvocationEvidence, job_run_to_json_with_activity_provenance,
+};
+use orbit_core::{
+    InvocationQuery, JobRun, OrbitError, OrbitRuntime, PipelineInvokeResult, PipelineWaitEntry,
+};
 use orbit_types::workflow::PipelineState;
 use serde_json::{Value, json};
 
@@ -250,7 +254,36 @@ impl Execute for JobResumeArgs {
 /// The CLI has historically exposed the claimed worker PID; the web API does
 /// not. Keep that contract difference at this presentation boundary.
 pub(crate) fn cli_job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
-    let mut value = job_run_to_json(run, state);
+    let evidence = Vec::new();
+    let mut value = job_run_to_json_with_activity_provenance(run, state, &evidence);
+    value["pid"] = json!(run.pid);
+    value
+}
+
+/// CLI run inspection enriches the compatible shared projection with durable
+/// invocation evidence. Older runs or unavailable telemetry stores remain
+/// inspectable; their activity status is explicitly `unavailable` instead of
+/// borrowing the requested run crew as an actual model claim.
+pub(crate) fn cli_job_run_to_json_with_activity_provenance(
+    runtime: &OrbitRuntime,
+    run: &JobRun,
+    state: Option<&PipelineState>,
+) -> Value {
+    let evidence = runtime
+        .invocation_records(InvocationQuery {
+            job_run_id: Some(run.run_id.clone()),
+            limit: 1_000,
+            ..InvocationQuery::default()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|record| ActivityInvocationEvidence {
+            activity_id: record.activity_id,
+            provider: record.agent,
+            model: record.model,
+        })
+        .collect::<Vec<_>>();
+    let mut value = job_run_to_json_with_activity_provenance(run, state, &evidence);
     value["pid"] = json!(run.pid);
     value
 }

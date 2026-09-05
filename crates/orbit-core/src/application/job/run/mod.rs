@@ -24,5 +24,7 @@ pub(crate) use actions::CANCELLATION_WORKER_EXIT_AUDIT;
 #[cfg(test)]
 pub(crate) use conflict::TERMINAL_OUTCOME_CONFLICT_CODE;
 pub(crate) use owner::{RunOwnerLiveness, run_owner_liveness};
-pub use projection::job_run_to_json;
+pub use projection::{
+    ActivityInvocationEvidence, job_run_to_json, job_run_to_json_with_activity_provenance,
+};
 pub use types::{JobRunCancelResult, JobRunListParams};

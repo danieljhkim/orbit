@@ -5,9 +5,11 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::security::redaction::redact_all;
-use orbit_core::application::job::job_run_to_json;
+use orbit_core::application::job::{
+    ActivityInvocationEvidence, job_run_to_json_with_activity_provenance,
+};
 use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
-use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
+use orbit_core::{InvocationQuery, JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
 
 use super::{
@@ -155,7 +157,21 @@ pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Va
     // it entirely, so the dashboard could not see the waiting reasons or the
     // child-dispatch lineage the CLI already showed.
     let state = runtime.read_run_state(&run.run_id).ok().flatten();
-    let mut full = job_run_to_json(run, state.as_ref());
+    let evidence = runtime
+        .invocation_records(InvocationQuery {
+            job_run_id: Some(run.run_id.clone()),
+            limit: 1_000,
+            ..InvocationQuery::default()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|record| ActivityInvocationEvidence {
+            activity_id: record.activity_id,
+            provider: record.agent,
+            model: record.model,
+        })
+        .collect::<Vec<_>>();
+    let mut full = job_run_to_json_with_activity_provenance(run, state.as_ref(), &evidence);
     // Reshape into `{run, steps}` per the dashboard contract: peel the
     // `steps` array off the flat `job_run_to_json` output.
     let stored_steps = full
