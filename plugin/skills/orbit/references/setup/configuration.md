@@ -1,8 +1,10 @@
 # Configuration
 
-What is tunable and where. The canonical, field-by-field reference is the
-project's `docs/CONFIG.md` — read that for exhaustive semantics. This covers the
-settings that change how work actually runs.
+What is tunable and where. `orbit config keys` and `orbit config show` expose
+the installed version's supported keys and effective values without a source
+checkout. This reference covers operating choices; for additional prose see
+the [published configuration reference](https://github.com/danieljhkim/orbit/blob/main/docs/CONFIG.md),
+checking its release against `orbit --version`.
 
 ## Where config lives
 
@@ -35,7 +37,7 @@ orbit config path
 `built-in`, or `environment`, with the file it came from. Reach for it before
 assuming a value.
 
-## Settable keys
+## Common settings
 
 | Key | Purpose |
 |---|---|
@@ -53,6 +55,12 @@ assuming a value.
 | `runtime.log_max_file_mb` | Roll the active log past N MiB. Must not exceed the total budget. |
 | `scoring.enabled` | Record scoreboard metrics for task runs. |
 | `pr.task_url_template` | URL template linking a task ID in PR descriptions. |
+
+Use `orbit config keys` to distinguish keys supported by `config set` from
+settings authored as TOML. Set workspace ship mode with
+`orbit workspace init --ship-mode pr|local`; verify the registered workspace
+with `orbit workspace show`. Base branch and ship mode govern source delivery,
+not task snapshot publication.
 
 ## Crews
 
@@ -103,15 +111,21 @@ A policy defines the filesystem profiles activities run under.
 ```bash
 orbit policy list
 orbit policy show <name>
-orbit policy check <path>        # dry-run a path against the active profile rules
+orbit policy check <profile> <path>        # dry-run a path against the active profile rules
 ```
 
 Shipped profiles: `reviewer` and `pure_compute` (read-only), `docs_writer`
 (scoped writes), `implementer` (workspace writes), `unrestricted`.
 
 The trap worth knowing: an activity that omits `fsProfile` falls back to
-unrestricted workspace writes. A read-only activity must declare its profile
+the `unrestricted` profile. A read-only activity must declare its profile
 explicitly — silence is not a safe default here.
+
+The operating-system boundary matters: macOS uses `sandbox-exec`; Linux uses
+Bubblewrap to enforce allowed writes while leaving host reads and network
+available. Unsupported platforms have only in-process filesystem guards. A
+read-only profile is not a claim of network isolation or private host reads.
+See [first-run.md](first-run.md) for the Linux prerequisite.
 
 ## Docs roots
 
@@ -122,3 +136,23 @@ roots = ["docs/"]
 
 Add more with `orbit docs add <path>` rather than hand-editing.
 → [docs-corpus.md](../docs-corpus.md)
+
+## Crew selection and actual execution
+
+For ship dispatch, an explicit run crew overrides `task.crew`, which overrides
+`workflow.default_crew`; environment/system fallbacks apply only when no higher
+selection exists. An override on one run does not rewrite the task's persisted
+crew. An empty crew string on task update clears that override. Discover actual
+crew names through the connected server's crew discovery when available, or
+inspect effective configuration; executor names are not a list of crew names.
+
+The task's `resolved_crew` and `crew_model`, when returned, describe the recorded
+run rather than today's default. Unsupported/unavailable explicitly selected
+providers fail rather than silently switching vendors. Provider login and model
+availability must be checked on the execution host before dispatch.
+
+Installed executors include provider-specific CLI integrations; a model name
+from another vendor does not change the executor's identity. For example,
+Copilot and Cursor keep their own authentication and sandbox grants regardless
+of the model they route to. Use the installed executor catalog and provider CLI
+help for supported model IDs instead of treating examples as a permanent list.

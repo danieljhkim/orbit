@@ -46,23 +46,25 @@ inspection commands, and does *not* claim the eventual outcome. Add `--wait` to
 block on it.
 
 Equivalent catalog commands exist as `orbit job list|show|run|replay|resume`.
-`replay` re-runs from step 0 against the current definition; `resume` continues
-an interrupted run from its persisted step checkpoints, skipping completed
-steps.
+`replay` re-runs from step 0 against the current definition; `resume` creates a new linked run using persisted checkpoints where
+resumable, preserving the original attempt. Read both run records; a resume is
+not a rewrite of failed history.
 
 ## The shipped pipelines
 
 | Job | Purpose |
 |---|---|
 | `task_pr_pipeline` | Implement a task in a worktree and open a PR. |
-| `task_local_pipeline` | Same, committing to the current branch without a PR. |
+| `task_local_pipeline` | Implement in a worktree and merge to the configured local base without a PR; optional push. |
 | `task_auto_pipeline` | Discover ready backlog tasks and ship them. |
 | `task_gate_pipeline` | Gated shipment with windowing and starvation handling. |
-| `task_pilot_pipeline` | Read-only preflight that fills validated `context_files`. |
+| `task_pilot_pipeline` | Read-only agent preflight plus a deterministic apply step that writes validated `context_files`. |
 | `task_triage_pipeline` | Diagnose tasks blocked by failed runs. |
 | `epic_pipeline` | Ship an epic and its descendants against one worktree. |
 | `workspace_ship_pipeline` / `workspace_auto_pipeline` | Workspace-scoped wrappers that resolve mode and base branch, then invoke the pipelines above. |
 | `auto_task_scheduler_pipeline` | Mint tasks from due auto-task definitions. |
+| `ci_failure_sweep_pipeline` | Collect GitHub Actions failures and file evidence-backed tasks, without implementing repairs. |
+| `dependabot_alert_sweep_pipeline` | Collect Dependabot/code/secret-scanning evidence and file remediation tasks. |
 | `worktree_gc_pipeline` | Reclaim settled worktrees. |
 
 Inspect any of them with `orbit job show <id>` before invoking — the step list is
@@ -102,3 +104,26 @@ group and the safe termination order.
   their place.
 - If Orbit's own tooling or diagnostics mislead you, record friction
   ([friction.md](friction.md)).
+
+## Custom jobs and resource overrides
+
+Use `orbit job show <id>` and `orbit activity show <id>` to inspect the effective
+installed definitions before changing them. Workspace resource overrides can
+shadow shipped global resources, so the binary's version alone does not prove
+which pipeline ran. `orbit workspace sync --check` reports managed-resource
+drift; customized files are preserved for deliberate reconciliation.
+
+A job uses `schemaVersion: 2`, `kind: Job`, `metadata.name`, and a `spec` with
+`default_input` and ordered `steps`. A simple step names an `id`, a
+`target: activity:<name>`, and `default_input`. Templates can reference
+`input.<name>` and `steps.<step-id>.output.<field>`. The shipped jobs demonstrate
+conditionals, loops, retries, and recovery activities. Copy an installed example
+that matches the intended operation; validate the effective catalog before
+submitting it. A routine can only target a job, not an activity directly.
+
+An agent step's brief, selected crew, filesystem profile, allowed tools, and
+completion envelope are separate contracts. A successful provider exit alone
+is insufficient when the step requires structured completion output. Keep
+required tools exact and minimal, and declare read-only filesystem profiles
+explicitly for inspection work. File meaningful failures rather than treating
+an empty/malformed agent response as successful completion.

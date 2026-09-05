@@ -20,7 +20,7 @@ use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_as
 /// competing for the same trigger. The ordering below mirrors the router's
 /// own reference tables, so the shipped surface reads the same in both
 /// places.
-pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 20] = [
+pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 22] = [
     (
         "orbit/SKILL.md",
         include_str!("../../assets/skills/orbit/SKILL.md"),
@@ -29,6 +29,10 @@ pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 20] = [
     (
         "orbit/references/concepts.md",
         include_str!("../../assets/skills/orbit/references/concepts.md"),
+    ),
+    (
+        "orbit/references/tool-surface.md",
+        include_str!("../../assets/skills/orbit/references/tool-surface.md"),
     ),
     (
         "orbit/references/task-authoring.md",
@@ -90,6 +94,10 @@ pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 20] = [
     (
         "orbit/references/setup/auto-tasks.md",
         include_str!("../../assets/skills/orbit/references/setup/auto-tasks.md"),
+    ),
+    (
+        "orbit/references/setup/publication.md",
+        include_str!("../../assets/skills/orbit/references/setup/publication.md"),
     ),
     (
         "orbit/references/setup/maintenance.md",

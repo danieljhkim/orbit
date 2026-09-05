@@ -4,7 +4,10 @@ Debug an Orbit job run without guessing. A failed run has multiple layers of evi
 
 ## Quick Triage
 
-Given a run id `<run_id>`:
+Given a run id `<run_id>`, first read it through the authoritative
+`orbit_workflow_run_show` (`id`, `workspace`) or the owning host's
+`orbit run show`. Record the owner host and workspace before inspecting files.
+The following raw-file sequence is a fallback when public readers omit evidence:
 
 1. Locate the run bundle:
 
@@ -100,7 +103,8 @@ git -C <workspace_path> log --oneline --decorate --graph --max-count=12 --all
 git -C <workspace_path> ls-remote origin refs/heads/<branch> refs/heads/<base_branch>
 ```
 
-Use `git merge-tree` or a dry-run rebase only to understand conflicts — don't resolve conflicts unless asked to fix the run, not merely investigate it.
+Use read-only `git merge-tree` to understand conflicts; Git rebase has no
+general dry-run mode — don't resolve conflicts unless asked to fix the run, not merely investigate it.
 
 ## Check Live Processes
 
@@ -111,7 +115,8 @@ ps -o pid,ppid,pgid,stat,etime,command -p <pid>
 ps -axo pid,ppid,pgid,stat,etime,command | rg '<run_id>|<workspace_path>|<task_id>'
 ```
 
-If asked to kill a run: match run id → task id(s) → `pid` → `pgid` → command; prefer process-group termination (`kill -TERM -<pgid>`, wait, verify with `ps ... | awk '$3==<pgid>'`); escalate to `kill -KILL -<pgid>` only if children remain and the human clearly asked to kill it; if the killed child belongs to a parent gate/auto run for the same task, inspect the parent and kill it only after verifying it owns the same task(s); report whether the run record updated to `failed`/`cancelled` or still says `running` despite no live process.
+If cancellation is authorized, prefer `orbit run cancel <run_id>` on the owning
+host and inspect its result. If process cleanup is still required: match run id → task id(s) → `pid` → `pgid` → command; prefer process-group termination (`kill -TERM -<pgid>`, wait, verify with `ps ... | awk '$3==<pgid>'`); escalate to `kill -KILL -<pgid>` only if children remain and the human clearly asked to kill it; if the killed child belongs to a parent gate/auto run for the same task, inspect the parent and kill it only after verifying it owns the same task(s); report whether the run record updated to `failed`/`cancelled` or still says `running` despite no live process.
 
 ## Report Format
 

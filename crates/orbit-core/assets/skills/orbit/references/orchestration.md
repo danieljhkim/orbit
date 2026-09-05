@@ -6,10 +6,21 @@ covers the choices an orchestrator makes on top of them.
 
 ## Entry points
 
+Use `orbit_workflow_ship` with explicit `task_ids`, `workspace`, and attribution
+when driving an authoritative MCP connection. Observe with
+`orbit_workflow_run_show/list`; resume eligible terminal work with
+`orbit_workflow_run_resume`, which returns a new linked run. These operations
+require operator authority. Managed leaf runs cannot dispatch follow-up runs.
+See [tool-surface.md](tool-surface.md).
+
+The CLI offers additional discovery modes below. Use them only where the user
+and workspace dispatch policy permit auto-discovery; creating tasks or enabling
+a filing routine does not itself authorize execution.
+
 ```bash
 orbit run ship                      # ship ready backlog tasks through the gated pipeline
 orbit run ship <task-id> ...        # ship exactly these
-orbit run ship --mode local         # commit to the current branch; no PR
+orbit run ship --mode local         # implement in a worktree, merge to the base; no PR
 orbit run auto --for 2h             # drain the backlog for a window
 orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
 orbit run ship-sweep --dry-run      # what every registered workspace would ship
@@ -56,7 +67,8 @@ workspace whose `context_files` is empty, and skips tasks tagged as needing no
 diff. Explicit `task_ids` audits exactly the named tasks, including ones that
 already have selectors.
 
-This is cheap relative to what it prevents: the pilot is read-only, runs five
+The pilot agent inspection is read-only; its deterministic apply step mutates
+validated task selectors. It runs five
 partitions concurrently, and returns selector proposals plus duplicate,
 already-landed, dependency, and conflicting-decision warnings. An enabled
 workspace routine may already run the zero-input job every few hours — an extra
@@ -98,8 +110,10 @@ failed run from quietly parking a task forever. → [automation.md](setup/automa
 
 ## Multi-operator workspaces
 
-When two operators or hosts could dispatch into the same workspace, one holds an
-exclusive claim and the other must present its token:
+When two operators act on the same authoritative workspace store, one can hold
+an exclusive claim and another must present its token. Claims do not coordinate
+independent stores on different machines. These examples present an existing
+token; they do not acquire a claim:
 
 ```bash
 orbit run ship --claim-token <token>
@@ -124,3 +138,17 @@ require `workflow.auto_ship = true`. Before enabling either:
 Task state, run state, and the durable stores are the handoff — never agent
 prose. An orchestrator that reads a summary paragraph instead of
 `orbit.task.show` or `orbit run show` is guessing.
+
+## Delivery and completion
+
+The normal task pipelines end in `review`. PR mode prepares a source branch and
+opens a PR; that is not evidence it merged. Local mode implements in an isolated
+worktree and fast-forwards the configured local base branch; the leaf job's
+`auto_push` input controls its optional push. Inspect the effective wrapper and
+child job inputs rather than assuming local mode means the current checkout was
+edited or a remote branch was updated.
+
+Record validation, commit, branch/PR, and run evidence, then follow the user's
+approval policy for completion. Do not infer a `--complete` flag or automatic
+merge behavior from planned features; discover the installed CLI/tool schema.
+Task snapshot publication is independent of source delivery and lifecycle.
