@@ -550,7 +550,18 @@ backend = "cli"
             .iter()
             .find(|(name, _)| *name == "triage_failed_runs")
             .expect("triage agent activity is seeded");
+        let workspace_yaml =
+            include_str!("../../../../.orbit/resources/activities/triage_failed_runs.yaml");
+        assert_eq!(
+            *yaml, workspace_yaml,
+            "shipped and workspace triage resources must remain byte-identical"
+        );
         let asset = load_activity_asset(yaml).expect("parse triage agent activity");
+        assert_eq!(
+            asset.spec.fs_profile.as_deref(),
+            Some("reviewer"),
+            "direct triage must not inherit unrestricted workspace writes"
+        );
         match asset.spec.spec {
             ActivityV2Spec::AgentLoop(spec) => {
                 assert!(!yaml.contains("\n  role:"));
