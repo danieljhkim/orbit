@@ -116,7 +116,12 @@ bounded partitions, and its apply step persists only selectors it validated.
 orbit job show task_pilot_pipeline
 orbit run job task_pilot_pipeline                                  # zero-input discovery
 orbit run job task_pilot_pipeline --input 'task_ids=["<id>","<id>"]' # audit exactly these
+orbit run job task_pilot_pipeline --input crew=luna                # override the pilot's crew for this run
 ```
+
+Crew selection here is `--input crew=<name>`, not a `--crew` flag — see
+[workflows.md](workflows.md#running-a-job) for the full contract and how it
+differs from an activity-level `system_crew` override.
 
 Zero-input mode discovers only `proposed`/`backlog` tasks in the invoking
 workspace whose `context_files` is empty, and skips tasks tagged as needing no
