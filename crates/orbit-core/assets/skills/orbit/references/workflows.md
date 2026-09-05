@@ -125,11 +125,12 @@ group and the safe termination order.
 
 ## Custom jobs and resource overrides
 
-Use `orbit job show <id>` and `orbit activity show <id>` to inspect the effective
-installed definitions before changing them. Workspace resource overrides can
-shadow shipped global resources, so the binary's version alone does not prove
-which pipeline ran. `orbit workspace sync --check` reports managed-resource
-drift; customized files are preserved for deliberate reconciliation.
+Use `orbit job show <id>` to inspect effective installed job definitions and
+`orbit activity list` to discover registered activities before changing them.
+Workspace resource overrides can shadow shipped global resources, so the
+binary's version alone does not prove which pipeline ran. `orbit workspace sync
+--check` reports managed-resource drift; customized files are preserved for
+deliberate reconciliation.
 
 A job uses `schemaVersion: 2`, `kind: Job`, `metadata.name`, and a `spec` with
 `default_input` and ordered `steps`. A simple step names an `id`, a
