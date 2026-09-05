@@ -3,6 +3,7 @@
 use crate::OrbitRuntime;
 
 mod actions;
+mod cancellation_race;
 mod conflict;
 mod owner;
 mod projection;
