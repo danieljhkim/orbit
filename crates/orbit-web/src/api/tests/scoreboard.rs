@@ -13,11 +13,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use chrono::{DateTime, Duration, Utc};
 use orbit_core::OrbitRuntime;
+use serde_json::json;
 use tower::ServiceExt;
 
+use super::super::scoreboard::{MetricsExtras, compute_metrics_extras, months_in_range};
 use super::super::*;
-use super::test_support::body_json;
+use super::test_support::{body_json, write_lines};
 
 async fn get_scoreboard(runtime: OrbitRuntime, query: Option<&str>) -> axum::response::Response {
     let uri = match query {
@@ -282,4 +285,277 @@ async fn scoreboard_reports_failure_incidents_beside_raw_failed_tool_calls() {
         "the incident states how much raw evidence it collapsed"
     );
     assert_eq!(agent["unexpected_failure_incidents"].as_u64(), Some(1));
+}
+
+// ORB-11200: `compute_metrics_extras` must scope retries/avg/p95 to the
+// scoreboard's own requested window instead of a fixed "current + prior
+// month" guess, and `months_in_range` must walk actual calendar months so an
+// early-month `now` doesn't skip the month in between.
+
+/// Writes one `MetricsEntry` JSONL line per `(year_month, ts, model,
+/// step_duration_ms, retry_count)` tuple, grouping same-month fixtures into a
+/// single file the reader can enumerate.
+fn write_metrics_entries(
+    runtime: &OrbitRuntime,
+    entries: &[(&str, DateTime<Utc>, &str, u64, u32)],
+) {
+    let mut by_month: std::collections::BTreeMap<&str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (month, ts, model, step_duration_ms, retry_count) in entries {
+        let line = json!({
+            "ts": ts.to_rfc3339(),
+            "job_run": "jrun-fixture",
+            "step": "implement",
+            "actor_identity": model,
+            "tool_invocations": 1,
+            "token_usage": 10,
+            "step_duration_ms": step_duration_ms,
+            "retry_count": retry_count,
+        })
+        .to_string();
+        by_month.entry(month).or_default().push(line);
+    }
+    for (month, lines) in by_month {
+        let dir = runtime
+            .data_root()
+            .join("state")
+            .join("diagnostics")
+            .join("metrics")
+            .join(month);
+        std::fs::create_dir_all(&dir).expect("create metrics month dir");
+        write_lines(&dir.join("fixture.jsonl"), &lines);
+    }
+}
+
+#[test]
+fn months_in_range_single_month_when_since_and_now_share_a_month() {
+    let since = DateTime::parse_from_rfc3339("2026-06-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let now = DateTime::parse_from_rfc3339("2026-06-15T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(months_in_range(since, now), vec!["2026-06".to_string()]);
+}
+
+/// Reproduces the original bug: 31 days before an early-March `now` lands in
+/// January, so a naive "current month + prior month" guess never reads
+/// February even though the window spans it.
+#[test]
+fn months_in_range_does_not_skip_february_on_early_march_dates() {
+    let now = DateTime::parse_from_rfc3339("2026-03-01T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let since = now - Duration::days(30);
+    assert_eq!(since.format("%Y-%m").to_string(), "2026-01");
+
+    assert_eq!(
+        months_in_range(since, now),
+        vec![
+            "2026-01".to_string(),
+            "2026-02".to_string(),
+            "2026-03".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn months_in_range_walks_a_leap_year_february() {
+    let since = DateTime::parse_from_rfc3339("2028-01-30T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let now = DateTime::parse_from_rfc3339("2028-03-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(
+        months_in_range(since, now),
+        vec![
+            "2028-01".to_string(),
+            "2028-02".to_string(),
+            "2028-03".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn months_in_range_spans_a_year_boundary() {
+    let since = DateTime::parse_from_rfc3339("2025-12-20T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let now = DateTime::parse_from_rfc3339("2026-01-05T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(
+        months_in_range(since, now),
+        vec!["2025-12".to_string(), "2026-01".to_string()]
+    );
+}
+
+/// Fixed timestamps (no wall-clock sleeps) with a record before, inside, and
+/// after each windowed range prove only the eligible record is counted.
+#[test]
+fn compute_metrics_extras_excludes_records_outside_the_requested_window() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let now = DateTime::parse_from_rfc3339("2026-03-15T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let since = now - Duration::hours(1);
+    let month = now.format("%Y-%m").to_string();
+
+    write_metrics_entries(
+        &runtime,
+        &[
+            // Before the window: excluded.
+            (
+                &month,
+                since - Duration::minutes(1),
+                "claude-opus-5",
+                9_000,
+                5,
+            ),
+            // Inside the window: the only eligible record.
+            (
+                &month,
+                since + Duration::minutes(1),
+                "claude-opus-5",
+                400,
+                2,
+            ),
+            // After "now" (future-dated / clock skew): excluded.
+            (&month, now + Duration::minutes(10), "claude-opus-5", 500, 9),
+        ],
+    );
+
+    let extras = compute_metrics_extras(&runtime, Some(since), now).expect("compute extras");
+    let claude = extras.get("claude-opus-5").expect("claude-opus-5 row");
+    assert_eq!(
+        claude,
+        &MetricsExtras {
+            avg_duration_ms: 400,
+            p95_duration_ms: 400,
+            retry_count: 2,
+        }
+    );
+}
+
+#[test]
+fn compute_metrics_extras_windows_1h_24h_7d_30d_each_include_only_the_inside_fixture() {
+    let now = DateTime::parse_from_rfc3339("2026-03-15T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    for (label, duration) in [
+        ("1h", Duration::hours(1)),
+        ("24h", Duration::hours(24)),
+        ("7d", Duration::days(7)),
+        ("30d", Duration::days(30)),
+    ] {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let since = now - duration;
+        let model = format!("claude-opus-5-{label}");
+        write_metrics_entries(
+            &runtime,
+            &[
+                (
+                    &since.format("%Y-%m").to_string(),
+                    since - Duration::minutes(1),
+                    &model,
+                    9_000,
+                    5,
+                ),
+                (
+                    &(since + (now - since) / 2).format("%Y-%m").to_string(),
+                    since + (now - since) / 2,
+                    &model,
+                    300,
+                    1,
+                ),
+                (
+                    &now.format("%Y-%m").to_string(),
+                    now + Duration::minutes(1),
+                    &model,
+                    500,
+                    9,
+                ),
+            ],
+        );
+
+        let extras = compute_metrics_extras(&runtime, Some(since), now).expect("compute extras");
+        let row = extras
+            .get(model.as_str())
+            .unwrap_or_else(|| panic!("{label}: expected a row for {model}"));
+        assert_eq!(
+            row.retry_count, 1,
+            "{label}: only the inside-window record should count"
+        );
+        assert_eq!(
+            row.avg_duration_ms, 300,
+            "{label}: avg must ignore outside records"
+        );
+        assert_eq!(
+            row.p95_duration_ms, 300,
+            "{label}: p95 must ignore outside records"
+        );
+    }
+}
+
+/// Lifetime (`since == None`) must enumerate every metrics partition on disk,
+/// not just the current and prior month, so records older than two months
+/// are still counted.
+#[test]
+fn compute_metrics_extras_lifetime_includes_partitions_older_than_two_months() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let now = DateTime::parse_from_rfc3339("2026-03-15T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let old_ts = DateTime::parse_from_rfc3339("2025-11-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    write_metrics_entries(&runtime, &[("2025-11", old_ts, "claude-opus-5", 200, 3)]);
+
+    let extras = compute_metrics_extras(&runtime, None, now).expect("compute extras");
+    let claude = extras.get("claude-opus-5").expect("claude-opus-5 row");
+    assert_eq!(claude.retry_count, 3);
+    assert_eq!(claude.avg_duration_ms, 200);
+}
+
+/// End-to-end: the HTTP handler must thread its parsed `?window=` and a
+/// single request `now` into `compute_metrics_extras`, so a record just
+/// outside a 1h window never reaches the response.
+#[tokio::test]
+async fn scoreboard_http_response_only_reflects_metrics_inside_the_requested_window() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let now = Utc::now();
+    let month = now.format("%Y-%m").to_string();
+    write_metrics_entries(
+        &runtime,
+        &[
+            (
+                &month,
+                now - Duration::hours(2),
+                "claude-opus-5-http",
+                9_000,
+                5,
+            ),
+            (
+                &month,
+                now - Duration::minutes(10),
+                "claude-opus-5-http",
+                400,
+                2,
+            ),
+        ],
+    );
+
+    let response = get_scoreboard(runtime, Some("window=1h")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let agent = &body["agents"]["claude-opus-5-http"];
+    assert_eq!(agent["retries"].as_i64(), Some(2));
+    assert_eq!(agent["avg_step_duration_ms"].as_i64(), Some(400));
+    assert_eq!(agent["p95_wall_clock_ms"].as_i64(), Some(400));
 }
