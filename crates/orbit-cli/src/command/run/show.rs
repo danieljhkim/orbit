@@ -5,10 +5,10 @@ use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, Execute, Payload};
 
-use super::job::cli_job_run_to_json;
+use super::job::cli_job_run_to_json_with_activity_provenance;
 use super::steps::{
-    filtered_steps, legacy_step_to_json, resolve_run, resolve_run_step, run_header_text,
-    run_header_text_with_state, step_record_payload, step_summary_table,
+    activity_provenance_lines, filtered_steps, legacy_step_to_json, resolve_run, resolve_run_step,
+    run_header_text, run_header_text_with_state, step_record_payload, step_summary_table,
 };
 
 #[derive(Args)]
@@ -56,8 +56,10 @@ pub(crate) fn run_show_payload(
     // of the Worker daemon, so this is the only place it is observable.
     let provider_processes = runtime.collect_run_provider_processes(&run.run_id)?;
 
+    let run_projection =
+        cli_job_run_to_json_with_activity_provenance(runtime, &run, state.as_ref());
     let doc = json!({
-        "run": cli_job_run_to_json(&run, state.as_ref()),
+        "run": run_projection,
         "pipeline_state": state,
         "provider_processes": provider_processes
             .iter()
@@ -74,6 +76,13 @@ pub(crate) fn run_show_payload(
             state.step_outputs.len(),
             state.updated_at.to_rfc3339(),
         ));
+    }
+    header.push_str(&activity_provenance_lines(&doc["run"]["activity_provenance"]).join("\n"));
+    if doc["run"]["activity_provenance"]
+        .as_array()
+        .is_some_and(|values| !values.is_empty())
+    {
+        header.push('\n');
     }
     header.push_str(&live_provider_process_lines(&provider_processes));
     header.push('\n');

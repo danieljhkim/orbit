@@ -38,6 +38,24 @@ orbit run trace <run_id>
 orbit run logs <run_id> --json
 ```
 
+### Verify model routing before reading logs
+
+`orbit run show <run_id> --json` separates three identities: `requested_crew`
+is the submitted `crew` input, `resolved_run_crew` is the run-level routing
+decision, and `activity_provenance` is durable provider/model evidence for
+each agent activity. The latter is the source for actual model routing; it can
+be mixed within one run. `actual_status: "not_started"` means no activity has
+begun, while `"unavailable"` means it began but no invocation evidence is
+available. Do not infer provider usage or token cost from the requested or
+resolved crew, and do not charge deterministic workflow wrapper steps to a
+model.
+
+Activities with `system_crew: true` are routed through `[workflow].system_crew`
+(which overwrites an activity `crew` during dispatch). Other activities use an
+explicit activity `crew` when present, otherwise the run's resolved crew.
+Check `activity_provenance` after execution to verify the effective route,
+especially after changing crew configuration.
+
 Step-scoped variants when the failing step is known: `orbit run show|logs|events <run_id> -s <step_id> --json`.
 
 If these commands fail or omit needed detail, fall back to files under `.orbit/state/` and mention the fallback in your report.
