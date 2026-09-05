@@ -75,8 +75,12 @@ orbit run job task_pilot_pipeline --input 'task_ids=["<id>","<id>"]' # audit exa
 
 Zero-input mode discovers only `proposed`/`backlog` tasks in the invoking
 workspace whose `context_files` is empty, and skips tasks tagged as needing no
-diff. Explicit `task_ids` audits exactly the named tasks, including ones that
-already have selectors.
+diff. It also excludes a task already named by the durable prepare checkpoint
+of an active pilot run and reports the owning run ID, so a later discovery run
+can inspect new work without repeating the expensive assessment. Explicit
+`task_ids` audits exactly the named tasks, including ones that already have
+selectors, but refuses an ID already prepared by an active run; inspect or
+resume the named run instead.
 
 The pilot agent inspection is read-only; its deterministic apply step mutates
 validated task selectors. It runs five
@@ -86,6 +90,15 @@ workspace routine may already run the zero-input job every few hours — an extr
 run before a large dispatch is still appropriate.
 The task-pilot pipeline never promotes tasks or dispatches them; promotion and
 shipping remain separate operator-authorized steps.
+
+Apply is isolated by partition. A stale task snapshot or malformed assessment
+leaves that whole partition untouched while independently valid partitions are
+still applied. The run then fails deliberately, and its durable apply output
+lists each partition as `applied`, `skipped_stale`, or `failed`, plus the exact
+task IDs actually applied. `orbit run show <run_id>` is therefore the recovery
+source of truth. Resuming the failed run reuses its successful prepare, pilot,
+and apply checkpoints (it does not rerun those agents); start a fresh zero-input
+pilot only for tasks that remain empty after reviewing the recorded outcomes.
 
 ## Keeping parallel runs off each other
 

@@ -14,18 +14,23 @@ use orbit_common::fs::selector::{
     anchor_path, canonical_selector_in_workspace, exists_in_workspace,
 };
 use orbit_engine::DispatchError;
+use orbit_store::contracts::JobRunQuery;
 use orbit_types::task::{Task, TaskStatus};
+use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
-use crate::adapter::engine_host::v2_host::ci_failure_admission;
-use crate::application::task::TaskUpdateParams;
+
+mod apply;
+
+pub(super) use apply::apply;
 
 const DEFAULT_MAX_PARTITION_SIZE: usize = 5;
 const HARD_MAX_PARTITION_SIZE: usize = 5;
 const DEFAULT_MAX_TASKS: usize = 50;
 const HARD_MAX_TASKS: usize = 500;
 const NO_DIFF_TAGS: [&str; 2] = ["no-diff-needed", "no-diff-expected"];
+const TASK_PILOT_JOB_ID: &str = "task_pilot_pipeline";
 
 pub(super) fn prepare(
     runtime: &OrbitRuntime,
@@ -49,6 +54,7 @@ pub(super) fn prepare(
     )?;
     let explicit_task_ids = string_array(input, "task_ids", action)?;
     let explicit_mode = !explicit_task_ids.is_empty();
+    let active_preparations = active_task_pilot_preparations(runtime, action, &workspace_root)?;
     let all_tasks = runtime
         .list_tasks()
         .map_err(|error| action_failed(action, format!("list workspace tasks: {error}")))?;
@@ -73,6 +79,18 @@ pub(super) fn prepare(
                         action,
                         format!("task {task_id} does not exist in the selected workspace"),
                     )
+                }).and_then(|task| {
+                    if let Some(run_ids) = active_preparations.get(task_id) {
+                        Err(action_failed(
+                            action,
+                            format!(
+                                "task {task_id} is already prepared by active task-pilot run(s) {}; inspect or resume that durable run instead of starting duplicate pilot work",
+                                run_ids.iter().cloned().collect::<Vec<_>>().join(", ")
+                            ),
+                        ))
+                    } else {
+                        Ok(task)
+                    }
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -90,6 +108,12 @@ pub(super) fn prepare(
             let reason = automatic_exclusion_reason(task);
             if let Some(reason) = reason {
                 excluded.push(json!({ "task_id": task.id, "reason": reason }));
+            } else if let Some(run_ids) = active_preparations.get(&task.id) {
+                excluded.push(json!({
+                    "task_id": task.id,
+                    "reason": "active_pilot_prepared",
+                    "prepared_by_run_ids": run_ids,
+                }));
             } else {
                 selected.push(task);
             }
@@ -135,299 +159,83 @@ pub(super) fn prepare(
     }))
 }
 
-pub(super) fn apply(
+fn active_task_pilot_preparations(
     runtime: &OrbitRuntime,
     action: &str,
-    input: &Value,
-) -> Result<Value, DispatchError> {
-    let workspace_root = requested_workspace_root(runtime, action, input)?;
-    let prepared = input
-        .get("prepared")
-        .and_then(Value::as_object)
-        .ok_or_else(|| action_failed(action, "`prepared` must be an object"))?;
-    let prepared_workspace = prepared
-        .get("workspace_path")
-        .and_then(Value::as_str)
-        .ok_or_else(|| action_failed(action, "prepared.workspace_path must be a string"))?;
-    if Path::new(prepared_workspace) != workspace_root {
-        return Err(action_failed(
-            action,
-            format!(
-                "prepared workspace {prepared_workspace} does not match active workspace {}",
-                workspace_root.display()
-            ),
-        ));
+    workspace_root: &Path,
+) -> Result<BTreeMap<String, BTreeSet<String>>, DispatchError> {
+    let mut prepared_by_task = BTreeMap::<String, BTreeSet<String>>::new();
+    for state in [
+        JobRunState::Pending,
+        JobRunState::Running,
+        JobRunState::Retrying,
+    ] {
+        let runs = runtime
+            .stores()
+            .jobs()
+            .list_job_runs_filtered(&JobRunQuery {
+                job_id: Some(TASK_PILOT_JOB_ID.to_string()),
+                state: Some(state),
+                terminal_only: false,
+                created_since: None,
+                limit: None,
+            })
+            .map_err(|error| {
+                action_failed(action, format!("list active task-pilot runs: {error}"))
+            })?;
+        for run in runs {
+            let run = runtime.show_job_run(&run.run_id).map_err(|error| {
+                action_failed(
+                    action,
+                    format!("reconcile active task-pilot run {}: {error}", run.run_id),
+                )
+            })?;
+            if run.state.is_terminal() {
+                continue;
+            }
+            let Some(state) = runtime.read_run_state(&run.run_id).map_err(|error| {
+                action_failed(
+                    action,
+                    format!("read active task-pilot run {} state: {error}", run.run_id),
+                )
+            })?
+            else {
+                continue;
+            };
+            let Some(task_ids) = state.step_outputs.iter().find_map(|(step_index, output)| {
+                (state.step_states.get(step_index) == Some(&JobRunState::Success))
+                    .then(|| prepared_task_ids(output, workspace_root))
+                    .flatten()
+            }) else {
+                continue;
+            };
+            for task_id in task_ids {
+                prepared_by_task
+                    .entry(task_id)
+                    .or_default()
+                    .insert(run.run_id.clone());
+            }
+        }
     }
-    let mode = prepared
-        .get("mode")
-        .and_then(Value::as_str)
-        .ok_or_else(|| action_failed(action, "prepared.mode must be a string"))?;
-    let expected_partitions = prepared
-        .get("partitions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| action_failed(action, "prepared.partitions must be an array"))?;
-    let prepared_tasks = prepared
-        .get("tasks")
-        .and_then(Value::as_array)
-        .ok_or_else(|| action_failed(action, "prepared.tasks must be an array"))?;
-    let results = input
-        .get("results")
-        .and_then(Value::as_array)
-        .ok_or_else(|| action_failed(action, "`results` must be an array"))?;
+    Ok(prepared_by_task)
+}
 
-    if results.len() != expected_partitions.len() {
-        return Err(action_failed(
-            action,
-            format!(
-                "expected {} task-pilot partition results, received {}",
-                expected_partitions.len(),
-                results.len()
-            ),
-        ));
+fn prepared_task_ids(output: &Value, workspace_root: &Path) -> Option<Vec<String>> {
+    let object = output.as_object()?;
+    let prepared_workspace = object.get("workspace_path")?.as_str()?;
+    if Path::new(prepared_workspace) != workspace_root
+        || !object.get("partitions")?.is_array()
+        || !object.get("tasks")?.is_array()
+        || !matches!(object.get("mode")?.as_str(), Some("automatic" | "explicit"))
+    {
+        return None;
     }
-
-    let prepared_before = prepared_tasks
+    object
+        .get("task_ids")?
+        .as_array()?
         .iter()
-        .map(|entry| {
-            let task_id = required_string(entry, "task_id", action)?;
-            let before = required_string_array(entry, "context_files_before", action)?;
-            Ok((task_id.to_string(), before))
-        })
-        .collect::<Result<BTreeMap<_, _>, DispatchError>>()?;
-
-    // Validate every partition and every selector before the first mutation.
-    // A malformed or failed partition therefore cannot partially apply the
-    // otherwise-valid partitions that happened to precede it.
-    let ci_sweep_filing = input
-        .get("ci_sweep_filing")
-        .filter(|value| !value.is_null());
-    let promotion_authorized = input
-        .get("promotion_authorized")
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| action_failed(action, "promotion_authorized must be a boolean"))
-        })
-        .transpose()?
-        .unwrap_or(false);
-    if ci_sweep_filing.is_some() && prepared_before.len() != 1 {
-        return Err(action_failed(
-            action,
-            "CI-sweep admission requires exactly one prepared task",
-        ));
-    }
-
-    let mut validated = Vec::with_capacity(prepared_before.len());
-    let mut seen_task_ids = BTreeSet::new();
-    for (position, (expected, result)) in expected_partitions.iter().zip(results).enumerate() {
-        let expected_index = expected
-            .get("partition_index")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                action_failed(
-                    action,
-                    format!("prepared.partitions[{position}].partition_index is invalid"),
-                )
-            })?;
-        let expected_ids = required_string_array(expected, "task_ids", action)?;
-        let result_object = result.as_object().ok_or_else(|| {
-            action_failed(
-                action,
-                format!("partition {expected_index} failed or returned no structured result"),
-            )
-        })?;
-        let result_index = result_object
-            .get("partition_index")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                action_failed(
-                    action,
-                    format!("partition result {position} is missing partition_index"),
-                )
-            })?;
-        if result_index != expected_index {
-            return Err(action_failed(
-                action,
-                format!(
-                    "partition result {position} reports index {result_index}, expected {expected_index}"
-                ),
-            ));
-        }
-        let result_ids = result_object
-            .get("task_ids")
-            .ok_or_else(|| action_failed(action, "`task_ids` must be an array"))
-            .and_then(|value| string_array_value(value, "task_ids", action))?;
-        if result_ids != expected_ids {
-            return Err(action_failed(
-                action,
-                format!("partition {expected_index} task_ids do not match the prepared partition"),
-            ));
-        }
-        let assessments = result_object
-            .get("tasks")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                action_failed(
-                    action,
-                    format!("partition {expected_index}.tasks must be an array"),
-                )
-            })?;
-        if assessments.len() != expected_ids.len() {
-            return Err(action_failed(
-                action,
-                format!(
-                    "partition {expected_index} returned {} task assessments for {} tasks",
-                    assessments.len(),
-                    expected_ids.len()
-                ),
-            ));
-        }
-        let assessments_by_id = assessments
-            .iter()
-            .map(|assessment| {
-                let task_id = required_string(assessment, "task_id", action)?;
-                Ok((task_id.to_string(), assessment))
-            })
-            .collect::<Result<BTreeMap<_, _>, DispatchError>>()?;
-        if assessments_by_id.len() != assessments.len() {
-            return Err(action_failed(
-                action,
-                format!("partition {expected_index} contains duplicate task assessments"),
-            ));
-        }
-
-        for task_id in expected_ids {
-            if !seen_task_ids.insert(task_id.clone()) {
-                return Err(action_failed(
-                    action,
-                    format!("task {task_id} appears in more than one partition result"),
-                ));
-            }
-            let assessment = assessments_by_id.get(&task_id).ok_or_else(|| {
-                action_failed(
-                    action,
-                    format!("partition {expected_index} omitted task {task_id}"),
-                )
-            })?;
-            let expected_before = prepared_before.get(&task_id).ok_or_else(|| {
-                action_failed(action, format!("task {task_id} was not in prepared.tasks"))
-            })?;
-            let reported_before =
-                required_string_array(assessment, "context_files_before", action)?;
-            if &reported_before != expected_before {
-                return Err(action_failed(
-                    action,
-                    format!(
-                        "task {task_id} context_files_before does not match the prepared snapshot"
-                    ),
-                ));
-            }
-            let current = runtime.get_task(&task_id).map_err(|error| {
-                action_failed(action, format!("reload task {task_id}: {error}"))
-            })?;
-            if current.context_files != *expected_before {
-                return Err(action_failed(
-                    action,
-                    format!(
-                        "task {task_id} context_files changed after preparation; refusing stale pilot output"
-                    ),
-                ));
-            }
-            let disposition = required_string(assessment, "disposition", action)?;
-            let after = required_string_array(assessment, "context_files_after", action)?;
-            validate_after_selectors(
-                action,
-                &task_id,
-                disposition,
-                assessment,
-                &after,
-                &workspace_root,
-            )?;
-            validate_recommendations(action, &task_id, assessment)?;
-            validated.push((
-                task_id,
-                expected_before.clone(),
-                after,
-                (*assessment).clone(),
-                current,
-            ));
-        }
-    }
-
-    if seen_task_ids.len() != prepared_before.len() {
-        return Err(action_failed(
-            action,
-            "partition results did not cover every prepared task",
-        ));
-    }
-
-    let mut task_results = Vec::with_capacity(validated.len());
-    let mut ci_sweep_admission = Vec::new();
-    for (task_id, before, after, mut assessment, current) in validated {
-        let changed = before != after;
-        let admission = ci_sweep_filing
-            .map(|filing| {
-                ci_failure_admission::assess(
-                    action,
-                    &task_id,
-                    &current,
-                    &assessment,
-                    &after,
-                    filing,
-                    promotion_authorized,
-                )
-            })
-            .transpose()?;
-        let promote = admission
-            .as_ref()
-            .is_some_and(|decision| decision["decision"] == "promote");
-        if changed || promote {
-            runtime
-                .update_task(
-                    &task_id,
-                    TaskUpdateParams {
-                        context_files: changed.then_some(after.clone()),
-                        status: promote.then_some(TaskStatus::Backlog),
-                        comment: promote.then(|| {
-                            "CI-sweep admission: task-pilot validated current relevance and selectors; promoted proposed repair to backlog."
-                                .to_string()
-                        }),
-                        ..TaskUpdateParams::default()
-                    },
-                )
-                .map_err(|error| {
-                    action_failed(
-                        action,
-                        format!("apply validated context_files for task {task_id}: {error}"),
-                    )
-                })?;
-        }
-        if let Value::Object(fields) = &mut assessment {
-            fields.insert("applied".to_string(), Value::Bool(changed));
-            if let Some(admission) = admission.clone() {
-                fields.insert("ci_sweep_admission".to_string(), admission);
-            }
-        }
-        if let Some(admission) = admission {
-            ci_sweep_admission.push(admission);
-        }
-        task_results.push(assessment);
-    }
-
-    Ok(json!({
-        "status": "success",
-        "mode": mode,
-        "workspace_path": workspace_root,
-        "discovery": {
-            "task_ids": prepared.get("task_ids").cloned().unwrap_or_else(|| json!([])),
-            "excluded": prepared.get("excluded").cloned().unwrap_or_else(|| json!([])),
-        },
-        "partition_decisions": expected_partitions,
-        "partition_count": expected_partitions.len(),
-        "failed_partitions": [],
-        "tasks": task_results,
-        "ci_sweep_admission": ci_sweep_admission,
-    }))
+        .map(|task_id| task_id.as_str().map(ToOwned::to_owned))
+        .collect()
 }
 
 fn automatic_exclusion_reason(task: &Task) -> Option<&'static str> {

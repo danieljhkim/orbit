@@ -6,9 +6,10 @@
 # excluding no-diff tasks. Explicit mode audits exactly the named workspace
 # tasks, including non-empty selectors.
 # Preparation never promotes or dispatches a task. Each read-only pilot
-# receives at most five tasks. The all-join makes any failed partition
-# fail the run before the deterministic apply step can execute. Apply normally
-# changes only context_files. A CI sweep may pass its exact filing record plus
+# receives at most five tasks. Agent dispatch failures still stop at the
+# all-join. Apply isolates stale or malformed assessments by partition, applies
+# every independently valid partition, then a guard fails the total run when
+# any partition did not apply. Apply normally changes only context_files. A CI sweep may pass its exact filing record plus
 # literal promotion authority; only then can apply promote a warning-free,
 # selector-backed proposed repair to backlog.
 #
@@ -78,3 +79,9 @@ spec:
         workspace_path: "{{ steps.prepare.output.workspace_path }}"
         promotion_authorized: "{{ input.promotion_authorized }}"
         ci_sweep_filing: "{{ input.ci_sweep_filing }}"
+
+    - id: require_apply_success
+      target: activity:pipeline_success_guard
+      default_input:
+        context: task-pilot partition apply
+        result: "{{ steps.apply.output }}"
