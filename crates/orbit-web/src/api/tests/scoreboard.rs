@@ -9,6 +9,7 @@
 // - schema_version is the v9 value (notable completions + coverage) with its
 //   separately-versioned managed-execution orchestration section
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -18,7 +19,10 @@ use orbit_core::OrbitRuntime;
 use serde_json::json;
 use tower::ServiceExt;
 
-use super::super::scoreboard::{MetricsExtras, compute_metrics_extras, months_in_range};
+use super::super::incidents::ActorFailureRollup;
+use super::super::scoreboard::{
+    MetricsExtras, apply_side_source_extras, compute_metrics_extras, months_in_range,
+};
 use super::super::*;
 use super::test_support::{body_json, write_lines};
 
@@ -558,4 +562,136 @@ async fn scoreboard_http_response_only_reflects_metrics_inside_the_requested_win
     assert_eq!(agent["retries"].as_i64(), Some(2));
     assert_eq!(agent["avg_step_duration_ms"].as_i64(), Some(400));
     assert_eq!(agent["p95_wall_clock_ms"].as_i64(), Some(400));
+}
+
+// ORB-11201: a side-source (metrics extras / denials / failure incidents)
+// read or query failure must surface as an explicit `unavailable` coverage
+// note plus `null` per-agent fields, never as an indistinguishable measured
+// zero. A source that succeeds — even with an empty result — still reports
+// true zeros.
+
+/// Forces a genuine, non-`InvalidInput` I/O error out of
+/// `compute_metrics_extras`'s lifetime path (`list_metrics_months`'s
+/// `fs::read_dir` over a plain file instead of a directory), proving the
+/// error actually propagates instead of being silently treated as "no
+/// partitions".
+#[test]
+fn compute_metrics_extras_surfaces_a_real_read_dir_failure() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let metrics_dir = runtime
+        .data_root()
+        .join("state")
+        .join("diagnostics")
+        .join("metrics");
+    std::fs::create_dir_all(metrics_dir.parent().expect("diagnostics dir"))
+        .expect("create diagnostics parent");
+    std::fs::write(&metrics_dir, b"not a directory").expect("block the metrics directory");
+
+    let result = compute_metrics_extras(&runtime, None, Utc::now());
+    assert!(
+        result.is_err(),
+        "read_dir over a blocking file must be a real error, not an empty partition list"
+    );
+}
+
+/// End-to-end: when the metrics log is unreadable, the scoreboard endpoint
+/// still returns 200 with the rest of the summary intact, but marks the
+/// metrics-derived fields `null` and the coverage note `unavailable` —
+/// while the independent denials/failure-incidents sources (which have no
+/// data to report) still come back as real, non-null zeros.
+#[tokio::test]
+async fn scoreboard_reports_metrics_extras_unavailable_not_zero_when_metrics_log_is_unreadable() {
+    let runtime = OrbitRuntime::in_memory().expect("build runtime");
+    let metrics_dir = runtime
+        .data_root()
+        .join("state")
+        .join("diagnostics")
+        .join("metrics");
+    std::fs::create_dir_all(metrics_dir.parent().expect("diagnostics dir"))
+        .expect("create diagnostics parent");
+    std::fs::write(&metrics_dir, b"not a directory").expect("block the metrics directory");
+
+    let response = get_scoreboard(runtime, None).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "a side-source failure must not fail the whole scoreboard request"
+    );
+    let body = body_json(response).await;
+
+    assert_eq!(
+        body["coverage"]["metrics_extras"]["availability"].as_str(),
+        Some("unavailable")
+    );
+    let claude = &body["agents"]["claude"];
+    assert!(
+        claude["avg_step_duration_ms"].is_null(),
+        "a failed metrics join must not report a measured zero"
+    );
+    assert!(claude["retries"].is_null());
+    assert!(claude["p95_wall_clock_ms"].is_null());
+
+    // Independent sources succeeded (nothing to read) and report true zeros.
+    assert_eq!(
+        body["coverage"]["denials"]["availability"].as_str(),
+        Some("observed")
+    );
+    assert_eq!(
+        body["coverage"]["failure_incidents"]["availability"].as_str(),
+        Some("observed")
+    );
+    assert_eq!(claude["denials"].as_i64(), Some(0));
+    assert_eq!(claude["failure_incidents"].as_i64(), Some(0));
+    assert_eq!(claude["unexpected_failure_incidents"].as_i64(), Some(0));
+    assert_eq!(claude["failure_incident_events"].as_i64(), Some(0));
+}
+
+/// Directly exercises the merge policy: a failed source (`None`) must
+/// produce `null` fields, while a succeeded-but-empty source (`Some` of an
+/// empty map) must produce real zeros. Deterministic and independent of any
+/// filesystem/SQLite failure injection.
+#[test]
+fn apply_side_source_extras_distinguishes_failed_source_from_true_zero() {
+    let mut agents = serde_json::Map::new();
+    agents.insert("claude".to_string(), json!({ "tasks_completed": 0 }));
+
+    let metrics_extras: BTreeMap<String, MetricsExtras> = BTreeMap::new();
+    let failure_rollup: BTreeMap<String, ActorFailureRollup> = BTreeMap::new();
+
+    apply_side_source_extras(
+        &mut agents,
+        Some(&metrics_extras), // succeeded, empty -> true zero
+        None,                  // failed -> null
+        Some(&failure_rollup), // succeeded, empty -> true zero
+    );
+
+    let claude = &agents["claude"];
+    assert_eq!(
+        claude["avg_step_duration_ms"],
+        json!(0),
+        "a succeeded-but-empty metrics join is a true zero"
+    );
+    assert_eq!(claude["retries"], json!(0));
+    assert_eq!(claude["p95_wall_clock_ms"], json!(0));
+    assert!(
+        claude["denials"].is_null(),
+        "a failed denials join must not report a measured zero"
+    );
+    assert_eq!(claude["failure_incidents"], json!(0));
+    assert_eq!(claude["unexpected_failure_incidents"], json!(0));
+    assert_eq!(claude["failure_incident_events"], json!(0));
+}
+
+/// When every side source fails, the metrics-only "surface a new agent" path
+/// must not fabricate a row: there is nothing observed to surface.
+#[test]
+fn apply_side_source_extras_adds_no_metrics_only_agent_when_metrics_source_failed() {
+    let mut agents = serde_json::Map::new();
+
+    apply_side_source_extras(&mut agents, None, None, None);
+
+    assert!(
+        agents.is_empty(),
+        "a failed metrics source has no rows to surface as new agents"
+    );
 }
