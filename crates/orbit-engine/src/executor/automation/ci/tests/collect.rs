@@ -72,6 +72,129 @@ fn separates_event_sha_current_head_and_actual_checkout_commit() {
 }
 
 #[test]
+fn checkout_identity_is_observed_from_the_middle_of_a_bounded_full_log() {
+    let checkout = "3333333333333333333333333333333333333333";
+    let full_log = format!(
+        "head\n{}\nci\tCheckout\tHEAD is now at {checkout}\n{}\ntail\n",
+        "x".repeat(500),
+        "y".repeat(500),
+    );
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log("10", true, &full_log);
+
+    let evidence = collect(
+        &queries,
+        &json!({
+            "integration_branch": "topic", "log_max_bytes": 64, "max_checkout_log_reads": 1,
+        }),
+    )
+    .expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert!(failure["log_truncated"].as_bool().is_some());
+    assert_eq!(failure["actual_checkout_shas"], json!([checkout]));
+    assert_eq!(failure["checkout_identity"]["state"], json!("observed"));
+    assert_eq!(
+        failure["checkout_identity"]["provenance"]["scope"],
+        json!("all")
+    );
+    assert_eq!(
+        failure["checkout_identity"]["provenance"]["source"],
+        json!("runner_log")
+    );
+}
+
+#[test]
+fn contradictory_checkout_steps_are_ambiguous_not_a_confident_identity() {
+    let first = "3333333333333333333333333333333333333333";
+    let second = "4444444444444444444444444444444444444444";
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log(
+            "10",
+            true,
+            &format!(
+                "ci\tCheckout\tHEAD is now at {first}\nci\tCheckout\tHEAD is now at {second}\n"
+            ),
+        );
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+    assert_eq!(failure["checkout_identity"]["state"], json!("ambiguous"));
+    assert_eq!(failure["actual_checkout_shas"], json!([first, second]));
+}
+
+#[test]
+fn pull_request_head_and_runner_merge_checkout_remain_separate() {
+    let merge = "5555555555555555555555555555555555555555";
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", OLD)
+        .with_pull_request(json!({
+            "number": 12,
+            "url": "https://github.com/acme/orbit/pull/12",
+            "head_branch": "feature-x",
+            "reported_head_sha": HEAD,
+        }))
+        .with_runs(vec![vec![run_on_branch(
+            10,
+            "ci",
+            "feature-x",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log(
+            "10",
+            true,
+            &format!("ci\tCheckout\tHEAD is now at {merge}\n"),
+        );
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+    assert_eq!(failure["ref_kind"], json!("pull_request"));
+    assert_eq!(failure["event_reported_head_sha"], json!(HEAD));
+    assert_eq!(failure["current_ref_head_sha"], json!(HEAD));
+    assert_eq!(failure["actual_checkout_shas"], json!([merge]));
+    assert_eq!(failure["checkout_identity"]["state"], json!("observed"));
+}
+
+#[test]
 fn latest_non_failing_run_supersedes_older_failures_on_the_same_head() {
     let queries = FakeQueries::authenticated()
         .with_head("topic", HEAD)

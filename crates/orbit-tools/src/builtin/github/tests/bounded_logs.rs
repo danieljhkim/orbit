@@ -1,7 +1,9 @@
 //! Bounding and redaction of runner-log excerpts, plus the checkout-evidence
 //! scan that keeps the tested commit distinct from a run's reported head SHA.
 
-use crate::builtin::github::{bound_log_text, scan_checkout_evidence};
+use crate::builtin::github::{
+    MAX_CHECKOUT_LOG_SCAN_BYTES, StreamedLogCollector, bound_log_text, scan_checkout_evidence,
+};
 
 #[test]
 fn a_short_log_is_returned_whole_and_unmarked() {
@@ -175,4 +177,39 @@ fn checkout_evidence_caps_and_dedups_commits() {
     unique.dedup();
     assert_eq!(unique.len(), evidence.commits.len());
     assert_eq!(evidence.commits[0], format!("{:040x}", 0));
+}
+
+#[test]
+fn streaming_log_finds_middle_checkout_without_retaining_it_in_the_excerpt() {
+    let sha = "2d773a649844b168c5cfce4c80feadb8b025bb69";
+    let mut collector = StreamedLogCollector::new(96, 40);
+    collector.push(b"head-marker\n");
+    collector.push(&vec![b'x'; 400]);
+    collector.push(format!("\nsetup\tCheckout\tHEAD is now at {sha}\n").as_bytes());
+    collector.push(&vec![b'y'; 400]);
+    collector.push(b"\ntail-marker\n");
+    let log = collector.finish();
+
+    assert!(log.truncated);
+    assert!(log.text.contains("head-marker"));
+    assert!(log.text.contains("tail-marker"));
+    assert!(
+        !log.text.contains(sha),
+        "checkout belongs in evidence, not excerpt"
+    );
+    assert_eq!(log.checkout_evidence.commits, [sha]);
+    assert!(log.checkout_evidence.complete);
+}
+
+#[test]
+fn streaming_log_marks_identity_incomplete_after_the_hard_scan_limit() {
+    let sha = "2d773a649844b168c5cfce4c80feadb8b025bb69";
+    let mut collector = StreamedLogCollector::new(64, 40);
+    collector.push(&vec![b'x'; MAX_CHECKOUT_LOG_SCAN_BYTES]);
+    collector.push(format!("\nsetup\tCheckout\tHEAD is now at {sha}\n").as_bytes());
+    let log = collector.finish();
+
+    assert!(log.checkout_evidence.source_truncated);
+    assert!(!log.checkout_evidence.complete);
+    assert!(log.checkout_evidence.commits.is_empty());
 }

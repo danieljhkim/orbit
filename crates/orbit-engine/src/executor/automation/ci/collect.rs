@@ -618,6 +618,7 @@ fn investigate<Q: CiQueries + ?Sized>(
             failure["actual_checkout_shas"] = json!(log.checkout_commits);
             failure["checkout_evidence"] = json!(log.checkout_evidence);
             failure["checkout_evidence_scope"] = json!("failed");
+            set_checkout_identity(failure, "failed", &log);
             // `gh` can succeed with empty stdout when the run's logs are gone
             // (retention). That is not a captured excerpt; record it so the
             // filed task can say why the block is empty.
@@ -649,7 +650,11 @@ fn investigate<Q: CiQueries + ?Sized>(
     let needs_checkout = failure
         .get("actual_checkout_shas")
         .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty);
+        .is_none_or(Vec::is_empty)
+        || failure
+            .get("checkout_evidence_complete")
+            .and_then(Value::as_bool)
+            != Some(true);
     if !needs_checkout {
         failure["investigated"] = json!(retryable_errors.len() == errors_before);
         return;
@@ -672,7 +677,16 @@ fn investigate<Q: CiQueries + ?Sized>(
             failure["actual_checkout_shas"] = json!(log.checkout_commits);
             failure["checkout_evidence"] = json!(log.checkout_evidence);
             failure["checkout_evidence_scope"] = json!("all");
-            if failure
+            set_checkout_identity(failure, "all", &log);
+            if !log.checkout_evidence_complete {
+                push_retryable_error(
+                    retryable_errors,
+                    "registration",
+                    "checkout_evidence",
+                    failure.get("run_id"),
+                    "checkout evidence scan reached its hard limit; actual checkout identity is incomplete",
+                );
+            } else if failure
                 .get("actual_checkout_shas")
                 .and_then(Value::as_array)
                 .is_none_or(Vec::is_empty)
@@ -698,6 +712,32 @@ fn investigate<Q: CiQueries + ?Sized>(
         }
     }
     failure["investigated"] = json!(retryable_errors.len() == errors_before);
+}
+
+fn set_checkout_identity(failure: &mut Value, scope: &str, log: &super::query::RunLog) {
+    let state = if !log.checkout_evidence_complete {
+        "incomplete"
+    } else {
+        match log.checkout_commits.len() {
+            0 => "missing",
+            1 => "observed",
+            _ => "ambiguous",
+        }
+    };
+    failure["checkout_evidence_complete"] = json!(log.checkout_evidence_complete);
+    failure["checkout_evidence_scanned_bytes"] = json!(log.checkout_evidence_scanned_bytes);
+    failure["checkout_evidence_source_truncated"] = json!(log.checkout_evidence_source_truncated);
+    failure["checkout_identity"] = json!({
+        "state": state,
+        "observed_shas": log.checkout_commits,
+        "provenance": {
+            "source": "runner_log",
+            "scope": scope,
+            "complete": log.checkout_evidence_complete,
+            "scanned_bytes": log.checkout_evidence_scanned_bytes,
+            "source_truncated": log.checkout_evidence_source_truncated,
+        },
+    });
 }
 
 fn push_retryable_error(

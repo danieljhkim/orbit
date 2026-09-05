@@ -57,5 +57,7 @@ pub use macos_sandbox::{
     sandbox_exec_unavailable_message, spawn_under_macos_sandbox,
 };
 pub use result::ExecutionResult;
-pub use runner::{EnvironmentMode, ExecRequest, StdinMode, run_process};
+pub use runner::{
+    EnvironmentMode, ExecRequest, StdinMode, run_process, run_process_streaming_stdout,
+};
 pub use sandbox::{NoSandbox, Sandbox};

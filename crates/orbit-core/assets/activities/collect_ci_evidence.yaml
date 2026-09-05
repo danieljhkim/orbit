@@ -12,7 +12,10 @@ spec:
     rather than assuming branch names; separates the event-reported SHA, the
     ref's current head, and the commit the runner actually checked out; and
     reports every bound it hit in `truncation` rather than silently returning
-    less. Workflow runs are listed repository-wide in one query and exactly
+    less. Checkout identity is extracted while the full runner-log stream is
+    drained, before the human excerpt is truncated; extraction scans at most
+    8 MiB per log and records incomplete evidence rather than guessing.
+    Workflow runs are listed repository-wide in one query and exactly
     the latest run of each workflow is authoritative, ordered by creation time
     then run ID. Discovery or investigation failures are bounded, redacted,
     and emitted in `retryable_errors`; the filing step rejects such a snapshot
