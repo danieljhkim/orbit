@@ -108,7 +108,7 @@ fn skill_list_renders_one_line_per_skill() {
     let json = workspace.run(&["skill", "list", "--json"], "skill list JSON");
     let skills: Value = serde_json::from_slice(&json.stdout).expect("skill list JSON");
     let expected = skills.as_array().expect("skill array").len();
-    // Orbit ships one skill whose references load on demand, so the catalog is
+    // Each shipped skill's references load on demand, so the catalog is
     // deliberately small — the invariant under test is one line per record, not
     // the record count.
     assert!(
