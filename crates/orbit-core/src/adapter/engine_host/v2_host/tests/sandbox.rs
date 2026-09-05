@@ -94,6 +94,60 @@ fn linux_child_runtime_grants_do_not_include_global_workspace_layout() {
     }
 }
 
+/// [ORB-11259] Implementer sandboxes receive a language-neutral host cache
+/// write root; reviewer profiles do not. The global registry root itself
+/// stays denied.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_implementer_gains_host_cache_root_reviewer_does_not() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    seed_executor(
+        &runtime,
+        "claude",
+        Some(orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap),
+    );
+
+    let global = runtime
+        .paths()
+        .global_dir
+        .canonicalize()
+        .unwrap_or_else(|_| runtime.paths().global_dir.clone());
+    let cache = global.join("cache").display().to_string();
+
+    let writer = runtime
+        .resolve_executor_sandbox("claude", None, Some(&repo_root))
+        .expect("resolve implementer sandbox")
+        .expect("descriptor");
+    assert!(
+        writer.fs_profile.modify.iter().any(|entry| entry == &cache),
+        "implementer must grant host cache {cache}: {:?}",
+        writer.fs_profile.modify
+    );
+    assert!(
+        !writer
+            .fs_profile
+            .modify
+            .iter()
+            .any(|entry| entry == &global.display().to_string()),
+        "host cache grant must not widen to the whole global registry: {:?}",
+        writer.fs_profile.modify
+    );
+
+    let reviewer = runtime
+        .resolve_executor_sandbox("claude", Some("reviewer"), Some(&repo_root))
+        .expect("resolve reviewer sandbox")
+        .expect("descriptor");
+    assert!(
+        !reviewer
+            .fs_profile
+            .modify
+            .iter()
+            .any(|entry| entry == &cache),
+        "reviewer must not gain the host cache write root: {:?}",
+        reviewer.fs_profile.modify
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn direct_reviewer_profile_does_not_gain_workspace_runtime_writes() {
@@ -476,6 +530,7 @@ fn resolve_executor_sandbox_appends_gemini_orbit_runtime_roots_without_home_real
         format!("{global}/state/audit/**"),
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
+        format!("{global}/cache/**"),
         format!("{workspace_orbit}/tasks/**"),
         format!("{workspace_orbit}/frictions/**"),
         format!("{workspace_orbit}/state/audit/**"),

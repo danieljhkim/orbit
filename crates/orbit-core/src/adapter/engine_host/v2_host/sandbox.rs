@@ -227,6 +227,10 @@ fn append_orbit_child_runtime_write_roots(
         format!("{global}/state/audit/**"),
         format!("{global}/orbit.db*"),
         format!("{global}/tasks/**"),
+        // Language-neutral host cache seam shared across worktrees. Not an
+        // activity-tool store and not a shared Cargo target directory.
+        // [ORB-11259]
+        format!("{global}/cache/**"),
         format!("{workspace}/tasks/**"),
         format!("{workspace}/frictions/**"),
         format!("{workspace}/state/audit/**"),
@@ -302,6 +306,14 @@ fn append_linux_runtime_write_roots(
             append_unique_modify_root(resolved, file.display().to_string());
         }
     }
+
+    // Language-neutral host cache for toolchain artifacts shared across
+    // worktrees (compiler caches, etc.). Implementer-only so read-only
+    // profiles stay non-writers. Not a workspace `.orbit` path and not a
+    // shared Cargo target directory. [ORB-11259]
+    let host_cache = global.join("cache");
+    ensure_owned_directory(&host_cache)?;
+    append_unique_modify_root(resolved, host_cache.display().to_string());
 
     Ok(())
 }
