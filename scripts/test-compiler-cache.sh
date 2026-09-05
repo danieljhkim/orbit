@@ -95,25 +95,22 @@ HOME="$HOME" "$ROOT/scripts/compiler-cache.sh" status >/dev/null
 
 # 6. When the Linux stable mounts alias this checkout, argv paths are rewritten.
 fake_tgt="$TMP/stable-target"
-mkdir -p "$fake_tgt" /tmp/orbit-workspace
-ln -s "$ROOT/Cargo.toml" /tmp/orbit-workspace/Cargo.toml
-ln -sfn "$fake_tgt" /tmp/orbit-build
-cleanup_stable() {
-  rm -f /tmp/orbit-workspace/Cargo.toml
-  rmdir /tmp/orbit-workspace 2>/dev/null || true
-  rm -f /tmp/orbit-build
-}
-trap 'cleanup_stable; rm -rf "$TMP"' EXIT
+stable_src="$TMP/orbit-workspace"
+stable_tgt="$TMP/orbit-build"
+mkdir -p "$fake_tgt" "$stable_src"
+ln -s "$ROOT/Cargo.toml" "$stable_src/Cargo.toml"
+ln -s "$fake_tgt" "$stable_tgt"
+export ORBIT_COMPILER_CACHE_STABLE_SRC="$stable_src"
+export ORBIT_COMPILER_CACHE_STABLE_TGT="$stable_tgt"
 export FAKE_SCCACHE_LOG="$TMP/sccache-rewrite.log"
 export FAKE_SCCACHE_ENV="$TMP/sccache-rewrite.env"
 export FAKE_RUSTC_LOG="$TMP/rustc-rewrite.log"
 export CARGO_TARGET_DIR="$fake_tgt"
 rm -f "$FAKE_SCCACHE_LOG" "$FAKE_SCCACHE_ENV" "$FAKE_RUSTC_LOG"
 "$WRAPPER" "$TMP/bin/rustc" --out-dir "$fake_tgt/debug" "$ROOT/crates/orbit-types/src/lib.rs"
-grep -Fq "/tmp/orbit-build/debug" "$FAKE_SCCACHE_LOG" || fail "out-dir should rewrite onto the stable build mount"
-grep -Fq "/tmp/orbit-workspace/crates/orbit-types/src/lib.rs" "$FAKE_SCCACHE_LOG" || fail "source path should rewrite onto the stable workspace mount"
-cleanup_stable
-trap 'rm -rf "$TMP"' EXIT
+grep -Fq "$stable_tgt/debug" "$FAKE_SCCACHE_LOG" || fail "out-dir should rewrite onto the stable build mount"
+grep -Fq "$stable_src/crates/orbit-types/src/lib.rs" "$FAKE_SCCACHE_LOG" || fail "source path should rewrite onto the stable workspace mount"
 unset CARGO_TARGET_DIR
+unset ORBIT_COMPILER_CACHE_STABLE_SRC ORBIT_COMPILER_CACHE_STABLE_TGT
 
 printf 'test-compiler-cache: ok\n'
