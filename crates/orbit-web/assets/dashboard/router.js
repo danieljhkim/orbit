@@ -41,7 +41,7 @@ function markWorkspaceSelectorScope(fleetWide) {
 // being diagnostics-shaped, now routes as `#diagnostics/scoreboard`.
 const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];
 const DIAG_SUBTABS = ["runs", "metrics", "errors", "incidents", "reliability", "scoreboard"];
-const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];
+const OPERATIONS_SUBTABS = ["routines", "auto-tasks", "auto-drain"];
 // ORB-10444/ORB-10588: subtabs that replace the two-column diagnostics layout
 // with their own full-width <main>, keyed by the element they reveal.
 const DIAG_FULL_WIDTH_MAINS = {
@@ -151,8 +151,10 @@ function setOperationsSubtabImpl(ctx, name) {
   }
   const routines = $("operations-routines-main");
   const autoTasks = $("operations-auto-tasks-main");
+  const autoDrain = $("operations-auto-drain-main");
   if (routines) routines.hidden = name !== "routines";
   if (autoTasks) autoTasks.hidden = name !== "auto-tasks";
+  if (autoDrain) autoDrain.hidden = name !== "auto-drain";
 }
 
 function setKnowledgeSubtabImpl(ctx, name) {

@@ -4147,7 +4147,7 @@
         grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
         align-items: start;
       }
-      .operations-auto-tasks-layout { grid-template-columns: minmax(0, 1fr); }
+      .operations-auto-tasks-layout, .operations-auto-drain-layout { grid-template-columns: minmax(0, 1fr); }
       body.operations-active { height: auto; min-height: 100vh; overflow-y: auto; }
       .operations-layout .panel { min-width: 0; }
       .tab-pane[data-tab="operations"] .subtabs { border-bottom: 1px solid var(--border); }
@@ -4159,7 +4159,7 @@
       .operation-feedback.pending { color: var(--priority-medium); }
       .operation-feedback.success { color: var(--state-success); }
       .operation-feedback.error { color: var(--state-failed); }
-      #routines-body, #clock-body, #auto-tasks-body { padding: 12px; background: var(--bg); }
+      #routines-body, #clock-body, #auto-tasks-body, #auto-drain-body { padding: 12px; background: var(--bg); }
       .operation-card {
         padding: 12px; margin-bottom: 10px; border: 1px solid var(--border);
         border-radius: 4px; background: var(--bg-elev);
