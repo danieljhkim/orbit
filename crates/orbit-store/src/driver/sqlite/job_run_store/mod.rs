@@ -7,7 +7,7 @@ use orbit_common::{NotFoundKind, OrbitError};
 use orbit_types::identity::Crew;
 use orbit_types::workflow::{
     JobRun, JobRunStartOutcome, JobRunState, JobRunStep, JobTargetType, KnowledgeRunMetrics,
-    PipelineState, RunEvent,
+    PipelineState, RunEvent, RunStateUpdate,
 };
 use rusqlite::TransactionBehavior;
 
@@ -358,6 +358,15 @@ impl JobRunStoreBackend for SqliteJobRunStore {
         self.store
             .write_job_run_state_for_workspace(&self.workspace_id, run_id, state)
     }
+
+    fn update_run_state(
+        &self,
+        run_id: &str,
+        update: &mut dyn FnMut(JobRunState, &mut PipelineState) -> Result<(), OrbitError>,
+    ) -> Result<RunStateUpdate, OrbitError> {
+        self.store
+            .update_job_run_state_for_workspace(&self.workspace_id, run_id, update)
+    }
 }
 
 impl Store {
@@ -565,6 +574,59 @@ impl Store {
             ));
         }
         Ok(())
+    }
+
+    /// [ORB-11253] Apply `update` to a run's pipeline state, reading the run's
+    /// state and its checkpoint blob inside the same immediate write
+    /// transaction that persists the result.
+    ///
+    /// `IMMEDIATE` takes the write lock at BEGIN rather than at first write, so
+    /// two callers serialize here instead of racing between their own read and
+    /// write. An `Err` from `update` — the shape both a refused terminal run
+    /// and a lost compare-and-set take — propagates before the commit, leaving
+    /// the stored state untouched.
+    pub fn update_job_run_state_for_workspace(
+        &self,
+        workspace_id: &str,
+        run_id: &str,
+        update: &mut dyn FnMut(JobRunState, &mut PipelineState) -> Result<(), OrbitError>,
+    ) -> Result<RunStateUpdate, OrbitError> {
+        self.with_transaction_behavior(TransactionBehavior::Immediate, |tx| {
+            let row = tx
+                .tx
+                .query_row(
+                    "SELECT state, pipeline_state_json FROM job_runs \
+                     WHERE workspace_id = ?1 AND run_id = ?2",
+                    rusqlite::params![workspace_id, run_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .map(Some)
+                .or_else(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(OrbitError::Store(other.to_string())),
+                })?;
+            let Some((raw_state, raw_pipeline_state)) = row else {
+                return Ok(RunStateUpdate::NotFound);
+            };
+            let state = JobRunState::from_str(&raw_state)
+                .map_err(|error| OrbitError::Store(format!("invalid job run state: {error}")))?;
+            let Some(raw_pipeline_state) = raw_pipeline_state else {
+                return Ok(RunStateUpdate::NoState);
+            };
+            let mut pipeline_state: PipelineState = serde_json::from_str(&raw_pipeline_state)
+                .map_err(|e| OrbitError::Store(format!("invalid pipeline_state_json: {e}")))?;
+            update(state, &mut pipeline_state)?;
+            let state_json = serde_json::to_string_pretty(&pipeline_state)
+                .map_err(|e| OrbitError::Store(format!("serialize pipeline state: {e}")))?;
+            tx.tx
+                .execute(
+                    "UPDATE job_runs SET pipeline_state_json = ?3 \
+                     WHERE workspace_id = ?1 AND run_id = ?2",
+                    rusqlite::params![workspace_id, run_id, state_json],
+                )
+                .map_err(|e| OrbitError::Store(e.to_string()))?;
+            Ok(RunStateUpdate::Updated)
+        })
     }
 
     pub fn delete_job_run_for_workspace(

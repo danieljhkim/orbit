@@ -18,8 +18,11 @@ pub struct ActivityInvocationEvidence {
 /// Project a job run and its optional persisted state for operator-facing APIs.
 ///
 /// Child-dispatch lineage is historical and remains visible after a run reaches
-/// a terminal state. Waiting reasons are momentary, so terminal runs omit them.
-/// Presentation adapters may add intentionally surface-specific fields.
+/// a terminal state, and so is an operator-set worker ceiling [ORB-11253]: it
+/// is the evidence of what the run was admitting under, which a reader needs
+/// exactly when explaining a finished drain. Waiting reasons are momentary, so
+/// terminal runs omit them. Presentation adapters may add intentionally
+/// surface-specific fields.
 pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
     let last = run.steps.last();
     let child_dispatches = serde_json::to_value(
@@ -28,6 +31,10 @@ pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
             .unwrap_or_default(),
     )
     .unwrap_or_else(|_| Value::Array(Vec::new()));
+    let drain_worker_limit = state
+        .and_then(|state| state.drain_worker_limit.as_ref())
+        .and_then(|limit| serde_json::to_value(limit).ok())
+        .unwrap_or(Value::Null);
     let state = (!run.state.is_terminal()).then_some(state).flatten();
     let waiting_on_deps = state
         .and_then(|state| state.waiting_on_deps.as_ref())
@@ -43,6 +50,7 @@ pub fn job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
 
     json!({
         "child_dispatches": child_dispatches,
+        "drain_worker_limit": drain_worker_limit,
         "run_id": run.run_id,
         "job_id": run.job_id,
         "attempt": run.attempt,

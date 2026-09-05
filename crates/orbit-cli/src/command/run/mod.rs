@@ -1,6 +1,7 @@
 pub mod auto;
 mod cancel;
 mod command;
+mod concurrency;
 mod events;
 mod format;
 mod history;

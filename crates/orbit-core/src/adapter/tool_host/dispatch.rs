@@ -79,6 +79,9 @@ pub(super) fn execute(
         OrbitBuiltinAction::WorkflowRunResume => {
             super::workflow_tools::resume(runtime, input, agent, model)
         }
+        OrbitBuiltinAction::WorkflowRunWorkers => {
+            super::workflow_tools::workers(runtime, input, agent, model)
+        }
         OrbitBuiltinAction::WorkspaceClaimAcquire => {
             crate::runtime::workspace_claim::acquire(runtime, input, agent, model)
         }

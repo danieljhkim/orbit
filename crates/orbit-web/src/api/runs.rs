@@ -206,6 +206,8 @@ pub(super) async fn auto_drain_workflow_action(
         Some(for_seconds),
         body.concurrency,
         completion,
+        // [ORB-11242] The dashboard launch form does not offer a crew
+        // restriction, so it submits the unrestricted window it always has.
         &[],
         Some("dashboard"),
         body.claim_token.as_deref(),

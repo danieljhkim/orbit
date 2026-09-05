@@ -389,6 +389,12 @@ impl Commands {
                         Some(args.run_id.as_str()),
                         RuntimeNeed::Required,
                     ),
+                    RunSubcommand::Concurrency(args) => (
+                        "concurrency",
+                        Some("job_run"),
+                        Some(args.run_id.as_str()),
+                        RuntimeNeed::Required,
+                    ),
                     RunSubcommand::Job(args) => (
                         "job",
                         Some("job"),

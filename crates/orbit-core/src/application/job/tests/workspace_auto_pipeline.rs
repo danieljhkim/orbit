@@ -280,6 +280,17 @@ fn workspace_auto_keeps_dispatching_while_earlier_leaves_are_still_running() {
     assert!(outcome.success);
     assert_eq!(host.classify_calls.load(Ordering::SeqCst), 2);
 
+    // [ORB-11253] The classifier's only handle on the drain whose live worker
+    // ceiling it must read is the run id the engine injects into every activity
+    // input. Pinned here, where the real engine renders the step, because
+    // nothing in the asset itself passes it.
+    for input in host.inputs_for("classify_workspace_auto_tasks") {
+        assert_eq!(
+            input["run_id"], run.run_id,
+            "the classifier must be told which run it is admitting for: {input}"
+        );
+    }
+
     let dispatched: Vec<Value> = host
         .inputs_for("invoke_detached")
         .iter()

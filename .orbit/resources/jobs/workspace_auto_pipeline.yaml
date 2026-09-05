@@ -47,6 +47,13 @@ spec:
     for_seconds: 0
     # Live `task_auto_pipeline` runs allowed at once. That job declares
     # `max_active_runs: 10`, which is the hard ceiling above this one.
+    #
+    # ORB-11253: this is the ceiling the run *starts* with, not a fixed one.
+    # `orbit run concurrency <run_id> --set N` records a live ceiling on this
+    # run's own state, and `classify_workspace_auto_tasks` prefers it on the
+    # next admission pass — same run id, same deadline, same completion
+    # authorization, same children. Lowering it stops new admissions until
+    # enough children finish; it cancels nothing.
     max_active_leaf_runs: 5
     # Waited when the backlog has work but no slot is free: the latency a
     # freed slot sits idle before it is refilled.

@@ -24,6 +24,7 @@ orbit run ship --mode local         # implement in a worktree, merge to the base
 orbit run auto --for 2h             # drain the backlog for a window
 orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
 orbit run auto --for 2h --allow-crew opus,sonnet  # ... using only these crews
+orbit run concurrency <run-id> --set 7     # retune a live drain, without replacing it
 orbit run readiness                        # explain current auto-drain eligibility, read-only
 orbit run readiness TASK-123 --json        # explain selected task IDs as JSON
 orbit run ship <task-id> --complete  # ... and also carry it through to `done`
@@ -42,6 +43,23 @@ still finishes.
 It keeps `--concurrency` tasks in flight (5 by default) and re-lists the whole
 backlog every pass, so a slot is refilled as soon as its own task finishes and a
 task filed mid-window starts without waiting for the batch around it.
+
+That ceiling is adjustable while the drain runs. `orbit run concurrency <run-id>
+--set N` (MCP: `orbit.workflow.run.workers`) records a live ceiling on the run
+itself, so **do not cancel a drain to change how many workers it uses** — that
+mints a new run id, restarts the window, and re-states the completion
+authorization. The retune keeps all of them:
+
+- The next admission pass reads the new ceiling. Raising it fills the extra
+  slots from the same backlog; lowering it stops new admissions until enough
+  children finish, and cancels nothing that is already running.
+- It is refused, with the reason, for a run that is not a drain, has not started,
+  has already finished, or asks for more workers than the leaf job's own
+  `max_active_runs` allows.
+- `--if-revision N` makes the change conditional on the ceiling still being the
+  one you read, so two operators cannot silently overwrite each other. The
+  current value and who last moved it are on `orbit run show <run-id>`
+  (`drain_worker_limit`) and `orbit run readiness`.
 
 `--allow-crew` restricts one drain to the crews you name — the lever for a
 provider that is unavailable, rate-limited, or out of budget. It is opt-in and

@@ -10,6 +10,7 @@ use orbit_types::telemetry::AuditEvent;
 use orbit_types::tool::StoredTool;
 use orbit_types::workflow::{
     ExecutorDef, JobRun, JobRunStartOutcome, JobRunState, KnowledgeRunMetrics, PipelineState,
+    RunStateUpdate,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -428,6 +429,23 @@ pub trait JobRunStoreBackend: Send + Sync {
     fn delete_job_run(&self, run_id: &str) -> Result<String, OrbitError>;
     fn read_run_state(&self, run_id: &str) -> Result<Option<PipelineState>, OrbitError>;
     fn write_run_state(&self, run_id: &str, state: &PipelineState) -> Result<(), OrbitError>;
+    /// [ORB-11253] Read-modify-write a run's pipeline state in one immediate
+    /// transaction.
+    ///
+    /// The plain read/write pair cannot express a change that must survive
+    /// another writer: the run's state is one document that the engine
+    /// (checkpoints, child dispatches) and operator run controls both mutate,
+    /// so two interleaved read-modify-write cycles silently drop whichever
+    /// change landed in between. `update` also receives the run's current
+    /// [`JobRunState`], so a caller that must not mutate a finished run can
+    /// refuse inside the same transaction that would otherwise have written.
+    /// An `Err` from `update` rolls the transaction back, leaving the stored
+    /// state exactly as it was.
+    fn update_run_state(
+        &self,
+        run_id: &str,
+        update: &mut dyn FnMut(JobRunState, &mut PipelineState) -> Result<(), OrbitError>,
+    ) -> Result<RunStateUpdate, OrbitError>;
 }
 
 #[derive(Debug, Clone)]

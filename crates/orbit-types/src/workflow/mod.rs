@@ -44,13 +44,13 @@ pub use executor_def::{
 pub use job::{
     AgentCommitRequest, AgentResponseEnvelope, AgentRunError, Job, JobRun, JobRunStartOutcome,
     JobRunState, JobRunStep, JobScheduleState, JobStep, JobTargetType, KnowledgeRunMetrics,
-    RunEvent, StepCondition, default_job_max_active_runs, default_max_iterations,
+    RunEvent, RunStateUpdate, StepCondition, default_job_max_active_runs, default_max_iterations,
     default_retry_backoff_seconds,
 };
 pub use routine::{
     MissedRunPolicy, OverlapPolicy, ROUTINE_SCHEMA_VERSION, RoutineDefinition, RoutinePolicy,
     RoutineRetries, RoutineTarget, RoutineTrigger,
 };
-pub use run_state::PipelineState;
+pub use run_state::{DrainWorkerLimit, PipelineState};
 pub use ship::{CompletionPolicy, ShipMode, resolved_ship_mode};
 pub use skill::Skill;

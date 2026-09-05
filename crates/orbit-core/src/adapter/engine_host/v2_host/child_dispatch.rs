@@ -97,12 +97,17 @@ pub(super) fn checkpoint_submitted_child(
         return Ok(());
     };
 
-    let Some(mut state) = read_state(runtime, action, parent_run_id)? else {
-        return Ok(());
-    };
-    state.record_child_dispatch(dispatch.clone());
+    // [ORB-11253] One transaction for the read and the write, so this
+    // checkpoint cannot discard a run control an operator set on the same
+    // parent state between them.
     runtime
-        .write_run_state(parent_run_id, &state)
+        .stores()
+        .jobs()
+        .update_run_state(parent_run_id, &mut |_, state| {
+            state.record_child_dispatch(dispatch.clone());
+            Ok(())
+        })
+        .map(|_| ())
         .map_err(|error| {
             action_failed(
                 action,
@@ -224,16 +229,6 @@ pub(super) fn record_dispatch_failure(
     ) {
         tracing::warn!(%error, job_name, "could not record child dispatch failure audit");
     }
-}
-
-fn read_state(
-    runtime: &OrbitRuntime,
-    action: &str,
-    run_id: &str,
-) -> Result<Option<orbit_types::workflow::PipelineState>, DispatchError> {
-    runtime
-        .read_run_state(run_id)
-        .map_err(|error| action_failed(action, format!("read parent run state: {error}")))
 }
 
 #[allow(clippy::too_many_arguments)]

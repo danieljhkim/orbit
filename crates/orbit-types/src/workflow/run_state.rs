@@ -9,6 +9,32 @@ use crate::workflow::child_dispatch::{
     ChildCancellation, ChildCancellationPolicy, ChildDispatch, ChildDispatchPhase,
 };
 
+/// A live operator adjustment to a bounded drain's worker ceiling [ORB-11253].
+///
+/// The ceiling a drain was submitted with lives in its immutable
+/// `initial_input`, which is why raising it used to mean cancelling the
+/// coordinator and submitting a replacement. This is the mutable counterpart:
+/// the admission path prefers it over the submitted value, so the same run id,
+/// deadline, completion policy, and already-dispatched children survive the
+/// change.
+///
+/// `revision` is the compare-and-set handle. Every accepted update increments
+/// it, so a caller that read revision *n* and writes with `expected_revision`
+/// *n* cannot silently overwrite an update that landed in between.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DrainWorkerLimit {
+    /// Live ceiling on concurrently live leaf runs.
+    pub max_active_leaf_runs: u32,
+    /// The ceiling this update replaced, kept as change evidence.
+    pub previous_max_active_leaf_runs: u32,
+    /// Accepted-update counter, starting at 1.
+    pub revision: u32,
+    pub actor: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Persistent pipeline state for a job run.
 ///
 /// Stored as `state.json` in the run bundle directory. Steps read accumulated
@@ -59,6 +85,12 @@ pub struct PipelineState {
     /// name the child it left behind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub child_dispatches: Vec<ChildDispatch>,
+    /// Live worker ceiling for a bounded auto drain, when an operator has
+    /// adjusted it [ORB-11253]. Absent means the submitted input still
+    /// governs. Like `child_dispatches` this survives terminalization: it is
+    /// the evidence of what the run was actually admitting under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drain_worker_limit: Option<DrainWorkerLimit>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -79,8 +111,57 @@ impl PipelineState {
             waiting_on_deps: None,
             waiting_on_locks: None,
             child_dispatches: Vec::new(),
+            drain_worker_limit: None,
             updated_at: Utc::now(),
         }
+    }
+
+    /// The compare-and-set handle for [`Self::drain_worker_limit`]. Zero means
+    /// no operator adjustment has been accepted yet.
+    pub fn drain_worker_limit_revision(&self) -> u32 {
+        self.drain_worker_limit
+            .as_ref()
+            .map_or(0, |limit| limit.revision)
+    }
+
+    /// The ceiling currently in force, given the value the run was submitted
+    /// with. An operator adjustment always wins over the submitted input:
+    /// it is the more recent statement of the same decision.
+    pub fn effective_max_active_leaf_runs(&self, submitted: u32) -> u32 {
+        self.drain_worker_limit
+            .as_ref()
+            .map_or(submitted, |limit| limit.max_active_leaf_runs)
+    }
+
+    /// Record an accepted worker-ceiling change, replacing `submitted` when no
+    /// adjustment is recorded yet.
+    ///
+    /// Returns `false` and mutates nothing when `expected_revision` names a
+    /// revision other than the persisted one — the caller read a ceiling that
+    /// another operator has since replaced, and applying its arithmetic anyway
+    /// would silently discard that update.
+    pub fn set_drain_worker_limit(
+        &mut self,
+        max_active_leaf_runs: u32,
+        submitted: u32,
+        actor: String,
+        reason: Option<String>,
+        expected_revision: Option<u32>,
+    ) -> bool {
+        let revision = self.drain_worker_limit_revision();
+        if expected_revision.is_some_and(|expected| expected != revision) {
+            return false;
+        }
+        self.drain_worker_limit = Some(DrainWorkerLimit {
+            max_active_leaf_runs,
+            previous_max_active_leaf_runs: self.effective_max_active_leaf_runs(submitted),
+            revision: revision.saturating_add(1),
+            actor,
+            reason,
+            updated_at: Utc::now(),
+        });
+        self.updated_at = Utc::now();
+        true
     }
 
     /// Record step recovery metadata and advance the resume cursor.

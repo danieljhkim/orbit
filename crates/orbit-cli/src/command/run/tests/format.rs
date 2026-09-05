@@ -109,3 +109,29 @@ fn no_child_dispatches_prints_nothing() {
     assert!(format_child_dispatch_lines(Some(&state)).is_empty());
     assert!(format_child_dispatch_lines(None).is_empty());
 }
+
+/// [ORB-11253] A retuned drain says so in `orbit run show`; an untouched one
+/// stays quiet, because its submitted input already answers the question.
+#[test]
+fn worker_limit_line_reports_the_change_and_its_author() {
+    let mut state = PipelineState::new(
+        "jrun-drain".to_string(),
+        "workspace_auto_pipeline".to_string(),
+        serde_json::json!({ "max_active_leaf_runs": 5 }),
+    );
+    assert_eq!(format_worker_limit_line(Some(&state)), None);
+
+    state.set_drain_worker_limit(
+        7,
+        5,
+        "operator".to_string(),
+        Some("more headroom".to_string()),
+        None,
+    );
+    let line = format_worker_limit_line(Some(&state)).expect("worker limit line");
+    assert!(line.contains("Workers: 7"), "{line}");
+    assert!(line.contains("was 5"), "{line}");
+    assert!(line.contains("revision 1"), "{line}");
+    assert!(line.contains("set by operator"), "{line}");
+    assert!(line.contains("reason=more headroom"), "{line}");
+}
