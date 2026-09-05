@@ -6,10 +6,10 @@
 # excluding no-diff tasks. Explicit mode audits exactly the named workspace
 # tasks, including non-empty selectors.
 # Preparation never promotes or dispatches a task. In a Git workspace it
-# fetches the landing branch, pins one source revision, and fast-forwards a
-# clean primary on that branch when it is behind; dirty or unfetchable
-# checkouts fail as source-staleness before any agent call. Each read-only
-# pilot receives at most five tasks and inspects that pinned revision.
+# fetches the landing branch and pins one source revision without changing
+# primary HEAD, index, or working files. An unfetchable remote fails before
+# any agent call. Each read-only pilot receives at most five tasks and runs
+# in an invocation-owned checkout at that pinned revision.
 # Agent dispatch failures still stop at the
 # all-join. Apply isolates stale or malformed assessments by partition, applies
 # every independently valid partition, then a guard fails the total run when
@@ -71,6 +71,7 @@ spec:
             workspace_path: "{{ steps.prepare.output.workspace_path }}"
             base_branch: "{{ steps.prepare.output.source.base_branch }}"
             source_revision: "{{ steps.prepare.output.source.source_revision }}"
+            inspection_revision: "{{ steps.prepare.output.source.source_revision }}"
             # See the crew-resolution note at the top of this file.
             crew: system
       fan_in:

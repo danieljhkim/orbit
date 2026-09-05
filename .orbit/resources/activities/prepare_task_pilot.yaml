@@ -11,10 +11,9 @@ spec:
     task_ids it selects only proposed/backlog tasks whose context_files are
     empty, excluding no-diff-needed/no-diff-expected tasks and every active,
     review, or terminal status. In a Git workspace this step also fetches the
-    landing branch, pins one verified source revision, and fast-forwards a
-    clean primary on that branch when it is behind. Dirty, divergent, or
-    unfetchable checkouts fail closed as source-staleness before any agent
-    call. This action never promotes or dispatches work.
+    landing branch and pins one verified source revision without changing
+    the primary HEAD, index, or working files, including dirty and untracked
+    content. Remote failures stop preparation before any agent call. This action never promotes or dispatches work.
   input_schema_json:
     type: object
     properties:

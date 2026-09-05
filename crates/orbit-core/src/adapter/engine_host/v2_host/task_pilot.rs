@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use orbit_common::fs::selector::{
-    anchor_path, canonical_selector_in_workspace, exists_in_workspace,
+    anchor_path, canonical_selector, canonical_selector_in_workspace, exists_in_workspace,
 };
 use orbit_engine::DispatchError;
 use orbit_store::contracts::JobRunQuery;
@@ -413,13 +413,20 @@ fn validate_after_selectors(
                 format!("task {task_id} selector {selector:?} must use file:, dir:, or symbol:"),
             ));
         }
-        let canonical =
-            canonical_selector_in_workspace(trimmed, workspace_root).map_err(|error| {
-                action_failed(
-                    action,
-                    format!("task {task_id} selector {selector:?} is invalid: {error}"),
-                )
-            })?;
+        // A dirty primary may replace an anchor with a symlink or a different
+        // kind. Only syntax comes from this parser; pinned Git objects own
+        // containment and target validation when source identity is present.
+        let canonical = if source.is_some() {
+            canonical_selector(trimmed)
+        } else {
+            canonical_selector_in_workspace(trimmed, workspace_root)
+        }
+        .map_err(|error| {
+            action_failed(
+                action,
+                format!("task {task_id} selector {selector:?} is invalid: {error}"),
+            )
+        })?;
         if canonical != trimmed {
             return Err(action_failed(
                 action,

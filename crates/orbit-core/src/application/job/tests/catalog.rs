@@ -472,6 +472,10 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     );
     assert_eq!(
         pilot_input["source_revision"],
+        pilot_input["inspection_revision"]
+    );
+    assert_eq!(
+        pilot_input["inspection_revision"],
         "{{ steps.prepare.output.source.source_revision }}"
     );
     assert_eq!(

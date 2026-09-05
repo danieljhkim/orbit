@@ -133,12 +133,17 @@ selectors, but refuses an ID already prepared by an active run; inspect or
 resume the named run instead.
 
 The prepare step fetches the landing branch (`base_branch`, defaulting to
-`workflow.base_branch`) and pins one `source_revision`. A clean primary that
-already sits on that branch and is behind origin is fast-forwarded so inspection
-sees the landed tree; a dirty, divergent, or unfetchable checkout fails as
-source-staleness *before* any agent call. The pilot inspects that pinned
-revision. Apply validates selector existence against the same snapshot, not a
-later working tree, so a newly merged file is not reported as missing merely
+`workflow.base_branch`) and pins one `source_revision`, preserving primary
+HEAD, index, dirty and untracked files. Remote failure stops before an agent
+call. Each pilot runs in its own detached checkout at that revision, with
+its cwd, input paths, and read-only filesystem profile bound there. Task tools
+retain the owning logical workspace, and apply still checks task snapshots
+with compare-and-set on that authority. Inspection checkouts use at most 16
+exclusive slots in the common Git directory; normal return, error, and timeout
+remove the checkout before releasing its lease. A crash releases the kernel
+lease, and the next holder reclaims the abandoned checkout before reuse. No
+registered worktrees or primary branches are removed or modified. Apply
+validates selector existence against the same snapshot, not a later working tree, so a newly merged file is not reported as missing merely
 because the primary lagged origin, and a later origin advance cannot admit a
 path that did not exist at prepare.
 

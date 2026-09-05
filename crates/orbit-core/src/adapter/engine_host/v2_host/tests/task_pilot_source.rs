@@ -98,14 +98,6 @@ fn git(current_dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn git_allow_fail(current_dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new("git")
-        .args(args)
-        .current_dir(current_dir)
-        .output()
-        .unwrap_or_else(|error| panic!("spawn git {}: {error}", args.join(" ")))
-}
-
 fn init_repo(path: &Path, branch: &str) {
     fs::create_dir_all(path).expect("create repo dir");
     git(path, &["init"]);
@@ -189,7 +181,7 @@ fn prepare_landing(fixture: &RemoteLandingFixture) -> Result<Value, String> {
 }
 
 #[test]
-fn clean_stale_primary_fast_forwards_and_apply_admits_newly_merged_file() {
+fn clean_stale_primary_is_preserved_and_apply_admits_newly_merged_file() {
     let fixture = remote_landing_fixture();
     let prepared = prepare_landing(&fixture).expect("clean stale primary prepares");
 
@@ -199,12 +191,12 @@ fn clean_stale_primary_fast_forwards_and_apply_admits_newly_merged_file() {
         format!("origin/{LANDING}")
     );
     assert_eq!(prepared["source"]["source_revision"], fixture.current_sha);
-    assert_eq!(prepared["source"]["fast_forwarded"], true);
+    assert_eq!(prepared["source"]["fast_forwarded"], false);
     assert_eq!(
         git(&fixture.repo, &["rev-parse", "HEAD"]),
-        fixture.current_sha
+        fixture.stale_sha
     );
-    assert!(fixture.repo.join("src/merged.rs").exists());
+    assert!(!fixture.repo.join("src/merged.rs").exists());
 
     let output = apply_selectors(
         &fixture.runtime,
@@ -225,44 +217,66 @@ fn clean_stale_primary_fast_forwards_and_apply_admits_newly_merged_file() {
 }
 
 #[test]
-fn dirty_primary_reports_source_staleness_without_moving_head() {
+fn dirty_primary_preserves_head_index_tracked_and_untracked_bytes() {
     let fixture = remote_landing_fixture();
-    fs::write(fixture.repo.join("src/existing.rs"), "dirty local edit\n")
-        .expect("dirty tracked file");
-    let before = git(&fixture.repo, &["rev-parse", "HEAD"]);
-
-    let error = prepare_landing(&fixture).expect_err("dirty primary must not spend an agent call");
-    assert!(
-        error.contains("source-staleness"),
-        "expected source-staleness, got {error}"
+    fs::write(fixture.repo.join("src/existing.rs"), "staged edit\n").unwrap();
+    git(&fixture.repo, &["add", "src/existing.rs"]);
+    fs::write(fixture.repo.join("src/existing.rs"), b"dirty edit\0\xff").unwrap();
+    fs::write(
+        fixture.repo.join("src/merged.rs"),
+        b"untracked collision\0\xff",
+    )
+    .unwrap();
+    let index = fs::read(fixture.repo.join(".git/index")).unwrap();
+    let prepared = prepare_landing(&fixture).expect("dirty primary prepares");
+    let output = apply_selectors(
+        &fixture.runtime,
+        &prepared,
+        &fixture.task,
+        vec![
+            "file:src/merged.rs",
+            "dir:src",
+            "symbol:src/existing.rs#existing:function",
+        ],
     );
-    assert!(error.contains(&fixture.current_sha));
-    assert!(error.contains(&fixture.stale_sha));
-    assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), before);
-    assert!(!fixture.repo.join("src/merged.rs").exists());
+    assert_eq!(output["status"], "succeeded", "{output}");
+    assert_eq!(
+        git(&fixture.repo, &["rev-parse", "HEAD"]),
+        fixture.stale_sha
+    );
+    assert_eq!(fs::read(fixture.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        fs::read(fixture.repo.join("src/existing.rs")).unwrap(),
+        b"dirty edit\0\xff"
+    );
+    assert_eq!(
+        fs::read(fixture.repo.join("src/merged.rs")).unwrap(),
+        b"untracked collision\0\xff"
+    );
 }
 
+#[cfg(unix)]
 #[test]
-fn untracked_file_on_stale_primary_does_not_reset_or_admit_later_paths() {
+fn dirty_primary_symlink_does_not_change_pinned_selector_validation() {
     let fixture = remote_landing_fixture();
-    fs::write(fixture.repo.join("scratch.txt"), "untracked\n").expect("untracked file");
-    let before = git(&fixture.repo, &["rev-parse", "HEAD"]);
-
-    let error = prepare_landing(&fixture).expect_err("untracked files block fast-forward");
-    assert!(error.contains("source-staleness"), "{error}");
-    assert!(
-        error.contains("untracked") || error.contains("dirty"),
-        "{error}"
+    fs::remove_file(fixture.repo.join("src/existing.rs")).unwrap();
+    std::os::unix::fs::symlink(
+        "/missing-outside-target",
+        fixture.repo.join("src/existing.rs"),
+    )
+    .unwrap();
+    let prepared = prepare_landing(&fixture).expect("symlink dirty primary prepares");
+    let output = apply_selectors(
+        &fixture.runtime,
+        &prepared,
+        &fixture.task,
+        vec!["file:src/existing.rs"],
     );
-    assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), before);
-    assert!(
-        git_allow_fail(&fixture.repo, &["status", "--porcelain"])
-            .status
-            .success()
+    assert_eq!(output["status"], "succeeded", "{output}");
+    assert_eq!(
+        fs::read_link(fixture.repo.join("src/existing.rs")).unwrap(),
+        Path::new("/missing-outside-target")
     );
-    let status_output = git_allow_fail(&fixture.repo, &["status", "--porcelain"]);
-    let status = String::from_utf8_lossy(&status_output.stdout);
-    assert!(status.contains("scratch.txt"));
 }
 
 #[test]
@@ -348,7 +362,7 @@ fn apply_uses_pinned_revision_after_concurrent_branch_advancement() {
 #[test]
 fn untracked_workspace_file_is_not_admitted_against_the_source_snapshot() {
     let fixture = remote_landing_fixture();
-    let prepared = prepare_landing(&fixture).expect("fast-forward to landing tip");
+    let prepared = prepare_landing(&fixture).expect("pin landing tip");
     fs::write(fixture.repo.join("src/ghost.rs"), "working tree only\n").expect("untracked ghost");
 
     let output = apply_selectors(
@@ -374,10 +388,7 @@ fn untracked_workspace_file_is_not_admitted_against_the_source_snapshot() {
     );
 }
 
-/// ORB-11269: two concurrent `prepare_task_pilot` calls against the same
-/// shared primary must serialize their fast-forward instead of racing
-/// `git merge --ff-only` and misreporting the loser's index-lock contention
-/// as source staleness.
+/// Concurrent prepares serialize shared ref fetching and leave primary untouched.
 #[test]
 fn concurrent_prepare_calls_against_the_same_primary_both_succeed() {
     let fixture = remote_landing_fixture();
@@ -408,24 +419,13 @@ fn concurrent_prepare_calls_against_the_same_primary_both_succeed() {
 
     assert_eq!(
         git(&fixture.repo, &["rev-parse", "HEAD"]),
-        fixture.current_sha,
-        "the primary must land exactly on the pinned revision, not a merge byproduct"
+        fixture.stale_sha
     );
-    assert!(fixture.repo.join("src/merged.rs").exists());
-
-    let fast_forwarded_count = results
-        .iter()
-        .filter(|result| {
-            result
-                .as_ref()
-                .ok()
-                .and_then(|prepared| prepared["source"]["fast_forwarded"].as_bool())
-                .unwrap_or(false)
-        })
-        .count();
+    assert!(!fixture.repo.join("src/merged.rs").exists());
     assert!(
-        fast_forwarded_count >= 1,
-        "at least one serialized caller must have performed the fast-forward"
+        results
+            .iter()
+            .all(|result| result.as_ref().unwrap()["source"]["fast_forwarded"] == false)
     );
 }
 
