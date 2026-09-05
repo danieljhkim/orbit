@@ -198,6 +198,87 @@ fn automatic_discovery_filters_status_context_and_no_diff_tags_then_partitions()
 }
 
 #[test]
+fn automatic_discovery_bounds_excluded_evidence_as_terminal_history_grows() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    let eligible = (0..3)
+        .map(|index| {
+            seed_task(
+                &runtime,
+                &format!("eligible-{index}"),
+                TaskStatus::Backlog,
+                &[],
+                &[],
+            )
+        })
+        .collect::<Vec<_>>();
+    const TERMINAL_COUNT: usize = 200;
+    for index in 0..TERMINAL_COUNT {
+        seed_task(
+            &runtime,
+            &format!("terminal-{index}"),
+            TaskStatus::Done,
+            &[],
+            &[],
+        );
+    }
+
+    let started = std::time::Instant::now();
+    let output = prepare(
+        &runtime,
+        "prepare_task_pilot",
+        &json!({ "workspace_path": repo_root }),
+    )
+    .expect("automatic discovery bounds evidence over a large terminal history");
+    let elapsed = started.elapsed();
+
+    assert_eq!(output["mode"], "automatic");
+    assert_eq!(
+        output["task_ids"],
+        json!(
+            eligible
+                .iter()
+                .map(|task| task.id.clone())
+                .collect::<Vec<_>>()
+        ),
+        "a large terminal history must not change the selected tasks or their order"
+    );
+
+    let excluded_sample = output["excluded"].as_array().expect("excluded sample");
+    assert!(
+        excluded_sample.len() <= 20,
+        "the itemized sample must stay capped regardless of terminal history size, got {}",
+        excluded_sample.len()
+    );
+    assert_eq!(output["excluded_total"], json!(TERMINAL_COUNT));
+    assert_eq!(
+        output["excluded_by_reason"]["status_not_eligible"],
+        json!(TERMINAL_COUNT),
+        "omitted exclusion detail must still be explicitly counted by reason"
+    );
+    assert_eq!(output["excluded_sample_truncated"], true);
+    assert_eq!(
+        output["excluded_omitted_count"],
+        json!(TERMINAL_COUNT - excluded_sample.len())
+    );
+
+    // Representative preparation benchmark: this records that payload bytes
+    // and wall-clock time stay within a generous, non-pathological bound at
+    // this terminal-history size. It does not assert a latency improvement
+    // over the prior unbounded implementation (no such baseline was measured
+    // here) — only that bounding the evidence keeps both bytes and time sane.
+    let serialized = serde_json::to_string(&output).expect("serialize prepare output");
+    assert!(
+        serialized.len() < 8_000,
+        "prepare payload grew unexpectedly large ({} bytes) with {TERMINAL_COUNT} terminal tasks",
+        serialized.len()
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "prepare took unexpectedly long ({elapsed:?}) for {TERMINAL_COUNT} terminal tasks"
+    );
+}
+
+#[test]
 fn discovery_reuses_active_preparation_evidence_and_selects_only_new_work() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
     let already_prepared = seed_task(&runtime, "already prepared", TaskStatus::Backlog, &[], &[]);

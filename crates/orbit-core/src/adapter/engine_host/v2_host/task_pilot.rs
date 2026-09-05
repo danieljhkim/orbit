@@ -15,11 +15,12 @@ use orbit_common::fs::selector::{
 };
 use orbit_engine::DispatchError;
 use orbit_store::contracts::JobRunQuery;
-use orbit_types::task::{Task, TaskStatus};
+use orbit_types::task::{TaskEnvelopeV2, TaskStatus};
 use orbit_types::workflow::JobRunState;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::application::task::TaskListFilter;
 
 mod apply;
 mod source;
@@ -33,6 +34,11 @@ const DEFAULT_MAX_TASKS: usize = 50;
 const HARD_MAX_TASKS: usize = 500;
 const NO_DIFF_TAGS: [&str; 2] = ["no-diff-needed", "no-diff-expected"];
 const TASK_PILOT_JOB_ID: &str = "task_pilot_pipeline";
+/// Cap on individually itemized `excluded` entries in routine discovery output.
+/// Automatic-mode exclusions still carry full counts by reason; this bounds
+/// only the per-task sample so evidence size stops scaling with terminal
+/// workspace history [ORB-11244].
+const MAX_EXCLUDED_SAMPLE: usize = 20;
 
 pub(super) fn prepare(
     runtime: &OrbitRuntime,
@@ -58,15 +64,15 @@ pub(super) fn prepare(
     let explicit_task_ids = string_array(input, "task_ids", action)?;
     let explicit_mode = !explicit_task_ids.is_empty();
     let active_preparations = active_task_pilot_preparations(runtime, action, &workspace_root)?;
-    let all_tasks = runtime
-        .list_tasks()
-        .map_err(|error| action_failed(action, format!("list workspace tasks: {error}")))?;
-    let by_id = all_tasks
-        .iter()
-        .map(|task| (task.id.as_str(), task))
-        .collect::<BTreeMap<_, _>>();
 
-    let (mode, selected, excluded) = if explicit_mode {
+    let (mode, task_ids, task_snapshots, excluded) = if explicit_mode {
+        let all_tasks = runtime
+            .list_tasks()
+            .map_err(|error| action_failed(action, format!("list workspace tasks: {error}")))?;
+        let by_id = all_tasks
+            .iter()
+            .map(|task| (task.id.as_str(), task))
+            .collect::<BTreeMap<_, _>>();
         let mut seen = BTreeSet::new();
         let selected = explicit_task_ids
             .iter()
@@ -97,54 +103,99 @@ pub(super) fn prepare(
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        ("explicit", selected, Vec::new())
+        let task_ids = selected
+            .iter()
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>();
+        let task_snapshots = selected
+            .iter()
+            .map(|task| {
+                task_snapshot(
+                    &task.id,
+                    &task.title,
+                    task.status,
+                    &task.tags,
+                    &task.context_files,
+                )
+            })
+            .collect::<Vec<_>>();
+        (
+            "explicit",
+            task_ids,
+            task_snapshots,
+            ExcludedEvidence::default(),
+        )
     } else {
-        let mut selected = Vec::new();
-        let mut excluded = Vec::new();
-        let mut candidates = all_tasks.iter().collect::<Vec<_>>();
-        candidates.sort_by(|left, right| {
+        // Envelope-only metadata (no description/plan/comments/history/artifacts)
+        // for every task in the workspace, so routine discovery no longer pays
+        // for full-bundle hydration of terminal history it will only exclude.
+        let candidates = runtime
+            .task_candidates(&TaskListFilter::default(), usize::MAX)
+            .map_err(|error| {
+                action_failed(action, format!("list workspace task envelopes: {error}"))
+            })?;
+        let mut envelopes = candidates.items;
+        envelopes.sort_by(|left, right| {
             left.created_at
                 .cmp(&right.created_at)
                 .then(left.id.cmp(&right.id))
         });
-        for task in candidates {
-            let reason = automatic_exclusion_reason(task);
-            if let Some(reason) = reason {
-                excluded.push(json!({ "task_id": task.id, "reason": reason }));
-            } else if let Some(run_ids) = active_preparations.get(&task.id) {
-                excluded.push(json!({
-                    "task_id": task.id,
-                    "reason": "active_pilot_prepared",
-                    "prepared_by_run_ids": run_ids,
-                }));
-            } else {
-                selected.push(task);
+
+        let mut selected = Vec::new();
+        let mut excluded = ExcludedEvidence::default();
+        for envelope in &envelopes {
+            let reason = automatic_exclusion_reason(
+                envelope.status,
+                &envelope.context_files,
+                &envelope.tags,
+            )
+            .or_else(|| {
+                active_preparations
+                    .contains_key(&envelope.id)
+                    .then_some("active_pilot_prepared")
+            });
+            match reason {
+                Some(reason) => excluded.record(envelope, reason, &active_preparations),
+                None => selected.push(envelope),
             }
         }
-        ("automatic", selected, excluded)
+
+        let task_ids = selected
+            .iter()
+            .map(|task| task.id.clone())
+            .collect::<Vec<_>>();
+        let task_snapshots = selected
+            .iter()
+            .map(|task| {
+                task_snapshot(
+                    &task.id,
+                    &task.title,
+                    task.status,
+                    &task.tags,
+                    &task.context_files,
+                )
+            })
+            .collect::<Vec<_>>();
+        ("automatic", task_ids, task_snapshots, excluded)
     };
 
-    if selected.len() > max_tasks {
+    if task_ids.len() > max_tasks {
         return Err(action_failed(
             action,
             format!(
                 "{mode} task-pilot selection contains {} tasks, exceeding max_tasks {max_tasks}",
-                selected.len()
+                task_ids.len()
             ),
         ));
     }
 
-    let task_snapshots = selected
-        .iter()
-        .map(|task| task_snapshot(task))
-        .collect::<Vec<_>>();
-    let partitions = selected
+    let partitions = task_ids
         .chunks(max_partition_size)
         .enumerate()
-        .map(|(partition_index, tasks)| {
+        .map(|(partition_index, ids)| {
             json!({
                 "partition_index": partition_index,
-                "task_ids": tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>(),
+                "task_ids": ids,
             })
         })
         .collect::<Vec<_>>();
@@ -160,14 +211,51 @@ pub(super) fn prepare(
                 "fast_forwarded": false,
             })
         }),
-        "task_count": selected.len(),
-        "task_ids": selected.iter().map(|task| task.id.clone()).collect::<Vec<_>>(),
+        "task_count": task_ids.len(),
+        "task_ids": task_ids,
         "tasks": task_snapshots,
         "partition_size": max_partition_size,
         "partition_count": partitions.len(),
         "partitions": partitions,
-        "excluded": excluded,
+        "excluded": excluded.sample,
+        "excluded_total": excluded.total,
+        "excluded_by_reason": excluded.by_reason,
+        "excluded_sample_truncated": excluded.total > excluded.sample.len(),
+        "excluded_omitted_count": excluded.total.saturating_sub(excluded.sample.len()),
     }))
+}
+
+/// Bounded evidence for routine (non-explicit) discovery exclusions: every
+/// excluded task is counted by reason, but only a capped sample is itemized
+/// so response size stops scaling with terminal workspace history.
+#[derive(Default)]
+struct ExcludedEvidence {
+    sample: Vec<Value>,
+    total: usize,
+    by_reason: BTreeMap<&'static str, usize>,
+}
+
+impl ExcludedEvidence {
+    fn record(
+        &mut self,
+        envelope: &TaskEnvelopeV2,
+        reason: &'static str,
+        active_preparations: &BTreeMap<String, BTreeSet<String>>,
+    ) {
+        self.total += 1;
+        *self.by_reason.entry(reason).or_default() += 1;
+        if self.sample.len() >= MAX_EXCLUDED_SAMPLE {
+            return;
+        }
+        let mut entry = json!({ "task_id": envelope.id, "reason": reason });
+        if reason == "active_pilot_prepared"
+            && let Some(run_ids) = active_preparations.get(&envelope.id)
+            && let Value::Object(fields) = &mut entry
+        {
+            fields.insert("prepared_by_run_ids".to_string(), json!(run_ids));
+        }
+        self.sample.push(entry);
+    }
 }
 
 fn active_task_pilot_preparations(
@@ -250,30 +338,36 @@ fn prepared_task_ids(output: &Value, workspace_root: &Path) -> Option<Vec<String
         .collect()
 }
 
-fn automatic_exclusion_reason(task: &Task) -> Option<&'static str> {
-    if !matches!(task.status, TaskStatus::Proposed | TaskStatus::Backlog) {
+fn automatic_exclusion_reason(
+    status: TaskStatus,
+    context_files: &[String],
+    tags: &[String],
+) -> Option<&'static str> {
+    if !matches!(status, TaskStatus::Proposed | TaskStatus::Backlog) {
         return Some("status_not_eligible");
     }
-    if !task.context_files.is_empty() {
+    if !context_files.is_empty() {
         return Some("context_files_not_empty");
     }
-    if task
-        .tags
-        .iter()
-        .any(|tag| NO_DIFF_TAGS.contains(&tag.as_str()))
-    {
+    if tags.iter().any(|tag| NO_DIFF_TAGS.contains(&tag.as_str())) {
         return Some("no_diff_task");
     }
     None
 }
 
-fn task_snapshot(task: &Task) -> Value {
+fn task_snapshot(
+    id: &str,
+    title: &str,
+    status: TaskStatus,
+    tags: &[String],
+    context_files: &[String],
+) -> Value {
     json!({
-        "task_id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "tags": task.tags,
-        "context_files_before": task.context_files,
+        "task_id": id,
+        "title": title,
+        "status": status,
+        "tags": tags,
+        "context_files_before": context_files,
     })
 }
 
