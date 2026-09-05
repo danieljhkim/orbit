@@ -63,6 +63,12 @@ rg -n 'error|failed|panic|conflict|Validation|Outcome|execution_summary|git push
 
 Do not paste huge transcripts back to the human — summarize the decisive lines and identify the blob/command source.
 
+For CI-failure sweeps, checkout identity is separate runner-log evidence, not
+the API event or pull-request head SHA. The collector streams the full log,
+keeps only a bounded human excerpt, and scans at most 8 MiB for checkout
+evidence. Treat `checkout_identity.state: incomplete`, `missing`, or
+`ambiguous` as a diagnostic; do not fill it from another SHA field.
+
 ## Distinguish Failure Classes
 
 - **Implementation failure:** the agent loop exited nonzero or reported a failed envelope during `implement_one`.

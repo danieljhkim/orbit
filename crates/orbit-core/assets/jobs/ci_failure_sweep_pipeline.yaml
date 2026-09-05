@@ -29,6 +29,10 @@
 # - A discovery, investigation, registration, dedupe, or task-creation error
 #   fails `file` with a bounded `retryable_error` payload. The job retry wrapper
 #   retries the handoff; no current failure is consumed as a clean result.
+# - Checkout identity is read from the runner-log stream before the bounded
+#   excerpt is formed. The extractor scans no more than 8 MiB per log and
+#   marks the identity incomplete if that hard limit is reached; it never
+#   substitutes an event or PR head SHA as checkout evidence.
 #
 # Overlap safety
 # - `max_active_runs: 1` makes the sweep single-flight, and the seeded routine

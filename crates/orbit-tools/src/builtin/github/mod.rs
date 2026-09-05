@@ -317,6 +317,10 @@ const CHECKOUT_MARKERS: &[&str] = &[
 
 const MIN_SHA_LEN: usize = 7;
 const MAX_SHA_LEN: usize = 40;
+/// The most source bytes checkout extraction will inspect from one log. The
+/// rest is still drained so `gh` can exit, but identity is marked incomplete.
+pub const MAX_CHECKOUT_LOG_SCAN_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CHECKOUT_EVIDENCE_LINE_BYTES: usize = 16 * 1024;
 
 /// The commit a runner actually checked out, read out of the runner's own log.
 ///
@@ -327,6 +331,187 @@ const MAX_SHA_LEN: usize = 40;
 pub struct CheckoutEvidence {
     pub commits: Vec<String>,
     pub lines: Vec<String>,
+    pub complete: bool,
+    pub scanned_bytes: usize,
+    pub source_truncated: bool,
+}
+
+/// A bounded excerpt and checkout evidence collected while a log is drained.
+/// No complete copy of the source log is retained.
+pub struct StreamedLog {
+    pub text: String,
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub returned_bytes: usize,
+    pub checkout_evidence: CheckoutEvidence,
+}
+
+/// Incrementally retain the head/tail excerpt and checkout evidence from a
+/// potentially large log. `scan_limit` makes incomplete identity explicit
+/// instead of retaining an unbounded source stream.
+pub struct StreamedLogCollector {
+    max_bytes: usize,
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    total_bytes: usize,
+    evidence: CheckoutEvidenceCollector,
+}
+
+impl StreamedLogCollector {
+    pub fn new(max_bytes: usize, max_evidence_lines: usize) -> Self {
+        Self {
+            max_bytes,
+            head: Vec::with_capacity(max_bytes / 2),
+            tail: Vec::with_capacity(max_bytes.saturating_sub(max_bytes / 2)),
+            total_bytes: 0,
+            evidence: CheckoutEvidenceCollector::new(
+                max_evidence_lines,
+                MAX_CHECKOUT_LOG_SCAN_BYTES,
+            ),
+        }
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) {
+        self.total_bytes = self.total_bytes.saturating_add(chunk.len());
+        self.evidence.push(chunk);
+
+        let head_limit = self.max_bytes / 2;
+        let head_take = head_limit.saturating_sub(self.head.len()).min(chunk.len());
+        self.head.extend_from_slice(&chunk[..head_take]);
+        let tail_limit = self.max_bytes.saturating_sub(head_limit);
+        self.tail.extend_from_slice(&chunk[head_take..]);
+        if self.tail.len() > tail_limit {
+            self.tail.drain(..self.tail.len() - tail_limit);
+        }
+    }
+
+    pub fn finish(mut self) -> StreamedLog {
+        let evidence = self.evidence.finish();
+        let truncated = self.total_bytes > self.max_bytes;
+        let text = if truncated {
+            let omitted = self
+                .total_bytes
+                .saturating_sub(self.head.len() + self.tail.len());
+            format!(
+                "{}\n[... {omitted} bytes omitted; raise the byte budget for more ...]\n{}",
+                redact_all(&String::from_utf8_lossy(&self.head)),
+                redact_all(&String::from_utf8_lossy(&self.tail)),
+            )
+        } else {
+            // When the source is short, all bytes are in `tail` except the
+            // initial head window, so join the two retained halves.
+            self.head.extend_from_slice(&self.tail);
+            redact_all(&String::from_utf8_lossy(&self.head))
+        };
+        StreamedLog {
+            returned_bytes: text.len(),
+            text,
+            truncated,
+            total_bytes: self.total_bytes,
+            checkout_evidence: evidence,
+        }
+    }
+}
+
+struct CheckoutEvidenceCollector {
+    max_lines: usize,
+    scan_limit: usize,
+    scanned_bytes: usize,
+    source_truncated: bool,
+    pending_line: String,
+    dropping_line: bool,
+    commits: Vec<String>,
+    seen_commits: HashSet<String>,
+    lines: Vec<String>,
+    complete: bool,
+}
+
+impl CheckoutEvidenceCollector {
+    fn new(max_lines: usize, scan_limit: usize) -> Self {
+        Self {
+            max_lines,
+            scan_limit,
+            scanned_bytes: 0,
+            source_truncated: false,
+            pending_line: String::new(),
+            dropping_line: false,
+            commits: Vec::new(),
+            seen_commits: HashSet::new(),
+            lines: Vec::new(),
+            complete: true,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        let remaining = self.scan_limit.saturating_sub(self.scanned_bytes);
+        let scanned = &chunk[..chunk.len().min(remaining)];
+        self.scanned_bytes += scanned.len();
+        if scanned.len() < chunk.len() {
+            self.source_truncated = true;
+            self.complete = false;
+        }
+        for part in String::from_utf8_lossy(scanned).split_inclusive('\n') {
+            if self.dropping_line {
+                if part.ends_with('\n') {
+                    self.dropping_line = false;
+                }
+                continue;
+            }
+            if self.pending_line.len() + part.len() > MAX_CHECKOUT_EVIDENCE_LINE_BYTES {
+                self.pending_line.clear();
+                self.dropping_line = !part.ends_with('\n');
+                self.complete = false;
+                continue;
+            }
+            self.pending_line.push_str(part);
+            if self.pending_line.ends_with('\n') {
+                self.observe_pending_line();
+            }
+        }
+    }
+
+    fn finish(mut self) -> CheckoutEvidence {
+        if !self.pending_line.is_empty() && !self.dropping_line {
+            self.observe_pending_line();
+        }
+        CheckoutEvidence {
+            commits: self.commits,
+            lines: self.lines,
+            complete: self.complete,
+            scanned_bytes: self.scanned_bytes,
+            source_truncated: self.source_truncated,
+        }
+    }
+
+    fn observe_pending_line(&mut self) {
+        let line = std::mem::take(&mut self.pending_line);
+        let (step, payload) = split_log_line(&line);
+        let lowered = payload.to_ascii_lowercase();
+        let marked = CHECKOUT_MARKERS
+            .iter()
+            .any(|marker| lowered.contains(marker));
+        let in_checkout_step = step.to_ascii_lowercase().contains("checkout");
+        if !(marked || in_checkout_step && is_bare_commit_sha(payload)) {
+            return;
+        }
+        if self.lines.len() < self.max_lines {
+            self.lines.push(redact_all(payload.trim()));
+        } else {
+            self.complete = false;
+        }
+        for token in commit_sha_tokens(payload) {
+            if self.seen_commits.contains(token) {
+                continue;
+            }
+            if self.commits.len() == self.max_lines {
+                self.complete = false;
+                continue;
+            }
+            let token = token.to_string();
+            self.seen_commits.insert(token.clone());
+            self.commits.push(token);
+        }
+    }
 }
 
 /// Split one `gh run view --log` line into its step column and its payload.
@@ -401,36 +586,9 @@ fn commit_sha_tokens(payload: &str) -> Vec<&str> {
 /// of thousands of fetch lines must not hand the caller an unbounded commit
 /// list, and membership is a set lookup rather than a scan per token.
 pub fn scan_checkout_evidence(log: &str, max_lines: usize) -> CheckoutEvidence {
-    let mut commits: Vec<String> = Vec::new();
-    let mut seen_commits: HashSet<&str> = HashSet::new();
-    let mut lines = Vec::new();
-    for line in log.lines() {
-        if commits.len() >= max_lines && lines.len() >= max_lines {
-            break;
-        }
-        let (step, payload) = split_log_line(line);
-        let lowered = payload.to_ascii_lowercase();
-        let marked = CHECKOUT_MARKERS
-            .iter()
-            .any(|marker| lowered.contains(marker));
-        let in_checkout_step = step.to_ascii_lowercase().contains("checkout");
-        let is_evidence = marked || (in_checkout_step && is_bare_commit_sha(payload));
-        if !is_evidence {
-            continue;
-        }
-        for token in commit_sha_tokens(payload) {
-            if commits.len() >= max_lines {
-                break;
-            }
-            if seen_commits.insert(token) {
-                commits.push(token.to_string());
-            }
-        }
-        if lines.len() < max_lines {
-            lines.push(redact_all(payload.trim()));
-        }
-    }
-    CheckoutEvidence { commits, lines }
+    let mut collector = CheckoutEvidenceCollector::new(max_lines, log.len());
+    collector.push(log.as_bytes());
+    collector.finish()
 }
 
 #[cfg(test)]
