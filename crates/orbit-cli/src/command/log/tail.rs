@@ -8,6 +8,8 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
@@ -110,7 +112,66 @@ pub(super) fn run_tail<W: Write + ?Sized>(
         return Ok(());
     }
 
-    follow_file(path, initial_offset, filters, args.json, use_color, writer)
+    follow_file(
+        path,
+        initial_offset,
+        filters,
+        args.json,
+        use_color,
+        writer,
+        FollowControl::Forever,
+    )
+}
+
+#[cfg(test)]
+pub(super) struct FollowTestControl {
+    ready: Sender<()>,
+    stop: Receiver<()>,
+}
+
+#[cfg(test)]
+impl FollowTestControl {
+    pub(super) fn new(ready: Sender<()>, stop: Receiver<()>) -> Self {
+        Self { ready, stop }
+    }
+}
+
+#[cfg(test)]
+pub(super) fn run_tail_with_test_control<W: Write + ?Sized>(
+    path: &Path,
+    args: &TailArgs,
+    filters: &Filters,
+    use_color: bool,
+    writer: &mut W,
+    control: FollowTestControl,
+) -> io::Result<()> {
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("orbit log file not found: {}", path.display()),
+        ));
+    }
+
+    let initial_offset = print_initial_window(path, args, filters, use_color, writer)?;
+    control.ready.send(()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "follow test stopped before readiness",
+        )
+    })?;
+    if !args.follow {
+        return Ok(());
+    }
+
+    follow_file(
+        path,
+        initial_offset,
+        filters,
+        args.json,
+        use_color,
+        writer,
+        FollowControl::UntilStopped(control.stop),
+    )
 }
 
 fn print_initial_window<W: Write + ?Sized>(
@@ -156,6 +217,7 @@ fn follow_file<W: Write + ?Sized>(
     json: bool,
     use_color: bool,
     writer: &mut W,
+    control: FollowControl,
 ) -> io::Result<()> {
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(initial_offset))?;
@@ -163,6 +225,9 @@ fn follow_file<W: Write + ?Sized>(
     let mut leftover = String::new();
 
     loop {
+        if control.should_stop() {
+            return Ok(());
+        }
         let mut buf = String::new();
         let n = reader.read_line(&mut buf)?;
         if n == 0 {
@@ -184,6 +249,22 @@ fn follow_file<W: Write + ?Sized>(
             && filters.matches(&value)
         {
             emit_line(&full_line, json, use_color, writer)?;
+        }
+    }
+}
+
+enum FollowControl {
+    Forever,
+    #[cfg(test)]
+    UntilStopped(Receiver<()>),
+}
+
+impl FollowControl {
+    fn should_stop(&self) -> bool {
+        match self {
+            Self::Forever => false,
+            #[cfg(test)]
+            Self::UntilStopped(stop) => !matches!(stop.try_recv(), Err(TryRecvError::Empty)),
         }
     }
 }
