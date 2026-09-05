@@ -79,6 +79,7 @@ pub(super) struct RunLog {
     pub(super) checkout_evidence_complete: bool,
     pub(super) checkout_evidence_scanned_bytes: usize,
     pub(super) checkout_evidence_source_truncated: bool,
+    pub(super) checkout_evidence_display_truncated: bool,
 }
 
 /// Cap on returned checkout-evidence lines, mirroring `github.run.logs`.
@@ -247,6 +248,7 @@ impl CiQueries for HostCiQueries {
             checkout_evidence_complete: log.checkout_evidence.complete,
             checkout_evidence_scanned_bytes: log.checkout_evidence.scanned_bytes,
             checkout_evidence_source_truncated: log.checkout_evidence.source_truncated,
+            checkout_evidence_display_truncated: log.checkout_evidence.display_truncated,
         })
     }
 
@@ -281,5 +283,6 @@ pub(super) fn bounded_run_log(raw: &str, max_bytes: usize) -> RunLog {
         checkout_evidence_complete: evidence.complete,
         checkout_evidence_scanned_bytes: evidence.scanned_bytes,
         checkout_evidence_source_truncated: evidence.source_truncated,
+        checkout_evidence_display_truncated: evidence.display_truncated,
     }
 }

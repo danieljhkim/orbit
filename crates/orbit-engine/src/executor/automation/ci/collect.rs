@@ -678,6 +678,13 @@ fn investigate<Q: CiQueries + ?Sized>(
             failure["checkout_evidence"] = json!(log.checkout_evidence);
             failure["checkout_evidence_scope"] = json!("all");
             set_checkout_identity(failure, "all", &log);
+            // A genuinely incomplete scan (the source-byte cap, or a dropped
+            // overlong line that could have carried checkout identity) stays
+            // fail-closed even when one SHA was already found: it cannot rule
+            // out a later, conflicting identity past whatever it didn't
+            // manage to read. Only a *display* cap (evidence line/commit
+            // count, or an overlong line unrelated to checkout) is exempt —
+            // that never touches `checkout_evidence_complete`.
             if !log.checkout_evidence_complete {
                 push_retryable_error(
                     retryable_errors,
@@ -686,11 +693,7 @@ fn investigate<Q: CiQueries + ?Sized>(
                     failure.get("run_id"),
                     "checkout evidence scan reached its hard limit; actual checkout identity is incomplete",
                 );
-            } else if failure
-                .get("actual_checkout_shas")
-                .and_then(Value::as_array)
-                .is_none_or(Vec::is_empty)
-            {
+            } else if log.checkout_commits.is_empty() {
                 push_retryable_error(
                     retryable_errors,
                     "registration",
@@ -727,6 +730,7 @@ fn set_checkout_identity(failure: &mut Value, scope: &str, log: &super::query::R
     failure["checkout_evidence_complete"] = json!(log.checkout_evidence_complete);
     failure["checkout_evidence_scanned_bytes"] = json!(log.checkout_evidence_scanned_bytes);
     failure["checkout_evidence_source_truncated"] = json!(log.checkout_evidence_source_truncated);
+    failure["checkout_evidence_display_truncated"] = json!(log.checkout_evidence_display_truncated);
     failure["checkout_identity"] = json!({
         "state": state,
         "observed_shas": log.checkout_commits,
@@ -736,6 +740,10 @@ fn set_checkout_identity(failure: &mut Value, scope: &str, log: &super::query::R
             "complete": log.checkout_evidence_complete,
             "scanned_bytes": log.checkout_evidence_scanned_bytes,
             "source_truncated": log.checkout_evidence_source_truncated,
+            // Display caps (evidence line/commit count, or an unrelated
+            // overlong line) reduce what is reported without bearing on
+            // whether identity itself was captured; see `complete` for that.
+            "display_truncated": log.checkout_evidence_display_truncated,
         },
     });
 }

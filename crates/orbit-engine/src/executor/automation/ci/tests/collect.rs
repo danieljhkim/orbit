@@ -732,6 +732,187 @@ fn investigation_failure_keeps_the_current_run_visible_and_retryable() {
     );
 }
 
+/// ORB-11248: a matrix workflow with enough jobs pushes the checkout-evidence
+/// line/commit display cap without the scan itself missing anything. That
+/// alone must not stop the failure from being filed.
+#[test]
+fn checkout_evidence_display_cap_alone_does_not_block_filing() {
+    let sha = "3".repeat(40);
+    let mut full_log = format!("ci\tCheckout\t2026-08-30T01:00:00Z HEAD is now at {sha}\n");
+    for _ in 0..45 {
+        full_log.push_str("ci\tCheckout\t2026-08-30T01:00:00Z Checking out the ref\n");
+    }
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log("10", true, &full_log);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert_eq!(failure["actual_checkout_shas"], json!([sha]));
+    assert_eq!(failure["checkout_identity"]["state"], json!("observed"));
+    assert_eq!(failure["checkout_evidence_display_truncated"], json!(true));
+    assert_eq!(failure["checkout_evidence_complete"], json!(true));
+    assert_eq!(failure["investigated"], json!(true));
+    assert_eq!(evidence["retryable_errors"], json!([]));
+    assert_eq!(evidence["outcome_hint"], json!("current_failures"));
+}
+
+/// A dropped overlong line that could have carried checkout identity leaves
+/// the scan genuinely incomplete. A SHA found elsewhere in the same log does
+/// not lift that: the scan cannot rule out a later, conflicting identity past
+/// whatever it failed to read, so this must stay fail-closed (retryable), not
+/// be filed on a partial read.
+#[test]
+fn a_genuinely_incomplete_scan_stays_retryable_even_when_a_sha_was_found() {
+    let sha = "4".repeat(40);
+    let overlong = "x".repeat(20_000);
+    let full_log = format!(
+        "ci\tCheckout\t2026-08-30T01:00:00Z HEAD is now at {sha}\n\
+         ci\tCheckout\t2026-08-30T01:00:01Z {overlong}\n"
+    );
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log("10", true, &full_log);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert_eq!(failure["actual_checkout_shas"], json!([sha]));
+    assert_eq!(failure["checkout_evidence_complete"], json!(false));
+    assert_eq!(failure["checkout_identity"]["state"], json!("incomplete"));
+    assert_eq!(failure["investigated"], json!(false));
+    let errors = evidence["retryable_errors"]
+        .as_array()
+        .expect("retryable_errors");
+    assert!(
+        errors.iter().any(|error| {
+            error["operation"] == json!("checkout_evidence")
+                && error["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("identity is incomplete"))
+        }),
+        "a genuine partial scan must stay retryable even with a SHA found: {errors:?}"
+    );
+    assert_eq!(evidence["outcome_hint"], json!("retryable_error"));
+}
+
+/// The other half of the same distinction: when the scan is incomplete *and*
+/// no SHA was found anywhere, there is genuinely insufficient evidence and
+/// the failure must stay retryable rather than being filed on a guess.
+#[test]
+fn an_incomplete_scan_with_no_sha_found_stays_retryable() {
+    let overlong = "z".repeat(20_000);
+    let full_log = format!("ci\tCheckout\t2026-08-30T01:00:00Z {overlong}\n");
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log("10", true, &full_log);
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert_eq!(failure["actual_checkout_shas"], json!([]));
+    assert_eq!(failure["checkout_identity"]["state"], json!("incomplete"));
+    assert_eq!(failure["investigated"], json!(false));
+    let errors = evidence["retryable_errors"]
+        .as_array()
+        .expect("retryable_errors");
+    assert!(
+        errors.iter().any(|error| {
+            error["operation"] == json!("checkout_evidence")
+                && error["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("identity is incomplete"))
+        }),
+        "insufficient evidence must stay retryable and auditable: {errors:?}"
+    );
+    assert_eq!(evidence["outcome_hint"], json!("retryable_error"));
+}
+
+/// A completely absent checkout step (no markers anywhere in the full log) is
+/// a distinct, complete-scan case: it must be reported as "missing" identity,
+/// not conflated with an incomplete scan, and still stays retryable since
+/// there is no evidence at all to file on.
+#[test]
+fn a_complete_scan_with_no_checkout_step_reports_missing_identity() {
+    let queries = FakeQueries::authenticated()
+        .with_head("topic", HEAD)
+        .with_head("main", HEAD)
+        .with_runs(vec![vec![run(
+            10,
+            "ci",
+            HEAD,
+            "completed",
+            Some("failure"),
+            "2026-08-30T01:00:00Z",
+        )]])
+        .with_run_view(
+            "10",
+            json!({"failed_jobs": [{"job_id": 5, "name": "build", "conclusion": "failure"}]}),
+        )
+        .with_log("10", false, "ci\tbuild\tassertion failed\n")
+        .with_log("10", true, "ci\tbuild\tno checkout markers here\n");
+
+    let evidence = collect(&queries, &input()).expect("collect");
+    let failure = &evidence["current_failures"][0];
+
+    assert_eq!(failure["checkout_evidence_complete"], json!(true));
+    assert_eq!(failure["checkout_identity"]["state"], json!("missing"));
+    assert_eq!(failure["investigated"], json!(false));
+    let errors = evidence["retryable_errors"]
+        .as_array()
+        .expect("retryable_errors");
+    assert!(
+        errors.iter().any(|error| {
+            error["operation"] == json!("checkout_evidence")
+                && error["message"] == json!("run logs contained no actual checkout SHA")
+        }),
+        "{errors:?}"
+    );
+}
+
 #[test]
 fn live_failure_fixture_is_latest_current_and_evidence_complete() {
     const EVENT_SHA: &str = "2a4cb4e4631a856552d901b6b062fa6596475cc0";
