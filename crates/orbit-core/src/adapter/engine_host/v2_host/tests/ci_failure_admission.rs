@@ -315,8 +315,15 @@ fn failed_or_warned_pilot_does_not_block_an_independent_eligible_fix() {
         &filings[2],
         Assessment::actionable("file:src/missing.rs", true),
     )
-    .expect_err("invalid selector fails only its pilot apply");
-    assert!(invalid.contains("does not resolve"), "{invalid}");
+    .expect("invalid selector is isolated to its pilot apply");
+    assert_eq!(invalid["status"], "failed");
+    assert_eq!(invalid["failed_partitions"][0]["outcome"], "failed");
+    assert!(
+        invalid["failed_partitions"][0]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("does not resolve")),
+        "{invalid}"
+    );
 
     let eligible = apply_pilot(
         &runtime,

@@ -194,6 +194,7 @@ impl RuntimeHost for CompletionFailureHost<'_> {
                     "allow_rebase_merge": true,
                     "allow_merge_commit": true,
                     "requires_linear_history": true,
+                    "allow_auto_merge": false,
                 }
             })),
             "pr.merge" => Err(orbit_common::OrbitError::Execution(
