@@ -20,7 +20,7 @@ spec:
     # `crew` is optional here: the pipeline names `system` on the pilot step so
     # the crew is readable in the job definition, while a direct invocation may
     # omit it and inherit the run's resolved crew.
-    required: [task_ids, workspace_path, base_branch, partition_index]
+    required: [task_ids, workspace_path, base_branch, inspection_revision, partition_index]
     properties:
       task_ids:
         type: array
@@ -33,7 +33,9 @@ spec:
       base_branch:
         type: string
       source_revision:
-        type: string
+        type: [string, "null"]
+      inspection_revision:
+        type: [string, "null"]
       partition_index:
         type: number
       crew:
@@ -113,9 +115,14 @@ spec:
     You are Orbit's task-pilot for one explicit, bounded partition.
 
     Input contains `task_ids` (one to five exact IDs), `workspace_path`,
-    `base_branch`, `source_revision` (the prepared landing-branch commit),
+    `base_branch`, `inspection_revision` (null only for a non-Git workspace),
+    `source_revision` (the prepared landing-branch commit),
     and `partition_index`. Work only on those task IDs and treat the
-    workspace as read-only.
+    workspace as read-only. The CLI host materializes `inspection_revision`
+    in an invocation-owned checkout and binds `workspace_path`, `repo_root`,
+    subprocess cwd, and filesystem reads to it. Orbit tool calls retain the
+    owning logical workspace through the managed environment; do not route
+    task tools using the temporary checkout path.
 
     For every task:
 
@@ -124,15 +131,15 @@ spec:
        `context_files`. Use `orbit.search` for the task ID and relevant design
        terms; inspect linked decision docs when a result points to one.
     2. With `proc.spawn` run only read-only `git`/`rg` commands. Verify the
-       workspace Git top-level. If `source_revision` is a commit id, inspect
+       workspace Git top-level and confirm HEAD equals `source_revision`
+       when set. Read candidate files only under this supplied checkout.
+       If `source_revision` is a commit id, inspect
        that exact snapshot (`git rev-parse`, `git ls-tree`, `git show
        <source_revision>:<path>`) and treat it as the source of truth for
        whether a modification target exists. `base_branch` names the landing
-       branch that snapshot belongs to. If `source_revision` is empty, inspect
-       `base_branch` as it exists in this checkout. If `base_branch` is also
-       empty, resolve the repository's default remote branch (and cross-check
-       the release branch recorded in CI evidence) instead of treating the
-       empty string as a Git ref.
+       branch that snapshot belongs to; it is provenance, not a ref to resolve
+       again. If `source_revision` is empty or null, this is a non-Git workspace:
+       inspect the supplied filesystem directly.
        Use the provider-native file-read tool to inspect candidate targets. Do not edit repository files.
     3. Propose `context_files_after` as exact canonical selectors using only
        `file:`, `dir:`, or `symbol:`. Every anchor must already exist inside
@@ -145,8 +152,8 @@ spec:
        evidence. Otherwise use disposition `selectors`. Never use an empty list
        merely because inspection was inconclusive.
        For a `ci-failure-sweep` task, compare the runner-tested commit and
-       original run evidence in the task description with `base_branch` as it
-       exists now. Inspect relevant history and current code. A failure from an
+       original run evidence in the task description with the pinned
+       `source_revision`. Inspect relevant history and code at that commit. A failure from an
        old release whose repair is already present must be `verified_no_diff`
        with `already_landed` set to an object containing concrete `evidence`;
        do not return executable selectors for it.

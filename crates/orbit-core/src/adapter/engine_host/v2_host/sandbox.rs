@@ -36,8 +36,8 @@ pub(crate) fn resolve_executor_sandbox(
             }
             #[cfg(target_os = "macos")]
             {
-                let mut resolved =
-                    resolve_fs_profile_absolute(runtime, fs_profile, None).map_err(|err| {
+                let mut resolved = resolve_fs_profile_absolute(runtime, fs_profile, subprocess_cwd)
+                    .map_err(|err| {
                         DispatchError::CliInvocationFailed(format!(
                             "resolve fsProfile for sandbox: {err}"
                         ))

@@ -1,5 +1,6 @@
 mod argv;
 mod envelope;
+mod inspection;
 mod orchestrator;
 mod spawn;
 mod supervisor;

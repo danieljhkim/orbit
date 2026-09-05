@@ -19,6 +19,41 @@ fn resolve_executor_sandbox_returns_none_when_executor_has_no_sandbox() {
     assert!(resolved.is_none());
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn reviewer_read_rules_follow_inspection_cwd_without_primary_write_grants() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    let inspection = tempfile::tempdir().unwrap();
+    let inspection_root = inspection.path().canonicalize().unwrap();
+    #[cfg(target_os = "linux")]
+    let kind = orbit_types::workflow::ExecutorSandboxKind::LinuxBwrap;
+    #[cfg(target_os = "macos")]
+    let kind = orbit_types::workflow::ExecutorSandboxKind::MacosSandboxExec;
+    seed_executor(&runtime, "claude", Some(kind));
+    let sandbox = runtime
+        .resolve_executor_sandbox("claude", Some("reviewer"), Some(&inspection_root))
+        .unwrap()
+        .unwrap();
+    assert!(
+        sandbox
+            .fs_profile
+            .read
+            .iter()
+            .any(|rule| rule.starts_with(&inspection_root.display().to_string()))
+    );
+    assert!(
+        !sandbox
+            .fs_profile
+            .read
+            .iter()
+            .any(|rule| rule.starts_with(&repo_root.display().to_string()))
+    );
+    assert!(!sandbox.fs_profile.modify.iter().any(|rule| {
+        rule.starts_with(&inspection_root.display().to_string())
+            || rule.starts_with(&repo_root.display().to_string())
+    }));
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn resolve_executor_sandbox_returns_linux_descriptor_with_absolute_mounts() {

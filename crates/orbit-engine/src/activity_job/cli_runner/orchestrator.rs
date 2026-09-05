@@ -27,6 +27,7 @@ use super::envelope::{
     cli_agent_envelope_json, parse_cli_invocation_trace, parse_cli_response_result,
     task_id_from_input, task_ids_from_input,
 };
+use super::inspection::SourceInspection;
 use super::spawn::{
     linux_bwrap_failed_write_diagnostic, macos_keychain_auth_diagnostic, orbit_tool_env,
     prepare_sandbox_for_dispatch, resolve_provider_launcher,
@@ -96,8 +97,19 @@ pub fn run_cli_backend(
     // re-allow the active worktree subpath after the policy deny rules. The
     // sandbox's `denyModify .orbit/**` rule otherwise blocks every non-codex
     // provider from writing inside its own jrun worktree. See T20260508-17.
-    let subprocess_cwd =
+    let source_cwd =
         resolve_subprocess_cwd(input, task_ctx.as_ref(), tool_ctx.workspace_root.as_deref())?;
+    let inspection = SourceInspection::from_input(input, source_cwd.as_deref(), fs_profile)?;
+    let inspection_input = inspection
+        .as_ref()
+        .map(|snapshot| snapshot.bind_input(input));
+    let inspection_task_ctx = inspection
+        .as_ref()
+        .and_then(|snapshot| task_ctx.as_ref().map(|task| snapshot.bind_input(task)));
+    let subprocess_cwd = inspection
+        .as_ref()
+        .map(|snapshot| snapshot.root().to_path_buf())
+        .or_else(|| source_cwd.clone());
     let subprocess_cwd_string = subprocess_cwd
         .as_ref()
         .map(|path| path.display().to_string());
@@ -110,8 +122,8 @@ pub fn run_cli_backend(
     let envelope_json = cli_agent_envelope_json(
         spec,
         run_id,
-        input,
-        task_ctx.as_ref(),
+        inspection_input.as_ref().unwrap_or(input),
+        inspection_task_ctx.as_ref().or(task_ctx.as_ref()),
         &activity_tools.requested_tools,
         &activity_tools.effective_tools,
     )?;
@@ -188,6 +200,8 @@ pub fn run_cli_backend(
     let stdin_blob_ref = audit.write_blob(&invocation.stdin);
 
     // L-0095: Provider cwd is advisory; enforce the linked-worktree postcondition.
+    // Inspection owns its temporary checkout separately; retain the original
+    // source pair here so task-worktree ownership validation stays unchanged.
     // Snapshot both sides of a linked-worktree invocation immediately before
     // provider spawn. `tool_ctx.workspace_root` is the registered primary
     // checkout; `subprocess_cwd` is the canonical assigned worktree. Direct
@@ -197,7 +211,7 @@ pub fn run_cli_backend(
         task_ctx.as_ref(),
         run_id,
         &provider,
-        subprocess_cwd.as_deref(),
+        source_cwd.as_deref(),
         tool_ctx.workspace_root.as_deref(),
         declared_worktree_pair.as_ref(),
     )?;
@@ -354,6 +368,10 @@ pub fn run_cli_backend(
             });
         }
     };
+
+    if let Some(snapshot) = &inspection {
+        snapshot.verify()?;
+    }
 
     if let Some(guard) = linux_post_run_guard {
         guard

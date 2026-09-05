@@ -2,6 +2,7 @@
 
 mod argv;
 mod envelope;
+mod inspection;
 mod orchestrator;
 #[cfg(target_os = "macos")]
 mod orchestrator_macos;
