@@ -1190,6 +1190,42 @@ fn auto_pipeline_checks_gate_results_after_fan_in() {
     }
 }
 
+/// [ORB-11268] `allowed_crews` reaching the `dispatch` fan-out is not enough:
+/// the generic escape hatch (`orbit run job task_auto_pipeline --input
+/// allowed_crews=<crew>` with `task_ids` left empty) forces the discovery
+/// branch in `list_backlog_tasks`, which reads the allowlist off
+/// `list_backlog`'s own rendered step input. If that step never forwards
+/// `input.allowed_crews`, discovery-mode backlog listing silently ignores the
+/// run's crew restriction even though the later gate still enforces it.
+#[test]
+fn auto_pipeline_list_backlog_step_forwards_allowed_crews() {
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_auto_pipeline").then_some(*yaml))
+        .expect("task auto pipeline default exists");
+    let asset = load_job_asset(yaml).expect("parse task auto pipeline");
+
+    let list_backlog = asset
+        .spec
+        .steps
+        .iter()
+        .find(|step| step.id == "list_backlog")
+        .expect("task auto pipeline has a list_backlog step");
+    match &list_backlog.body {
+        JobV2StepBody::TargetRef(target) => {
+            assert_eq!(target.target, "activity:list_backlog_tasks");
+            let input = target.default_input.as_ref().expect("list_backlog input");
+            assert_eq!(
+                input["allowed_crews"],
+                Value::String("{{ input.allowed_crews }}".to_string()),
+                "list_backlog must forward the job's top-level allowed_crews input, \
+                 not just the later dispatch step"
+            );
+        }
+        other => panic!("expected list_backlog target ref, got {other:?}"),
+    }
+}
+
 #[test]
 fn gate_pipeline_default_reservation_ttl_covers_child_wait_budget() {
     let yaml = DEFAULT_JOB_FILES
