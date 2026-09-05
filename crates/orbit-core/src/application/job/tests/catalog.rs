@@ -303,8 +303,18 @@ fn dependabot_sweep_pipeline_is_two_deterministic_steps_and_single_flight() {
         "collection_outcome:",
         "family_outcomes:",
         "skipped_over_cap:",
+        "match_kind:",
+        "match_evidence:",
     ] {
         assert!(file.contains(field), "file schema missing {field}");
+    }
+
+    let ci_file = DEFAULT_ACTIVITY_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "file_ci_failure_tasks").then_some(*yaml))
+        .expect("CI file activity default exists");
+    for field in ["match_kind:", "match_evidence:"] {
+        assert!(ci_file.contains(field), "CI file schema missing {field}");
     }
 }
 

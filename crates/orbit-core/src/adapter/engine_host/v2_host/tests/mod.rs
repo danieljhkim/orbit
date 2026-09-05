@@ -8,6 +8,7 @@ mod required_tools;
 mod sandbox;
 mod sandbox_nested;
 mod scan_unresolved;
+mod sweep_duplicate_tasks;
 mod task_context;
 mod task_pilot;
 mod triage;

@@ -35,6 +35,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::OrbitRuntime;
+use crate::adapter::engine_host::v2_host::duplicate_tasks::{
+    CoverageAnchor, CoverageFingerprint, DuplicateCandidate, DuplicateTaskLookup,
+    DuplicateTaskMatch, find_covering_task,
+};
 use crate::application::task::TaskAddParams;
 
 /// Wire contract with `collect_ci_evidence` (`orbit-engine`'s
@@ -79,17 +83,45 @@ pub(crate) fn file_ci_failure_tasks(
     runtime: &OrbitRuntime,
     input: &Value,
 ) -> Result<Value, OrbitError> {
-    file_ci_failure_tasks_with_add(runtime, input, |params| {
+    file_ci_failure_tasks_with_ops(runtime, input, runtime, |params| {
         runtime.add_task(params).map(|task| task.id)
     })
 }
 
+#[cfg(test)]
 pub(in crate::adapter::engine_host::v2_host) fn file_ci_failure_tasks_with_add<F>(
     runtime: &OrbitRuntime,
     input: &Value,
+    add_task: F,
+) -> Result<Value, OrbitError>
+where
+    F: FnMut(TaskAddParams) -> Result<String, OrbitError>,
+{
+    file_ci_failure_tasks_with_ops(runtime, input, runtime, add_task)
+}
+
+#[cfg(test)]
+pub(in crate::adapter::engine_host::v2_host) fn file_ci_failure_tasks_with_lookup<L>(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    lookup: &L,
+) -> Result<Value, OrbitError>
+where
+    L: DuplicateTaskLookup + ?Sized,
+{
+    file_ci_failure_tasks_with_ops(runtime, input, lookup, |params| {
+        runtime.add_task(params).map(|task| task.id)
+    })
+}
+
+fn file_ci_failure_tasks_with_ops<L, F>(
+    runtime: &OrbitRuntime,
+    input: &Value,
+    lookup: &L,
     mut add_task: F,
 ) -> Result<Value, OrbitError>
 where
+    L: DuplicateTaskLookup + ?Sized,
     F: FnMut(TaskAddParams) -> Result<String, OrbitError>,
 {
     let evidence = input.get("ci_evidence").ok_or_else(|| {
@@ -222,27 +254,41 @@ where
         .is_ok()
         .then(|| SYSTEM_CREW.to_string());
 
-    for cluster in &clusters {
-        if let Some(task_id) =
-            open_task_for_key(runtime, &cluster.failure_key).map_err(|error| {
+    // Complete every external lookup before the first task write. A transient
+    // duplicate-check failure must leave no partial filing or dedupe state.
+    let duplicate_matches = clusters
+        .iter()
+        .map(|cluster| {
+            find_covering_task(lookup, &cluster.duplicate_candidate()).map_err(|error| {
                 retryable_pipeline_error(
                     "dedupe_lookup",
                     &audit,
                     vec![json!({
                         "stage": "registration",
-                        "operation": "open_task_for_key",
+                        "operation": "find_covering_task",
                         "failure_key": cluster.failure_key,
                         "retryable": true,
                         "message": bounded_error(&error.to_string()),
                     })],
                 )
-            })?
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for (cluster, duplicate_match) in clusters.iter().zip(duplicate_matches) {
+        if let Some(DuplicateTaskMatch {
+            task_id,
+            match_kind,
+            evidence,
+        }) = duplicate_match
         {
             skipped_existing.push(json!({
                 "failure_key": cluster.failure_key,
                 "cluster_key": cluster.cluster_key,
                 "task_id": task_id,
                 "workflow": cluster.workflow,
+                "match_kind": match_kind,
+                "match_evidence": evidence,
             }));
             continue;
         }
@@ -256,6 +302,14 @@ where
                     .and_then(|entry| entry["task_id"].as_str())
                     .unwrap_or_default(),
                 "workflow": cluster.workflow,
+                "match_kind": "exact_key",
+                "match_evidence": {
+                    "fingerprint": "same_sweep_key",
+                    "matched_fields": [{
+                        "field": "failure_key",
+                        "value": cluster.failure_key,
+                    }],
+                },
             }));
             continue;
         }
@@ -442,6 +496,31 @@ struct FailureCluster {
 }
 
 impl FailureCluster {
+    fn duplicate_candidate(&self) -> DuplicateCandidate {
+        let exact_tag = format!("{CI_FAILURE_KEY_TAG_PREFIX}{}", self.failure_key);
+        let fingerprints = if self.signature_is_step_fallback {
+            // A step-name fallback contains no diagnostic. It is sufficient
+            // for exact-key idempotency but too weak for broader free-text
+            // coverage, where it could suppress an unrelated failure of the
+            // same generic CI step.
+            vec![CoverageFingerprint::new(
+                "ci_failure_unmatchable_fallback",
+                vec![CoverageAnchor::new("exact_failure_key", &exact_tag)],
+            )]
+        } else {
+            vec![CoverageFingerprint::new(
+                "ci_failure_root_cause",
+                vec![
+                    CoverageAnchor::new("workflow", format!("workflow {}", self.workflow)),
+                    CoverageAnchor::new("job", format!("failing job {}", self.job)),
+                    CoverageAnchor::new("step", format!("failing step {}", self.step)),
+                    CoverageAnchor::new("normalized_error_signature", &self.signature),
+                ],
+            )]
+        };
+        DuplicateCandidate::new(exact_tag, fingerprints)
+    }
+
     fn run_urls(&self) -> Vec<String> {
         self.runs
             .iter()
@@ -1180,29 +1259,6 @@ fn digest(parts: &[&str]) -> String {
         .chars()
         .take(KEY_LEN)
         .collect()
-}
-
-/// The id of a still-open task already carrying this failure key, if any.
-fn open_task_for_key(
-    runtime: &OrbitRuntime,
-    failure_key: &str,
-) -> Result<Option<String>, OrbitError> {
-    let tag = format!("{CI_FAILURE_KEY_TAG_PREFIX}{failure_key}");
-    let tasks = runtime.list_tasks_by_tags(std::slice::from_ref(&tag))?;
-    Ok(tasks
-        .into_iter()
-        .find(|task| is_open_status(task.status))
-        .map(|task| task.id))
-}
-
-/// Statuses that count as "already being handled". Mirrors the auto-task
-/// `skip_if_open` rule: done, archived, and rejected are closed, and everything
-/// else is in flight.
-fn is_open_status(status: TaskStatus) -> bool {
-    !matches!(
-        status,
-        TaskStatus::Done | TaskStatus::Archived | TaskStatus::Rejected
-    )
 }
 
 fn bounded_u64(input: &Value, key: &str, default: u64, max: u64) -> Result<u64, OrbitError> {
