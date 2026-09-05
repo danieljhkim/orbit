@@ -58,6 +58,7 @@ spec:
       default_input:
         max_tasks: "{{ input.max_tasks }}"
         task_ids: "{{ input.task_ids }}"
+        allowed_crews: "{{ input.allowed_crews }}"
 
     - id: validate_bundles
       target: activity:validate_bundles
