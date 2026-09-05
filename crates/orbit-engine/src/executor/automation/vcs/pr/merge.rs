@@ -22,6 +22,13 @@ pub(super) enum MergeStrategy {
     Merge,
 }
 
+/// Repository capabilities needed to request a permitted PR merge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct MergeCapabilities {
+    pub(super) strategy: MergeStrategy,
+    pub(super) auto_merge_allowed: bool,
+}
+
 impl MergeStrategy {
     pub(super) const fn as_str(self) -> &'static str {
         match self {
@@ -37,6 +44,14 @@ pub(super) fn resolve_merge_strategy<H: RuntimeHost + ?Sized>(
     workspace_path: &str,
     pr_number: &str,
 ) -> Result<MergeStrategy, OrbitError> {
+    Ok(resolve_merge_capabilities(host, workspace_path, pr_number)?.strategy)
+}
+
+pub(super) fn resolve_merge_capabilities<H: RuntimeHost + ?Sized>(
+    host: &H,
+    workspace_path: &str,
+    pr_number: &str,
+) -> Result<MergeCapabilities, OrbitError> {
     let response = host.run_private_vcs_operation(
         operations::PR_MERGE_CAPABILITIES,
         json!({
@@ -61,15 +76,25 @@ pub(super) fn resolve_merge_strategy<H: RuntimeHost + ?Sized>(
     let rebase = capability("allow_rebase_merge")?;
     let merge = capability("allow_merge_commit")?;
     let linear = capability("requires_linear_history")?;
+    let auto_merge_allowed = capability("allow_auto_merge")?;
 
     if squash {
-        return Ok(MergeStrategy::Squash);
+        return Ok(MergeCapabilities {
+            strategy: MergeStrategy::Squash,
+            auto_merge_allowed,
+        });
     }
     if rebase {
-        return Ok(MergeStrategy::Rebase);
+        return Ok(MergeCapabilities {
+            strategy: MergeStrategy::Rebase,
+            auto_merge_allowed,
+        });
     }
     if merge && !linear {
-        return Ok(MergeStrategy::Merge);
+        return Ok(MergeCapabilities {
+            strategy: MergeStrategy::Merge,
+            auto_merge_allowed,
+        });
     }
 
     let repository_name = repository

@@ -8,6 +8,7 @@ fn private_vcs_boundary_normalizes_repository_and_branch_merge_policy() {
         &json!({
             "data": {
                 "repository": {
+                    "autoMergeAllowed": true,
                     "squashMergeAllowed": false,
                     "rebaseMergeAllowed": true,
                     "mergeCommitAllowed": true,
@@ -35,6 +36,7 @@ fn private_vcs_boundary_normalizes_repository_and_branch_merge_policy() {
                 "allow_squash_merge": false,
                 "allow_rebase_merge": true,
                 "allow_merge_commit": true,
+                "allow_auto_merge": true,
                 "requires_linear_history": true,
             }
         })

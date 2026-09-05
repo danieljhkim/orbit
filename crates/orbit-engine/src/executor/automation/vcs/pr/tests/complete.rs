@@ -23,6 +23,44 @@ fn host(tasks: Vec<orbit_types::task::Task>) -> (tempfile::TempDir, PrOpenTestHo
     (root, host)
 }
 
+/// Without repository auto-merge, settling checks are polled until GitHub
+/// reports a normal mergeable state, then the permitted ordinary merge is used.
+#[test]
+fn pending_checks_with_auto_merge_disabled_wait_for_an_ordinary_merge() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("PENDING"), state("CLEAN"), merged_state()]);
+    host.queue_merge_capabilities_with_auto_merge(true, true, true, true, false);
+
+    let mut input = complete_input(root.path(), &["T1"]);
+    input["max_wait_seconds"] = json!(1);
+    let output = pr_complete(&host, &input).expect("complete after checks settle");
+
+    assert_eq!(output["merge"]["merged"], true);
+    assert_eq!(output["merge"]["auto_merge_requested"], false);
+    let merges = merge_calls(&host);
+    assert_eq!(merges.len(), 1, "only the ordinary merge is requested");
+    assert_eq!(merges[0]["auto"], false);
+    assert_eq!(merges[0]["strategy"], "squash");
+    assert_eq!(host.task_status("T1"), TaskStatus::Done);
+}
+
+#[test]
+fn pending_checks_with_auto_merge_disabled_time_out_in_review() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("PENDING")]);
+    host.queue_merge_capabilities_with_auto_merge(true, true, true, true, false);
+
+    let error = pr_complete(&host, &complete_input(root.path(), &["T1"]))
+        .expect_err("pending checks must respect the completion deadline");
+
+    assert!(error.to_string().contains("timed out"), "{error}");
+    assert!(
+        merge_calls(&host).is_empty(),
+        "disabled auto-merge is never requested"
+    );
+    assert_eq!(host.task_status("T1"), TaskStatus::Review);
+}
+
 fn complete_input(workspace_path: &std::path::Path, task_ids: &[&str]) -> Value {
     json!({
         "job_run_id": "batch-1",
