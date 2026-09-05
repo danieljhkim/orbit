@@ -34,11 +34,19 @@ subprocess, or authentication checks.
 orbit job list                                   # catalog
 orbit job show <job_id>
 orbit run job <job_id> --input key=value --json
+orbit run job <job_id> --input crew=<name> --json # override the run's crew for this run
 orbit run job <job_id> --wait                    # block until terminal; nonzero unless it succeeded
 orbit run history --json
 orbit run history -j <job_id>
 orbit run show <run_id> --json
 ```
+
+There is no `--crew` flag on `run job` — crew selection is always a run input.
+That picks the run's resolved crew (`resolved_run_crew` in `orbit run show
+--json`); an individual activity can still route elsewhere via an explicit
+activity `crew` or `system_crew: true`, which overrides even an explicit
+request. [run-debugging.md](run-debugging.md#verify-model-routing-before-reading-logs)
+covers reading `activity_provenance` for what actually dispatched.
 
 **Runs are asynchronous by default.** `orbit run job` submits to a detached
 worker and returns as soon as the run is durable — it prints the run id and the
