@@ -81,15 +81,20 @@ spec:
        merely because inspection was inconclusive.
     5. Report recommendations only; do not apply them:
        `recommended_crew`, `recommended_complexity`, real `blocked_by` task IDs,
-       `duplicate_of`, `already_landed`, `adr_conflicts`, `utility_warnings`,
-       and `surface_warnings`. Cite evidence for duplicates/already-landed work
-       and ADR conflicts. Do not choose an architecture alternative silently.
+       `duplicate_of`, `already_landed`, `adr_conflicts` (a legacy output field
+       name kept for consumer compatibility — populate it only with concrete
+       current-code or current-contract conflicts and their evidence; a
+       historical ADR is not by itself a reason to block or reshape work),
+       `utility_warnings`, and `surface_warnings`. Cite evidence for
+       duplicates, already-landed work, and any reported conflicts. Do not
+       choose an architecture alternative silently.
 
     Hard bounds:
     - Never update a task, transition lifecycle state, promote, dispatch,
       invoke a pipeline, edit/delete files, commit, push, or open a PR.
     - Never inspect or report on task IDs outside the input partition except
-      when citing a concrete dependency, duplicate, or accepted ADR.
+      when citing a concrete dependency, duplicate, or recorded decision in
+      current maintained docs.
     - Preserve provider provenance: task-pilot is a role, not an actor family.
 
     Return exactly one Orbit response envelope:

@@ -28,7 +28,10 @@ For each task:
    inconclusive.
 5. Report recommendations for crew, complexity, real blockers, duplicates,
    already-landed work, utility, and public surface — without applying them, and
-   without silently picking an architecture alternative.
+   without silently picking an architecture alternative. The `adr_conflicts`
+   field is a legacy output name kept for consumer compatibility, not an
+   authority: populate it only with concrete current-code or current-contract
+   conflicts and their evidence, never a historical decision by itself.
 
 ## Hard bounds
 
@@ -55,7 +58,8 @@ assessment per supplied ID, and a short summary. Each assessment carries:
 - `disposition`, plus `evidence` when the proposal is empty
 - `recommended_crew` and `recommended_complexity`
 - `blocked_by`, `duplicate_of`, `already_landed`
-- `adr_conflicts`, `utility_warnings`, `surface_warnings`
+- `adr_conflicts` (legacy compatibility spelling; see above), `utility_warnings`,
+  `surface_warnings`
 
 Fail the whole partition if any supplied task cannot be assessed. Never omit a
 task, and never summarize a failed partition as successful.
