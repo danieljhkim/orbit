@@ -13,6 +13,7 @@ pub(super) mod ci_failure_tasks;
 pub(super) mod cli_executor;
 pub(super) mod dependabot_alert_tasks;
 pub(super) mod dispatch;
+pub(super) mod duplicate_tasks;
 pub(super) mod pipeline_actions;
 pub(super) mod sandbox;
 pub(super) mod scan_unresolved;

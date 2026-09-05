@@ -44,7 +44,14 @@ fn file_error(runtime: &OrbitRuntime, input: Value) -> String {
 }
 
 /// One current failure, shaped exactly as `collect_ci_evidence` emits it.
-fn failure(run_id: u64, workflow: &str, job: &str, step: &str, log: &str, checkout: &str) -> Value {
+pub(super) fn failure(
+    run_id: u64,
+    workflow: &str,
+    job: &str,
+    step: &str,
+    log: &str,
+    checkout: &str,
+) -> Value {
     json!({
         "run_id": run_id,
         "workflow": workflow,
@@ -76,7 +83,7 @@ fn failure(run_id: u64, workflow: &str, job: &str, step: &str, log: &str, checko
     })
 }
 
-fn snapshot(current: Vec<Value>) -> Value {
+pub(super) fn snapshot(current: Vec<Value>) -> Value {
     let latest = current.clone();
     json!({
         "schema_version": 1,
@@ -99,7 +106,7 @@ fn snapshot(current: Vec<Value>) -> Value {
     })
 }
 
-fn filed_task_ids(output: &Value) -> Vec<String> {
+pub(super) fn filed_task_ids(output: &Value) -> Vec<String> {
     output["filed"]
         .as_array()
         .expect("filed array")
