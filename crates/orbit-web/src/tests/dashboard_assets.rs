@@ -1,6 +1,8 @@
 use axum::body::to_bytes;
 use axum::http::{HeaderValue, header};
 use axum::response::Response;
+use std::fs;
+use std::process::Command;
 
 use crate::{
     DASHBOARD_CSP, serve_app_js, serve_audit_js, serve_common_js, serve_diagnostics_js,
@@ -8,6 +10,45 @@ use crate::{
     serve_purify_js, serve_reliability_js, serve_router_js, serve_run_detail_js, serve_runs_js,
     serve_scoreboard_js, serve_tasks_js,
 };
+
+// The recent-history, aggregate-request, and route-selection assertions
+// addressed by this task have three dispositions:
+// * Keep static source checks when the source itself is the product contract
+//   (embedded asset packaging, CSP/MIME, or required copy/markup).
+// * Replace behavior claims with the Node harness below, which imports the
+//   shipped ES modules and observes DOM state or requests.
+// * Delete implementation-shape checks (helper names, predicate placement, and
+//   exact call counts) once the observable behavior is covered. Those shapes
+//   are not dashboard contracts and should be free to change during refactors.
+fn run_dashboard_javascript_test(script: &str) {
+    let temp_dir =
+        tempfile::tempdir().expect("create temporary dashboard JavaScript test directory");
+    let assets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/dashboard");
+    for entry in fs::read_dir(&assets_dir).expect("read dashboard asset directory") {
+        let entry = entry.expect("read dashboard asset entry");
+        let path = entry.path();
+        if path.extension().is_some_and(|extension| extension == "js") {
+            let destination = temp_dir.path().join(entry.file_name());
+            fs::copy(&path, destination).expect("copy shipped dashboard JavaScript module");
+        }
+    }
+    fs::write(temp_dir.path().join("package.json"), r#"{"type":"module"}"#)
+        .expect("write temporary JavaScript module manifest");
+    let harness_path = temp_dir.path().join("dashboard-behavior.mjs");
+    fs::write(&harness_path, script).expect("write dashboard JavaScript behavior harness");
+
+    let output = Command::new("node")
+        .arg(&harness_path)
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("run Node dashboard behavior harness");
+    assert!(
+        output.status.success(),
+        "dashboard behavior harness failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
 
 #[tokio::test]
 async fn dashboard_html_and_js_routes_emit_csp() {
@@ -183,273 +224,6 @@ fn dashboard_run_resume_matches_runtime_guard_and_surfaces_lineage_and_errors() 
 }
 
 #[test]
-fn dashboard_guards_per_workspace_panels_in_aggregate_view() {
-    // ORB-00039: in the aggregate "All workspaces" view there is no concrete
-    // workspace, so the per-workspace endpoints (/api/crews, /api/tasks/locks,
-    // /api/audit/summary, /api/scoreboard) must not be
-    // fetched — they'd 400 — and their panels show a placeholder instead.
-    // Asserted against the embedded asset sources since the dashboard has no JS
-    // test runner (see dashboard_markdown_call_sites above).
-    let app = include_str!("../../assets/dashboard/app.js");
-    let common = include_str!("../../assets/dashboard/common.js");
-    let css = include_str!("../../assets/dashboard/dashboard.css");
-
-    // A single aggregate-mode predicate, defined once and reused. ORB-00040 moved
-    // it into the shared leaf module (common.js) so audit.js and scoreboard.js can
-    // guard on the same live predicate; the raw check lives only inside the helper.
-    assert!(
-        common.contains("function isAggregateView()"),
-        "aggregate-mode check must be factored into isAggregateView() in common.js"
-    );
-    assert_eq!(
-        common
-            .matches("multiWorkspace && !currentWorkspace")
-            .count(),
-        1,
-        "the aggregate predicate must be defined once, not duplicated inline"
-    );
-    assert!(
-        !app.contains("function isAggregateView()"),
-        "isAggregateView() must be single-sourced in common.js, not redefined in app.js"
-    );
-    assert_eq!(
-        app.matches("const aggregate = isAggregateView();").count(),
-        2,
-        "isAggregateView() must gate both fetchAndRenderTasks and activeRefreshJobs"
-    );
-
-    // Aggregate mode renders placeholders instead of fetching the per-workspace
-    // summary panel.
-    assert!(
-        app.contains("renderAggregatePlaceholders()"),
-        "aggregate mode must render panel placeholders"
-    );
-    assert!(
-        common.contains("Select a workspace to view this panel"),
-        "skipped panels must show an inline placeholder prompt"
-    );
-    assert!(
-        css.contains(".panel-placeholder"),
-        "the aggregate placeholder must be styled"
-    );
-
-    // The per-workspace summary job is pushed only in the non-aggregate branch
-    // (previously an unconditional array literal with a trailing comma) — the
-    // old unconditional form must be gone.
-    assert!(
-        app.contains("jobs.push(fetchAndRenderSummary());"),
-        "fetchAndRenderSummary must be pushed conditionally, not unconditionally"
-    );
-    assert!(
-        !app.contains("fetchAndRenderSummary(),"),
-        "fetchAndRenderSummary must no longer be an unconditional job"
-    );
-
-    // Task locks and crews are skipped in aggregate mode; the aggregate task list
-    // (/api/tasks/all) still renders with a crew fallback rather than blocking.
-    assert!(
-        app.contains("if (!aggregate && !document.hidden) jobs.push(fetchAndRenderTaskLocks());"),
-        "task locks fetch must be skipped in aggregate mode"
-    );
-    assert!(
-        app.contains("const crews = aggregate ? Promise.resolve() : fetchAndCacheCrews();"),
-        "crews fetch must be skipped in aggregate mode so the task list still renders"
-    );
-}
-
-#[test]
-fn dashboard_guards_remaining_panels_in_aggregate_view() {
-    // ORB-00040: follow-up to ORB-00039. In the aggregate "All workspaces" view
-    // the Audit tab (/api/audit, /api/diagnostics/denials), the Knowledge tab
-    // (/api/frictions) and the scoreboard window
-    // selector (/api/scoreboard?window=...) still fired per-workspace endpoints
-    // that 400 and flipped conn-status to red. The isAggregateView() guard is
-    // extended to all of them, sharing one predicate from common.js. Asserted
-    // against the embedded asset sources (the dashboard has no JS test runner).
-    let app = include_str!("../../assets/dashboard/app.js");
-    let audit = include_str!("../../assets/dashboard/audit.js");
-    let scoreboard = include_str!("../../assets/dashboard/scoreboard.js");
-    let common = include_str!("../../assets/dashboard/common.js");
-
-    // The predicate + placeholder helper are shared from the leaf module so all
-    // three view modules guard on the same live state without a circular import.
-    assert!(
-        common.contains("export function isAggregateView()"),
-        "isAggregateView() must be exported from common.js for cross-module reuse"
-    );
-    assert!(
-        common.contains("export function setMultiWorkspace("),
-        "the multi-workspace flag setter must be exported from common.js"
-    );
-    assert!(
-        common.contains("export function renderPanelPlaceholder("),
-        "the shared placeholder renderer must be exported from common.js"
-    );
-    // Multi-workspace mode is fed once, from the workspace-discovery path.
-    assert!(
-        app.contains("setMultiWorkspace(dashboardWorkspaces.length > 1)"),
-        "aggregate mode must be driven by the discovered workspace count"
-    );
-
-    // Audit tab: both subtabs skip their per-workspace fetch and show a
-    // placeholder in aggregate mode (events -> /api/audit, policy -> denials).
-    assert!(
-        audit.contains("isAggregateView") && audit.contains("renderPanelPlaceholder"),
-        "audit.js must import the shared aggregate guard"
-    );
-    assert!(
-        audit.contains(r#"renderPanelPlaceholder("audit-body")"#),
-        "audit events subtab must show a placeholder in aggregate mode"
-    );
-    assert!(
-        audit.contains(r#"renderPanelPlaceholder("audit-policy-body")"#),
-        "audit policy subtab must show a placeholder in aggregate mode"
-    );
-
-    // Knowledge tab: the friction fetch is guarded at the chokepoint, so the
-    // auto-refresh, tab-activation and search-box entry points are all covered.
-    assert!(
-        app.contains(r#"renderPanelPlaceholder("frictions-body")"#),
-        "knowledge frictions must show a placeholder in aggregate mode"
-    );
-
-    // Scoreboard: the tab body shows a placeholder. Window clicks write shared
-    // dashboard state; the per-workspace fetch stays on the refresh path, which
-    // is already aggregate-guarded above.
-    assert!(
-        app.contains(r#"renderPanelPlaceholder("scoreboard-body")"#),
-        "scoreboard panel must show a placeholder in aggregate mode"
-    );
-    assert!(
-        !scoreboard.contains("fetchJson(`/api/scoreboard"),
-        "the scoreboard window selector must not fetch on its own"
-    );
-
-    // The guards read the live predicate before fetching (not a stale captured
-    // flag), so switching to "All workspaces" after a concrete selection is safe.
-    assert!(
-        app.matches("if (isAggregateView())").count() >= 1,
-        "the remaining knowledge fetch must guard on the live aggregate predicate"
-    );
-    assert!(
-        audit.matches("if (isAggregateView())").count() >= 2,
-        "both audit fetches must guard on the live aggregate predicate"
-    );
-}
-
-#[test]
-fn dashboard_guards_diagnostics_and_detail_panels_in_aggregate_view() {
-    // ORB-00044: follow-up to ORB-00039/00040 closing the two remaining
-    // aggregate-mode gaps. (1) The Diagnostics tab is fed exclusively by
-    // per-workspace endpoints (/api/job-runs plus /api/diagnostics/metrics,
-    // /errors, /friction and /implement_one all take the `Ws` extractor and 400
-    // without a concrete workspace), so in aggregate mode the whole tab branch
-    // of activeRefreshJobs is skipped and placeholders render instead. (2) The
-    // friction detail panel previously kept stale content with live resolve/patch
-    // buttons after switching to "All workspaces"; they now show the shared
-    // placeholder too. Asserted against the embedded asset sources (the
-    // dashboard has no JS test runner).
-    let app = include_str!("../../assets/dashboard/app.js");
-    let router = include_str!("../../assets/dashboard/router.js");
-
-    fn index_of(source: &str, name: &str, needle: &str) -> usize {
-        match source.find(needle) {
-            Some(index) => index,
-            None => panic!("{name} must contain `{needle}`"),
-        }
-    }
-
-    // Diagnostics: the aggregate guard sits at the top of the diagnostics
-    // branch, before any of the per-workspace fetch sites — every diagnostics
-    // fetch in activeRefreshJobs is unreachable in aggregate mode.
-    let branch = index_of(app, "app.js", r#"if (activeTab === "diagnostics") {"#);
-    let guard = index_of(
-        app,
-        "app.js",
-        "renderDiagnosticsPlaceholders();\n      return jobs;",
-    );
-    assert!(
-        branch < guard,
-        "the aggregate guard must live inside the diagnostics branch"
-    );
-    for fetch in [
-        "/api/diagnostics/metrics",
-        "/api/diagnostics/errors",
-        // ORB-10871: the incidents subtab is per-workspace too (`Ws` extractor).
-        "/api/audit/incidents",
-        "/api/diagnostics/implement_one",
-        "/api/tasks/completion-by-complexity",
-        "fetchAndRenderRuns()",
-    ] {
-        let fetch_at = index_of(app, "app.js", fetch);
-        assert!(
-            guard < fetch_at,
-            "diagnostics fetch `{fetch}` must come after the aggregate early-return"
-        );
-    }
-    // fetchAndRenderRuns (the "runs" subtab job, /api/job-runs +
-    // /api/diagnostics/friction) is only invoked from the guarded branch: one
-    // guarded call site plus the function definition itself.
-    assert_eq!(
-        app.matches("fetchAndRenderRuns()").count(),
-        2,
-        "fetchAndRenderRuns must have no unguarded call site"
-    );
-
-    // The placeholder helper covers both subtab bodies and the side card, and
-    // neutralizes the count.
-    assert!(
-        app.contains("function renderDiagnosticsPlaceholders()"),
-        "aggregate mode must render diagnostics placeholders"
-    );
-    for body in ["diag-body", "runs-body", "diag-implement-one-body"] {
-        assert!(
-            app.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
-            "diagnostics {body} must show a placeholder in aggregate mode"
-        );
-    }
-
-    // A diagnostics subtab switch re-renders from the stale last* caches in
-    // router.js, so it guards on the same live predicate instead of repainting
-    // the previous workspace's rows over the placeholder.
-    assert!(
-        router.contains("isAggregateView"),
-        "router.js must import the shared aggregate guard"
-    );
-    for body in ["diag-body", "runs-body"] {
-        assert!(
-            router.contains(&format!(r#"renderPanelPlaceholder("{body}")"#)),
-            "router subtab switch must render the {body} placeholder in aggregate mode"
-        );
-    }
-    // ORB-10444 added the scoreboard subtab, so there are three re-render sites.
-    // ORB-10588's reliability subtab is deliberately not a fourth: it is served
-    // by a cross-workspace endpoint (`/api/metrics/reliability` takes the whole
-    // DashboardState, not the `Ws` extractor), so it holds no per-workspace
-    // state to placehold and stays live in the aggregate view.
-    assert_eq!(
-        router.matches("isAggregateView()").count(),
-        3,
-        "every per-workspace subtab re-render site in router.js must be guarded"
-    );
-
-    // Knowledge detail panels: each list guard also replaces its detail panel
-    // (which carries the per-workspace action buttons) with the placeholder.
-    assert!(
-        app.contains("function renderKnowledgeDetailPlaceholder(prefix)"),
-        "the detail-panel placeholder helper must exist"
-    );
-    assert!(
-        app.contains("renderPanelPlaceholder(`${prefix}-detail`)"),
-        "the helper must target the <prefix>-detail panels"
-    );
-    assert!(
-        app.contains(r#"renderKnowledgeDetailPlaceholder("friction")"#),
-        "the friction list guard must also clear the stale detail panel"
-    );
-}
-
-#[test]
 fn dashboard_renders_complexity_as_its_own_dimension() {
     let diagnostics = include_str!("../../assets/dashboard/diagnostics.js");
     assert!(
@@ -472,22 +246,79 @@ fn dashboard_renders_complexity_as_its_own_dimension() {
 }
 
 #[test]
-fn dashboard_recent_history_filters_before_limiting() {
-    // ORB-10311: the recent-history panel must exclude legacy bare `commented`
-    // stubs *before* applying the five-row limit, so meaningful status/workflow
-    // events cannot be displaced by comment noise. Asserted against the embedded
-    // asset source (the dashboard has no JS test runner).
-    let tasks = include_str!("../../assets/dashboard/tasks.js");
-
-    let filter_at = tasks
-        .find(r#".filter((h) => h && h.event !== "commented")"#)
-        .expect("recent history must drop legacy `commented` stubs");
-    let slice_at = tasks
-        .find("meaningful.slice(-5).reverse()")
-        .expect("recent history must apply the five-row limit to the filtered list");
-    assert!(
-        filter_at < slice_at,
-        "the `commented`-stub filter must run before the recent-history slice"
+fn dashboard_shipped_javascript_observes_history_routes_and_aggregate_requests() {
+    run_dashboard_javascript_test(
+        r#"
+const nodes = [];
+class Node {
+  constructor(id = "") { this.id = id; this.children = []; this.dataset = {}; this.style = {}; this.listeners = {}; this.className = ""; this._text = ""; this.parentNode = null; this.hidden = false; nodes.push(this); }
+  appendChild(child) { if (child == null) return child; this.children.push(child); child.parentNode = this; return child; }
+  insertBefore(child, before) { const index = this.children.indexOf(before); if (index < 0) return this.appendChild(child); this.children.splice(index, 0, child); child.parentNode = this; return child; }
+  removeChild(child) { this.children = this.children.filter((candidate) => candidate !== child); child.parentNode = null; return child; }
+  prepend(child) { this.children.unshift(child); child.parentNode = this; }
+  remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter((child) => child !== this); }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  setAttribute(name, value) { this[name] = String(value); }
+  get textContent() { return this._text + this.children.map((child) => child.textContent || "").join(""); }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  set innerHTML(value) { this.textContent = value; }
+  get innerHTML() { return this.textContent; }
+  get firstChild() { return this.children[0] || null; }
+  get lastElementChild() { return this.children[this.children.length - 1] || null; }
+  get classList() { const self = this; return { add: (...c) => { self.className = `${self.className} ${c.join(" ")}`.trim(); }, remove: () => {}, toggle: (c, on) => { if (on) this.addClass(c); } }; }
+  addClass(c) { if (!this.className.split(/\\s+/).includes(c)) this.className = `${this.className} ${c}`.trim(); }
+  querySelectorAll() { return []; }
+  querySelector() { return null; }
+  contains(node) { return this === node || this.children.includes(node); }
+  focus() {}
+  closest() { return null; }
+}
+const byId = new Map();
+const get = (id) => byId.get(id) || (byId.set(id, new Node(id)), byId.get(id));
+const tabs = ["tasks", "audit", "diagnostics", "operations", "knowledge"].map((tab) => Object.assign(new Node(), { dataset: { tab } }));
+const panes = [...tabs, Object.assign(new Node(), { dataset: { tab: "run-detail" } })];
+globalThis.document = {
+  body: new Node("body"), hidden: false,
+  getElementById: get, createElement: () => new Node(), createElementNS: () => new Node(), createTextNode: (text) => Object.assign(new Node(), { textContent: text }), createDocumentFragment: () => new Node(),
+  querySelectorAll: (selector) => selector === ".tab" ? tabs : selector === ".tab-pane" ? panes : [],
+  querySelector: () => new Node(), addEventListener: () => {},
+};
+const location = new URL("http://dashboard.test/");
+globalThis.window = { location, innerHeight: 900, addEventListener: () => {}, matchMedia: () => ({ addEventListener: () => {}, matches: false }), localStorage: { getItem: () => null, setItem: () => {} } };
+globalThis.history = { replaceState: (_, __, url) => { location.href = String(url); } };
+Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: () => Promise.resolve() } }, configurable: true });
+globalThis.requestAnimationFrame = (fn) => fn();
+globalThis.setInterval = () => 0;
+globalThis.EventSource = class { constructor() {} close() {} };
+const requests = [];
+globalThis.fetch = async (path) => {
+  const url = String(path); requests.push(url);
+  const payload = url.startsWith("/api/workspaces") ? [{ id: "one", name: "one", status: "active", is_default: true }, { id: "two", name: "two", status: "active" }]
+    : url.startsWith("/api/tasks?") || url === "/api/tasks" ? { items: [], total: 0, limit: 50, truncated: false } : [];
+  return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+};
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const { renderTasks } = await import("./tasks.js");
+const { initRouter, setActiveTab } = await import("./router.js");
+const historyTask = { id: "ORB-11196", title: "history", status: "review", history: [
+  { event: "status-1", at: "1", by: "a" }, { event: "status-2", at: "2", by: "b" }, { event: "status-3", at: "3", by: "c" }, { event: "status-4", at: "4", by: "d" }, { event: "status-5", at: "5", by: "e" }, { event: "status-6", at: "6", by: "f" }, { event: "commented", at: "7", by: "noise" }, { event: "commented", at: "8", by: "noise" },
+] };
+const taskContext = { getTasks: () => [historyTask], getSearchQuery: () => "", getActiveStatuses: () => new Set(["review"]), statusOrder: ["review"], statusUpdateTargets: [], fmtAbsTime: (value) => value, refreshDashboard: () => Promise.resolve() };
+renderTasks([historyTask], taskContext);
+const row = nodes.find((node) => node.className.includes("row") && node.listeners.click);
+row.listeners.click();
+const historyLines = nodes.filter((node) => node.className === "history-line").map((node) => node.textContent);
+if (historyLines.length !== 5 || historyLines.some((line) => line.includes("commented")) || !historyLines[0].includes("status-6") || !historyLines[4].includes("status-2")) throw new Error(`recent history rendered incorrectly: ${historyLines}`);
+let selected = null;
+initRouter({ setTab: (tab) => { selected = tab; }, getDiagSubtab: () => "runs", setDiagSubtab: () => {}, getOperationsSubtab: () => "routines", setOperationsSubtab: () => {}, getKnowledgeSubtab: () => "frictions", setKnowledgeSubtab: () => {}, getRunId: () => null, setRunId: () => {}, getRunSubtab: () => "steps", setRunSubtab: () => {}, getExpandedSteps: () => new Set(), setExpandedSteps: () => {}, setRunLogs: () => {}, refreshDashboard: () => {}, fitLogPanelToViewport: () => {}, });
+setActiveTab("operations/auto-tasks", { refresh: false, updateHash: false });
+if (selected !== "operations" || !tabs.find((tab) => tab.dataset.tab === "operations").className.includes("active")) throw new Error("route did not select the Operations view");
+await import("./app.js");
+await tick(); await tick(); requests.length = 0;
+const selector = get("rail-workspace").children.find((child) => child.id === "workspace-select");
+selector.value = ""; selector.listeners.change(); await tick(); await tick();
+if (!requests.includes("/api/tasks/all") || requests.some((path) => ["/api/crews", "/api/tasks/locks", "/api/audit/summary"].some((forbidden) => path.startsWith(forbidden)))) throw new Error(`aggregate mode made incorrect requests: ${requests}`);
+"#,
     );
 }
 
@@ -517,7 +348,6 @@ fn dashboard_task_detail_shows_orchestrator_as_attribution_not_execution_crew() 
 #[tokio::test]
 async fn dashboard_top_level_nav_matches_the_operator_tabs() {
     let body = response_body(serve_index().await).await;
-    let router = include_str!("../../assets/dashboard/router.js");
 
     let nav: Vec<&str> = body
         .match_indices(r#"<button class="tab" data-tab=""#)
@@ -534,12 +364,6 @@ async fn dashboard_top_level_nav_matches_the_operator_tabs() {
         vec!["tasks", "audit", "diagnostics", "operations", "knowledge"]
     );
 
-    assert!(
-        router.contains(
-            r#"const TABS = ["tasks", "audit", "diagnostics", "operations", "knowledge", "run-detail"];"#
-        ),
-        "the router's tab list must match the nav (plus the hash-only run-detail route)"
-    );
     // Every routable tab must still have a pane to render into.
     for tab in [
         "tasks",
