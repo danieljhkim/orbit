@@ -417,6 +417,14 @@ async fn require_localhost_origin(request: Request<Body>, next: Next) -> Respons
     next.run(request).await
 }
 
+/// Tell long-lived streaming handlers (currently `/api/log/stream`) to close
+/// cooperatively. Called once from [`crate::shutdown_signal`] so the bounded
+/// graceful-drain deadline in `crate::run_server` rarely has to be relied on
+/// (ORB-11246).
+pub(super) fn request_shutdown() {
+    log::request_shutdown();
+}
+
 pub(super) fn router() -> Router<crate::state::DashboardState> {
     Router::new()
         .route("/search", get(search::search))
