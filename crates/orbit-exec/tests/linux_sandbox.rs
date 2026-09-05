@@ -517,6 +517,76 @@ fn direct_invocation_fails_closed_for_overlapping_non_subtree_deny() {
     assert!(error.to_string().contains("non-subtree denyModify"));
 }
 
+/// [ORB-11257] A read-only direct invocation can compile default dotenv glob
+/// denials. Live Bubblewrap must leave an existing match intact and refuse a
+/// newly created matching path; a write-capable sibling still fails closed.
+#[cfg(target_os = "linux")]
+#[test]
+fn kernel_enforces_existing_and_new_protected_env_paths_for_read_only_direct_invocation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    let existing = workspace.join(".env");
+    let created = workspace.join("new.env");
+    std::fs::write(&existing, "secret").expect("write existing protected path");
+    let read_only = profile(vec![
+        format!("!{}/**/.env", workspace.display()),
+        format!("!{}/**/.env.*", workspace.display()),
+        format!("!{}/**/*.env", workspace.display()),
+        format!("!{}/**/*.env.*", workspace.display()),
+    ]);
+    let unsafe_profile = profile(vec![
+        format!("{}/**", workspace.display()),
+        format!("!{}/**/*.env", workspace.display()),
+    ]);
+    let error = compile_linux_bwrap_argv(&unsafe_profile, "/bin/true", &[], None, false)
+        .expect_err("direct invocation must fail closed for unsafe profiles");
+    assert!(error.to_string().contains("non-subtree denyModify"));
+
+    let script = format!(
+        "! printf overwritten > '{existing}'; ! printf created > '{created}'; test -r '{existing}'",
+        existing = existing.display(),
+        created = created.display()
+    );
+    let plan = compile_linux_bwrap_argv(
+        &read_only,
+        "/bin/sh",
+        &["-c".to_string(), script],
+        Some(&workspace),
+        false,
+    )
+    .expect("compile read-only direct invocation");
+    assert!(
+        !plan.args.iter().any(|arg| arg == "--bind"),
+        "a no-modify profile must not gain a writable bind: {:?}",
+        plan.args
+    );
+
+    let probe = probe_bwrap();
+    if !probe.available {
+        println!("skipping real Bubblewrap test: {}", probe.detail);
+        return;
+    }
+    let mut child = spawn_under_linux_bwrap(LinuxBwrapSpawnRequest {
+        plan: &plan,
+        env: &[],
+        cwd: Some(&workspace),
+        stdin: Stdio::null(),
+        stdout: Stdio::null(),
+        stderr: Stdio::null(),
+    })
+    .expect("spawn");
+    assert!(child.wait().expect("wait").success());
+    assert_eq!(
+        std::fs::read_to_string(&existing).expect("read existing protected path"),
+        "secret"
+    );
+    assert!(
+        !created.exists(),
+        "newly created matching protected path must stay absent"
+    );
+}
+
 #[test]
 fn managed_worktree_guard_rejects_new_forbidden_match() {
     let temp = tempfile::tempdir().expect("tempdir");
