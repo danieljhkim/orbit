@@ -10,7 +10,9 @@
 //! substitutes into the instruction text before invoking the agent.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,58 @@ impl AgentModelPair {
 pub struct CrewAssignment {
     pub model: String,
     pub provider: String,
+    /// Optional Codex reasoning effort selected for this crew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<ReasoningEffort>,
+}
+
+/// The reasoning effort values accepted by the Codex CLI.
+///
+/// This closed set is shared by config admission and CLI argument rendering so
+/// an unsupported value cannot make it past config loading and then be
+/// silently ignored at execution time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub const VALUES: &'static str = "low, medium, high, xhigh, max";
+}
+
+impl fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        })
+    }
+}
+
+impl FromStr for ReasoningEffort {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim() {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "xhigh" => Ok(Self::Xhigh),
+            "max" => Ok(Self::Max),
+            other => Err(format!(
+                "invalid effort '{other}'; expected one of {}",
+                Self::VALUES
+            )),
+        }
+    }
 }
 
 /// A named provider-model assignment used for activity dispatch.

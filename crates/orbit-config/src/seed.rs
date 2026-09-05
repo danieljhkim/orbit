@@ -173,6 +173,7 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
                 RawCrewEntry {
                     provider: Some(crew.assignment.provider),
                     model: Some(crew.assignment.model),
+                    effort: crew.assignment.effort.map(|value| value.to_string()),
                     backend: None,
                     description: crew.description,
                     tags: crew.tags,
@@ -190,6 +191,7 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
             RawCrewEntry {
                 provider: assignment.provider,
                 model: assignment.model,
+                effort: None,
                 backend: None,
                 description: None,
                 tags: Vec::new(),
@@ -207,6 +209,7 @@ fn render_crews(seed: &ConfigSeed) -> Result<String, OrbitError> {
             RawCrewEntry {
                 provider: assignment.provider,
                 model: assignment.model,
+                effort: None,
                 backend: None,
                 description: None,
                 tags: Vec::new(),

@@ -157,6 +157,7 @@ pub fn run_cli_backend(
         spec.model.as_deref(),
         &provider_config,
     )
+    .and_then(|config| config.with_reasoning_effort(spec.reasoning_effort))
     .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent config: {err}")))?;
     let agent = Agent::new(&config)
         .map_err(|err| DispatchError::CliInvocationPermanent(format!("agent build: {err}")))?;

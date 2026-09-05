@@ -67,6 +67,7 @@ A **crew** is one provider-model assignment. Activities do not carry a model-sel
 |---|---|---|
 | `model` | Model identifier passed to the provider CLI | Provider-specific (e.g. `opus`, `sonnet`, `gpt-6-astra`, `gemini-3.8-flash`, `grok-4.6`) |
 | `provider` | Agent family | `claude`, `codex`, `gemini`, `grok`, `copilot`, `cursor` (the CLI-executable crew families; see [Provider identity and resolution](#provider-identity-and-resolution) for the full canonical set) |
+| `effort` | Optional Codex reasoning effort | `low`, `medium`, `high`, `xhigh`, or `max` (Codex crews only) |
 | `description` | Optional human-facing crew summary | Any non-empty string after trimming |
 | `tags` | Optional discovery labels | Array of strings; normalized, sorted, and deduplicated |
 
@@ -76,9 +77,23 @@ Example — the standard Codex Sol crew:
 [crews.sol]
 model = "gpt-5.6-sol"
 provider = "codex"
+effort = "high"
 description = "Systems implementation"
 tags = ["implementation", "review"]
 ```
+
+`effort` is omitted by default, which leaves the provider's existing model
+default unchanged. When set, Orbit validates it while loading `config.toml`
+and passes the selected Codex crew's value to the executor as
+`model_reasoning_effort`. Only Codex documents this exact argument contract;
+configuring `effort` on Claude, Gemini, Grok, Copilot, Cursor, or another
+provider fails clearly instead of being ignored or translated to a different
+setting. A selected activity crew (including `workflow.system_crew`) supplies
+its effort together with its provider and model, so it takes precedence over
+an activity's inline baseline in the same way as the rest of that assignment.
+For the standard Codex tiers, use the model-specific crew to choose capability
+first: Terra (`gpt-5.6-terra`) is the medium-low crew; `effort` adjusts the
+reasoning budget inside the chosen Codex model.
 
 Example — the standard Grok crew:
 
@@ -172,7 +187,7 @@ Provider selection is **three composed steps**, not one. Describe them precisely
 
 **2 — Which crew an activity uses.** A non-empty `crew` in the activity's rendered input selects that named crew. Without one, the activity uses the run's resolved crew from step 1. This is the only activity-authoring routing mechanism. Activity and job assets that declare `role` are rejected with guidance to pass `crew` in the activity input instead.
 
-**3 — The activity crew's assignment overrides the inline baseline** (`resolve_from_config`). For each `(provider, model)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew assignment that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
+**3 — The activity crew's assignment overrides the inline baseline** (`resolve_from_config`). For each `(provider, model, effort)` field independently: the selected crew value wins **when present**; otherwise the activity's inline `agent_loop` value stands. A crew assignment that omits a field (or whose `provider` string is unparseable) leaves the inline baseline in place — so a config typo never coerces dispatch onto a wrong runtime. This is also why **persisted provider identity is never re-defaulted** during reconciliation: a provider already frozen on a run record is reused verbatim, not reset to the enum default.
 
 ### The one setting that changes the default — `CONSTELLATION_DEFAULT_PROVIDER`
 

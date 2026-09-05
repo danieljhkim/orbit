@@ -285,6 +285,7 @@ fn agent_implement_shaped_step(id: &str, retry: Option<RetrySpec>) -> JobV2Step 
         tools: Vec::new(),
         on_denial: OnDenial::Terminate,
         model: None,
+        reasoning_effort: None,
         max_iterations: 1,
         backend: None,
         provider: Provider::Claude,

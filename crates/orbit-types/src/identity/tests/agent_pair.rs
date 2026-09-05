@@ -11,6 +11,7 @@ mod resolution {
         CrewAssignment {
             model: model.to_string(),
             provider: provider.to_string(),
+            effort: None,
         }
     }
 

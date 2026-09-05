@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use orbit_common::OrbitError;
-use orbit_types::identity::{Crew, CrewAssignment};
+use orbit_types::identity::{Crew, CrewAssignment, ReasoningEffort};
 use tempfile::tempdir;
 
 use super::{roots, write_config};
@@ -14,6 +14,7 @@ fn single_family_crew(name: &str) -> Crew {
     let assignment = CrewAssignment {
         model: format!("{name}-model"),
         provider: name.to_string(),
+        effort: None,
     };
     Crew {
         name: name.to_string(),
@@ -238,6 +239,65 @@ default_crew = "codex"
             .assignment
             .model,
         orbit_common::test_fixtures::TEST_CODEX_MODEL
+    );
+    assert_eq!(
+        config
+            .crews
+            .get("codex")
+            .expect("crew exists")
+            .assignment
+            .effort,
+        None,
+        "omitted effort preserves the provider default"
+    );
+}
+
+#[test]
+fn codex_crew_effort_accepts_every_supported_value() {
+    for (raw, expected) in [
+        ("low", ReasoningEffort::Low),
+        ("medium", ReasoningEffort::Medium),
+        ("high", ReasoningEffort::High),
+        ("xhigh", ReasoningEffort::Xhigh),
+        ("max", ReasoningEffort::Max),
+    ] {
+        let config = load_config(&format!(
+            "[crews.terra]\nmodel = \"gpt-5.6-terra\"\nprovider = \"codex\"\neffort = \"{raw}\"\n\n[workflow]\ndefault_crew = \"terra\"\n"
+        ))
+        .unwrap_or_else(|error| panic!("{raw} should load: {error}"));
+        assert_eq!(
+            config
+                .crews
+                .get("terra")
+                .expect("terra crew")
+                .assignment
+                .effort,
+            Some(expected),
+            "{raw}"
+        );
+    }
+}
+
+#[test]
+fn crew_effort_fails_closed_for_invalid_values_and_unsupported_providers() {
+    let invalid = load_config(
+        "[crews.terra]\nmodel = \"gpt-5.6-terra\"\nprovider = \"codex\"\neffort = \"medium-low\"\n\n[workflow]\ndefault_crew = \"terra\"\n",
+    )
+    .expect_err("invalid effort must fail config admission");
+    assert!(
+        invalid
+            .to_string()
+            .contains("expected one of low, medium, high, xhigh, max")
+    );
+
+    let unsupported = load_config(
+        "[crews.sonnet]\nmodel = \"sonnet\"\nprovider = \"claude\"\neffort = \"high\"\n\n[workflow]\ndefault_crew = \"sonnet\"\n",
+    )
+    .expect_err("unsupported provider must not silently ignore effort");
+    assert!(
+        unsupported
+            .to_string()
+            .contains("supported only for provider = \"codex\"")
     );
 }
 
