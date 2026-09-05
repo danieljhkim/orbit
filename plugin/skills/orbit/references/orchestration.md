@@ -23,6 +23,8 @@ orbit run ship <task-id> ...        # ship exactly these
 orbit run ship --mode local         # implement in a worktree, merge to the base; no PR
 orbit run auto --for 2h             # drain the backlog for a window
 orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
+orbit run readiness                        # explain current auto-drain eligibility, read-only
+orbit run readiness TASK-123 --json        # explain selected task IDs as JSON
 orbit run ship <task-id> --complete  # ... and also carry it through to `done`
 orbit run ship-sweep --dry-run      # what every registered workspace would ship
 orbit run triage                    # diagnose tasks blocked by failed runs
@@ -42,6 +44,14 @@ task filed mid-window starts without waiting for the batch around it.
 
 Runs are asynchronous: these commands return once the run is durable, printing a
 run ID. They do not claim the eventual outcome.
+
+`orbit run readiness` is the diagnostic counterpart to auto-drain. It reads a
+bounded snapshot of the explicit workspace and reports each selected backlog
+task as ready or waiting, naming unmet dependency IDs/statuses, context-lock
+holders, epic management, live child-run claims, and capacity saturation. It
+never creates a run, reconciles stale runs, reserves files, or mutates a task.
+Its answer can change immediately after the snapshot, so `eligible` means
+"would be admitted by this snapshot", never a guarantee that work will start.
 
 ```bash
 orbit run history -j task_auto_pipeline

@@ -9,6 +9,7 @@ use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
 use super::job::JobRunArgs;
 use super::logs::RunLogsArgs;
+use super::readiness::ReadinessCommand;
 use super::ship;
 use super::show::RunShowArgs;
 use super::sweep;
@@ -52,6 +53,7 @@ Workflows:
   ship        Ship backlog or explicitly selected tasks through the gated task pipeline
   ship-sweep  Dispatch ship runs in every registered workspace with ready backlog tasks
   triage      Triage tasks blocked by failed runs; re-backlog environmental failures
+  readiness   Explain why backlog tasks are waiting in auto-drain
   job         Run an arbitrary job by ID
 
 Audits:
@@ -93,6 +95,8 @@ pub enum RunSubcommand {
     ShipSweep(sweep::ShipSweepCommand),
     /// Triage tasks blocked by failed runs; re-backlog environmental failures
     Triage(triage::TriageCommand),
+    /// Explain why backlog tasks can or cannot start in auto-drain
+    Readiness(ReadinessCommand),
     /// Show recent job runs, optionally filtered to one job
     History(RunHistoryArgs),
     /// Show structured state and step summary for a job run
@@ -119,6 +123,7 @@ impl Execute for RunSubcommand {
             // registry-driven sweep never uses the cwd-derived runtime.
             RunSubcommand::ShipSweep(command) => command.execute_without_runtime(),
             RunSubcommand::Triage(command) => command.execute(runtime),
+            RunSubcommand::Readiness(command) => command.execute(runtime),
             RunSubcommand::History(command) => command.execute(runtime),
             RunSubcommand::Show(command) => command.execute(runtime),
             RunSubcommand::Logs(command) => command.execute(runtime),

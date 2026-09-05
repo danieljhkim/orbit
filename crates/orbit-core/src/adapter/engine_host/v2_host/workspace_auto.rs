@@ -1,15 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
+use orbit_common::OrbitError;
 use orbit_engine::DispatchError;
-use orbit_types::task::{Task, TaskStatus, task_dependencies_ready};
+use orbit_types::task::{Task, TaskStatus, task_dependencies_ready, unmet_task_dependencies};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 
 use super::backlog_exclusion::{
-    EpicFamilyMembership, epic_family_membership, list_backlog_tasks,
-    sort_tasks_for_automatic_dispatch,
+    BacklogTaskExclusionReason, EpicFamilyMembership, backlog_snapshot, epic_family_membership,
+    list_backlog_tasks, sort_tasks_for_automatic_dispatch,
 };
 
 /// The job that supervises one epic root. `classify_workspace_auto_tasks`
@@ -39,6 +40,8 @@ const DEFAULT_POLL_SLEEP_SECONDS: u64 = 30;
 /// only things that can change are a task arriving or the detached epic
 /// finishing.
 const DEFAULT_IDLE_SLEEP_SECONDS: u64 = 60;
+
+const MAX_READINESS_LIMIT: usize = 500;
 
 /// Longest drain window a caller may request, in seconds (24h). The window is
 /// the caller's, not a safety property, but an unbounded deadline would let a
@@ -158,6 +161,208 @@ pub(super) fn classify_workspace_auto_tasks(
     }))
 }
 
+/// Explain the same snapshot that auto-drain uses without performing its
+/// stale-run reconciliation. This is deliberately an observation API: it
+/// neither reserves work nor creates a pipeline run, and its answer can go
+/// stale immediately after the stores are read.
+pub fn explain_workspace_auto_readiness(
+    runtime: &OrbitRuntime,
+    task_ids: &[String],
+    max_active_leaf_runs: Option<u32>,
+    limit: usize,
+) -> Result<Value, OrbitError> {
+    if !(1..=MAX_READINESS_LIMIT).contains(&limit) {
+        return Err(OrbitError::InvalidInput(format!(
+            "readiness limit must be between 1 and {MAX_READINESS_LIMIT}"
+        )));
+    }
+    let max_active_leaf_runs = max_active_leaf_runs
+        .map(u64::from)
+        .unwrap_or(DEFAULT_MAX_ACTIVE_LEAF_RUNS);
+    if max_active_leaf_runs == 0 {
+        return Err(OrbitError::InvalidInput(
+            "concurrency must be at least 1".to_string(),
+        ));
+    }
+
+    let snapshot = backlog_snapshot(runtime, "explain_workspace_auto_readiness")
+        .map_err(|error| OrbitError::Execution(format!("read readiness snapshot: {error}")))?;
+    let live_leaves = read_live_leaf_runs(runtime)?;
+    let active_epic = read_active_epic_run(runtime)?;
+    let claimed_by_task =
+        live_leaves
+            .iter()
+            .fold(BTreeMap::<String, Vec<String>>::new(), |mut claims, run| {
+                for task_id in &run.task_ids {
+                    claims
+                        .entry(task_id.clone())
+                        .or_default()
+                        .push(run.run_id.clone());
+                }
+                claims
+            });
+    let free_slots = usize::try_from(max_active_leaf_runs)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(live_leaves.len());
+    let pending = snapshot
+        .admissible_leaves
+        .iter()
+        .filter(|task| !claimed_by_task.contains_key(&task.id))
+        .map(|task| task.id.clone())
+        .collect::<Vec<_>>();
+    let admitted = pending
+        .iter()
+        .take(free_slots)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let excluded_by_id = snapshot
+        .excluded
+        .iter()
+        .map(|excluded| (excluded.id.as_str(), excluded))
+        .collect::<BTreeMap<_, _>>();
+    let next_epic = if active_epic.is_none() {
+        next_admissible_epic_root(runtime, "explain_workspace_auto_readiness")
+            .map_err(|error| OrbitError::Execution(format!("read epic readiness: {error}")))?
+    } else {
+        None
+    };
+
+    let selected_ids = if task_ids.is_empty() {
+        let mut ids = snapshot
+            .task_lookup
+            .values()
+            .filter(|task| task.status == TaskStatus::Backlog)
+            .cloned()
+            .collect::<Vec<_>>();
+        sort_tasks_for_automatic_dispatch(&mut ids);
+        ids.into_iter().take(limit).map(|task| task.id).collect()
+    } else {
+        let mut ids = task_ids.to_vec();
+        ids.sort();
+        ids.dedup();
+        if let Some(missing) = ids
+            .iter()
+            .find(|id| !snapshot.task_lookup.contains_key(*id))
+        {
+            return Err(OrbitError::InvalidInput(format!(
+                "task `{missing}` was not found in this workspace"
+            )));
+        }
+        if ids.len() > limit {
+            return Err(OrbitError::InvalidInput(format!(
+                "readiness selection contains {} tasks; limit is {limit}",
+                ids.len()
+            )));
+        }
+        ids
+    };
+
+    let tasks = selected_ids
+        .iter()
+        .filter_map(|id| snapshot.task_lookup.get(id))
+        .map(|task| {
+            let mut entry = json!({
+                "task_id": task.id,
+                "status": task.status.to_string(),
+                "eligible": false,
+                "reason": "not_backlog",
+            });
+            let Some(object) = entry.as_object_mut() else {
+                unreachable!("readiness task entry is an object");
+            };
+            if task.status != TaskStatus::Backlog {
+                return Value::Object(object.clone());
+            }
+            let unmet = unmet_task_dependencies(task, &snapshot.status_by_id);
+            if !unmet.is_empty() {
+                object.insert("reason".to_string(), Value::String("unmet_dependency".to_string()));
+                object.insert(
+                    "dependencies".to_string(),
+                    json!(unmet
+                        .into_iter()
+                        .map(|dependency| json!({ "task_id": dependency.id, "status": dependency.status }))
+                        .collect::<Vec<_>>()),
+                );
+                return Value::Object(object.clone());
+            }
+            if let Some(excluded) = excluded_by_id.get(task.id.as_str()) {
+                match excluded.reason {
+                    BacklogTaskExclusionReason::EpicChild => {
+                        object.insert("reason".to_string(), Value::String("epic_managed".to_string()));
+                    }
+                    BacklogTaskExclusionReason::EpicRoot => {
+                        if active_epic.is_some() {
+                            object.insert("reason".to_string(), Value::String("epic_run_active".to_string()));
+                            object.insert("epic_run_id".to_string(), json!(active_epic.as_ref().map(|run| &run.run_id)));
+                        } else if next_epic.as_deref() == Some(task.id.as_str()) {
+                            object.insert("eligible".to_string(), Value::Bool(true));
+                            object.insert("reason".to_string(), Value::String("ready_as_epic".to_string()));
+                        } else {
+                            object.insert("reason".to_string(), Value::String("queued_behind_epic".to_string()));
+                            object.insert("next_epic_task_id".to_string(), json!(next_epic));
+                        }
+                    }
+                    BacklogTaskExclusionReason::ContextLockConflict
+                    | BacklogTaskExclusionReason::GroupMemberConflict => {
+                        object.insert(
+                            "reason".to_string(),
+                            Value::String(match excluded.reason {
+                                BacklogTaskExclusionReason::ContextLockConflict => "context_lock_conflict",
+                                BacklogTaskExclusionReason::GroupMemberConflict => "group_member_conflict",
+                                _ => unreachable!("lock exclusions are handled above"),
+                            }.to_string()),
+                        );
+                        object.insert(
+                            "conflicts".to_string(),
+                            json!(excluded.conflicts.iter().map(|conflict| json!({
+                                "requested_file": conflict.requested_file,
+                                "locking_task_id": conflict.locking_task_id,
+                            })).collect::<Vec<_>>()),
+                        );
+                    }
+                }
+                return Value::Object(object.clone());
+            }
+            if let Some(run_ids) = claimed_by_task.get(&task.id) {
+                object.insert("reason".to_string(), Value::String("claimed_by_live_child".to_string()));
+                object.insert("run_ids".to_string(), json!(run_ids));
+            } else if admitted.contains(&task.id) {
+                object.insert("eligible".to_string(), Value::Bool(true));
+                object.insert("reason".to_string(), Value::String("ready".to_string()));
+            } else {
+                object.insert("reason".to_string(), Value::String("capacity_saturated".to_string()));
+                object.insert("active_run_ids".to_string(), json!(live_leaves.iter().map(|run| &run.run_id).collect::<Vec<_>>()));
+            }
+            Value::Object(object.clone())
+        })
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "snapshot": {
+            "read_only": true,
+            "limitations": "Snapshot only: eligibility can change immediately and does not guarantee a task will start. No stale-run reconciliation, reservation, task mutation, or run submission was performed.",
+        },
+        "capacity": {
+            "max_active_leaf_runs": max_active_leaf_runs,
+            "active_leaf_runs": live_leaves.len(),
+            "free_slots": free_slots,
+        },
+        "tasks": tasks,
+    }))
+}
+
+impl OrbitRuntime {
+    /// Read-only projection of the current auto-drain admission snapshot.
+    pub fn workspace_auto_readiness(
+        &self,
+        task_ids: &[String],
+        max_active_leaf_runs: Option<u32>,
+        limit: usize,
+    ) -> Result<Value, OrbitError> {
+        explain_workspace_auto_readiness(self, task_ids, max_active_leaf_runs, limit)
+    }
+}
+
 /// A numeric loop input, tolerating the string a template renders. A step's
 /// `default_input` value goes through the template engine, so `5` arrives as
 /// `"5"`; an input the caller omitted renders as an empty string rather than
@@ -194,6 +399,7 @@ fn templated_u64(
 
 /// A live `task_auto_pipeline` run and the tasks it is carrying.
 struct LiveLeafRun {
+    run_id: String,
     task_ids: Vec<String>,
 }
 
@@ -211,14 +417,19 @@ fn live_leaf_runs(runtime: &OrbitRuntime, action: &str) -> Result<Vec<LiveLeafRu
                 format!("reconcile stale {LEAF_JOB_NAME} runs: {err}"),
             )
         })?;
+    read_live_leaf_runs(runtime)
+        .map_err(|error| action_failed(action, format!("list live {LEAF_JOB_NAME} runs: {error}")))
+}
+
+fn read_live_leaf_runs(runtime: &OrbitRuntime) -> Result<Vec<LiveLeafRun>, OrbitError> {
     let runs = runtime
         .stores()
         .jobs()
-        .list_pending_or_running_job_runs(LEAF_JOB_NAME)
-        .map_err(|err| action_failed(action, format!("list live {LEAF_JOB_NAME} runs: {err}")))?;
+        .list_pending_or_running_job_runs(LEAF_JOB_NAME)?;
     Ok(runs
         .into_iter()
         .map(|run| LiveLeafRun {
+            run_id: run.run_id,
             task_ids: run
                 .input
                 .as_ref()
@@ -258,14 +469,17 @@ fn active_epic_run(
             action: action.to_string(),
             message: format!("reconcile stale {EPIC_JOB_NAME} runs: {err}"),
         })?;
+    read_active_epic_run(runtime).map_err(|error| DispatchError::DeterministicActionFailed {
+        action: action.to_string(),
+        message: format!("list live {EPIC_JOB_NAME} runs: {error}"),
+    })
+}
+
+fn read_active_epic_run(runtime: &OrbitRuntime) -> Result<Option<ActiveEpicRun>, OrbitError> {
     let runs = runtime
         .stores()
         .jobs()
-        .list_pending_or_running_job_runs(EPIC_JOB_NAME)
-        .map_err(|err| DispatchError::DeterministicActionFailed {
-            action: action.to_string(),
-            message: format!("list live {EPIC_JOB_NAME} runs: {err}"),
-        })?;
+        .list_pending_or_running_job_runs(EPIC_JOB_NAME)?;
     Ok(runs.into_iter().next().map(|run| ActiveEpicRun {
         task_id: run
             .input

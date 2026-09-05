@@ -216,6 +216,10 @@ fn main() {
             root_override.as_deref(),
             workspace_selector.as_deref(),
         ),
+        RuntimeNeed::ReadOnly => RegisteredRuntimeFactory::initialize_read_only_with_overrides(
+            root_override.as_deref(),
+            workspace_selector.as_deref(),
+        ),
         RuntimeNeed::TaskOwner { task_id } => orbit_cmd::task_owner::initialize_for_task_show(
             root_override.as_deref(),
             workspace_selector.as_deref(),

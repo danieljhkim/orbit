@@ -7,6 +7,7 @@ mod history;
 pub mod job;
 pub mod legacy_logs;
 mod logs;
+mod readiness;
 pub mod ship;
 mod show;
 mod steps;

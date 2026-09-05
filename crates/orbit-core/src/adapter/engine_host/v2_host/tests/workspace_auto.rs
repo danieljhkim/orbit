@@ -86,6 +86,224 @@ fn list_epic_descendants_err(
         .expect_err("list epic descendants should fail")
 }
 
+fn readiness(runtime: &OrbitRuntime, task_ids: &[String], concurrency: Option<u32>) -> Value {
+    runtime
+        .workspace_auto_readiness(task_ids, concurrency, 50)
+        .expect("explain readiness")
+}
+
+fn readiness_task<'a>(output: &'a Value, task_id: &str) -> &'a Value {
+    output["tasks"]
+        .as_array()
+        .expect("readiness tasks")
+        .iter()
+        .find(|task| task["task_id"] == task_id)
+        .expect("readiness task")
+}
+
+#[test]
+fn readiness_explains_dependencies_locks_epics_claims_and_capacity() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/locked/src/lib.rs");
+    let dependency = seed_list_backlog_task(
+        &runtime,
+        "Unfinished dependency",
+        TaskStatus::Proposed,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let blocked = runtime
+        .add_task(TaskAddParams {
+            title: "Blocked leaf".to_string(),
+            description: "fixture".to_string(),
+            acceptance_criteria: vec!["fixture".to_string()],
+            plan: "fixture".to_string(),
+            dependencies: vec![dependency.id.clone()],
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed blocked leaf");
+    let missing_dependency = seed_list_backlog_task(
+        &runtime,
+        "Deleted dependency",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let missing = runtime
+        .add_task(TaskAddParams {
+            title: "Missing dependency leaf".to_string(),
+            description: "fixture".to_string(),
+            acceptance_criteria: vec!["fixture".to_string()],
+            plan: "fixture".to_string(),
+            dependencies: vec![missing_dependency.id.clone()],
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed missing dependency leaf");
+    runtime
+        .delete_task(&missing_dependency.id)
+        .expect("delete dependency for missing fixture");
+    let _holder = seed_list_backlog_task(
+        &runtime,
+        "Lock holder",
+        TaskStatus::InProgress,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec!["crates/locked/src/lib.rs"],
+    );
+    let locked = seed_list_backlog_task(
+        &runtime,
+        "Locked leaf",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec!["crates/locked/src/lib.rs"],
+    );
+    let epic = runtime
+        .add_task(TaskAddParams {
+            title: "Managed epic".to_string(),
+            description: "fixture".to_string(),
+            acceptance_criteria: vec!["fixture".to_string()],
+            plan: "fixture".to_string(),
+            tags: vec!["epic".to_string()],
+            status: Some(TaskStatus::Backlog),
+            ..Default::default()
+        })
+        .expect("seed epic");
+    let epic_child = seed_list_backlog_task(
+        &runtime,
+        "Managed epic child",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        Some(epic.id),
+        vec![],
+    );
+    let claimed = seed_list_backlog_task(
+        &runtime,
+        "Claimed leaf",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let claim_run = seed_live_leaf_run(&runtime, &[&claimed.id]);
+    let saturated = seed_list_backlog_task(
+        &runtime,
+        "Capacity leaf",
+        TaskStatus::Backlog,
+        TaskPriority::Low,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+
+    let ids = vec![
+        blocked.id.clone(),
+        missing.id.clone(),
+        locked.id.clone(),
+        epic_child.id.clone(),
+        claimed.id.clone(),
+        saturated.id.clone(),
+    ];
+    let output = readiness(&runtime, &ids, Some(1));
+
+    assert_eq!(
+        readiness_task(&output, &blocked.id)["reason"],
+        "unmet_dependency"
+    );
+    assert_eq!(
+        readiness_task(&output, &missing.id)["dependencies"][0]["status"],
+        "missing"
+    );
+    assert_eq!(
+        readiness_task(&output, &locked.id)["reason"],
+        "context_lock_conflict"
+    );
+    assert_eq!(
+        readiness_task(&output, &epic_child.id)["reason"],
+        "epic_managed"
+    );
+    assert_eq!(
+        readiness_task(&output, &claimed.id)["reason"],
+        "claimed_by_live_child"
+    );
+    assert_eq!(
+        readiness_task(&output, &claimed.id)["run_ids"],
+        json!([claim_run])
+    );
+    assert_eq!(
+        readiness_task(&output, &saturated.id)["reason"],
+        "capacity_saturated"
+    );
+}
+
+#[test]
+fn readiness_matches_dispatch_and_does_not_mutate_the_snapshot() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let first = seed_list_backlog_task(
+        &runtime,
+        "First ready leaf",
+        TaskStatus::Backlog,
+        TaskPriority::High,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let second = seed_list_backlog_task(
+        &runtime,
+        "Second ready leaf",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    let ids = vec![second.id.clone(), first.id.clone()];
+    let before_runs = runtime
+        .stores()
+        .jobs()
+        .list_pending_or_running_job_runs("task_auto_pipeline")
+        .expect("list runs");
+
+    let output = readiness(&runtime, &ids, Some(1));
+    let dispatched = classify_with(&runtime, json!({ "max_active_leaf_runs": 1 }));
+
+    assert_eq!(readiness_task(&output, &first.id)["reason"], "ready");
+    assert_eq!(readiness_task(&output, &first.id)["eligible"], true);
+    assert_eq!(
+        readiness_task(&output, &second.id)["reason"],
+        "capacity_saturated"
+    );
+    assert_eq!(dispatched["loose_task_ids"], json!([first.id]));
+    assert_eq!(
+        runtime
+            .stores()
+            .jobs()
+            .list_pending_or_running_job_runs("task_auto_pipeline")
+            .expect("list runs after"),
+        before_runs
+    );
+    assert_eq!(
+        runtime.get_task(&second.id).expect("read task").status,
+        TaskStatus::Backlog
+    );
+    assert!(
+        output["snapshot"]["limitations"]
+            .as_str()
+            .expect("limitations")
+            .contains("does not guarantee")
+    );
+}
+
 #[test]
 fn epic_descendants_are_dependency_then_dispatch_ordered_and_terminal_tasks_are_skipped() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
