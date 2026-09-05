@@ -1,91 +1,117 @@
-# Completion authorization
+# Dispatch and completion authorization
 
-This assumes [workflows.md](../orbit/references/workflows.md) and
-[orchestration.md](../orbit/references/orchestration.md)'s "Delivery and
-completion" section — read those for the full `completion` input and
-`review -> done` mechanics. This page covers what an orchestrator does with
-that authority once granted, not the mechanism itself.
+## Choose the requested delivery behavior
 
-## Base and ship defaults, not machine specifics
-
-Dispatch reads `workflow.base_branch` and the workspace's registered ship mode
-(`pr` unless the workspace sets otherwise) rather than a branch or path named
-in conversation. Teach and rely on those configured defaults; do not hardcode
-a specific branch name, worktree path, or crew name into a runbook — a
-different workspace configures different ones; use `--base`/`--mode` only to
-deliberately override.
-
-## What authorization actually grants
-
-Every authorization is scoped to what the user actually said, never inferred
-from a prior similar request:
-
-- Creating a task, or promoting it to `backlog`, authorizes neither dispatch
-  nor completion.
-- `orbit run ship <id> --complete` / `orbit run auto --complete` authorize
-  exactly the submitted run to carry the tasks it ships from `review` to
-  `done` — never a standing default, never something a workspace config file
-  or an unattended routine such as `ship-sweep` can turn on.
-- `run auto --complete` covers the whole window, including work filed after
-  the drain starts — the operator asked for a window, so treat everything the
-  drain admits inside it as covered, but not one moment beyond the window's
-  own bound (see below) and never a different drain the user did not invoke.
-- Never carry a specific session's bounded window (a duration, a task list, a
-  crew restriction) forward into a later request as if it were durable
-  policy. Ask again; a duration or scope is a fact about one request, not a
-  standing grant.
-
-## Keep independent work draining
-
-Once the user has authorized continuous completion for a window, do not add a
-blocking pre-merge review phase in front of it — that silently converts an
-authorized auto-drain into a gated one the user did not ask for. Post-merge
-review, QA, and CI feed findings back into new repair tasks that go through
-the ordinary preparation loop; they are not a checkpoint the drain waits on.
-→ [recovery.md](recovery.md)
-
-`--allow-crew` is the lever for a provider that is unavailable, rate-limited,
-or out of budget mid-window: it excludes named crews from *new* dispatch in
-that run only, and a task whose crew is excluded is skipped, not remapped —
-reassigning it to a permitted crew is a separate operator decision. See
-[orchestration.md](../orbit/references/orchestration.md) for the exact
-semantics before relying on it. → [walkthroughs.md](walkthroughs.md)
-
-## Stopping a bounded run
-
-A run's window bounds only the start of new work; a task already shipping
-when it expires keeps running to completion — do not assume expiry stopped
-it, and do not cancel it merely because the window ended. To stop
-in-flight work deliberately:
+Default shipping ends in `review`. It prepares a PR in PR mode; submission or
+PR creation does not prove a merge. Use `--complete` only when the user has
+authorized delivery through `done`:
 
 ```bash
-orbit run show <run_id> --json     # confirm what is actually still running
-orbit run cancel <run_id>          # the owning host's authoritative cancel
+orbit run ship <task-id> --complete
+orbit run auto --for 3h --concurrency 7 --complete
+orbit run auto --for 3h --concurrency 7 --complete --allow-crew <crew-a>,<crew-b>
 ```
 
-If cancellation itself needs process-level verification, follow the
-diagnose-before-kill order in [run-debugging.md](../orbit/references/run-debugging.md)
-rather than sending a signal based on a guess. Never cancel a parent
-gate/auto/epic run without first confirming it owns the task(s) you actually
-mean to stop.
+The numbers and crews are examples, not defaults or standing policy. Use the
+requested duration, concurrency, and configured crews. Without completion
+authorization, omit `--complete`. If the user will start the drain themselves,
+prepare work without launching a second coordinator.
 
-## Reporting handoff
+Prefer the connected MCP submission tool when it supports the requested
+options. If its schema lacks completion, use an available authorized admin
+command surface on the same host; do not invent a `complete` argument or
+silently submit a review-only run. See
+[tool-surface.md](../../orbit/references/tool-surface.md).
 
-Report from durable state, not from what you remember doing:
+`--complete` is default-off and applies to that submitted run:
 
-- Merged/completed work: tasks at `done`, with their run ID and verified
-  merge evidence.
-- Remaining work: tasks still `backlog`/`in-progress`/`review`, with what
-  each is waiting on.
-- Failures: the task and run ID, and the failure class from
-  [run-debugging.md](../orbit/references/run-debugging.md), not a paraphrase.
+- PR mode requires a verified merged PR before `done`.
+- Local mode requires merge and push before `done`.
+- Validated no-diff work may complete without a PR.
+- Auto completion covers every task admitted during the window, including
+  tasks prepared after it starts. Do not use a whole-backlog drain when only
+  named tasks were authorized.
+- It does not promote proposed tasks, bypass repository protections, or
+  authorize another window. Enabling GitHub auto-merge is not proof of merge.
 
-Never invent a token-cost or spend figure — Orbit does not hand you one, and a
-plausible-looking number is worse than omitting it.
+Use the configured base branch and ship mode unless the user requests an
+explicit override. Inspect effective inputs; `--base` and `--mode` are deliberate
+overrides. Never replace a user's branch choice with a hardcoded convention.
+Full delivery semantics: [orchestration.md](../../orbit/references/orchestration.md).
 
-A resumable handoff names, at minimum: the workspace selector, any run IDs
-still in flight, the authorization that was actually granted (what window,
-what scope, `--complete` or not), and the next preparation-loop step for each
-task that isn't done. A session that ends without recording this in task/run
-state (a task comment, an execution summary) leaves the next orchestrator
-guessing exactly like reading only agent prose would.
+## Keep authorized work moving
+
+Under a continuous-completion policy, do not insert an unrequested blocking
+review stage before merge. Post-merge review, QA, and CI feed new repair tasks
+through pilot and promotion. Existing branch protections still apply.
+
+`--concurrency` sets the drain's worker limit. Inspect active leaf runs and
+resource pressure before changing capacity; count system activities as well
+when assessing provider cost and host load. Do not start a second drain merely
+to raise capacity. Discover whether the installed version supports a live
+update, and follow its advertised command and authority requirements.
+
+`--allow-crew` is an **allowlist**: it permits the named configured crews and
+excludes others. Tasks outside it are skipped, not automatically remapped.
+It is scoped to the run and checked against resolved crew identity, including
+system activities; it does not cancel already-running workers. Diagnose with:
+
+```bash
+orbit run readiness --allow-crew <crew-a>,<crew-b> --json
+```
+
+Changing a task's crew is a separate operator action. Preserve explicit user
+choices, including a request to leave one existing expensive run alone.
+For a provider restriction during a window, use the recovery sequence in
+[walkthroughs.md](walkthroughs.md); do not reset the clock or drop `--complete`.
+
+## Window expiry and stopping
+
+The window bounds new admissions. Tasks admitted before its deadline retain
+their original completion authority and may finish afterward. Expiry is not
+cancellation, and an unfinished worker is not permission to extend the drain.
+Verify the coordinator's persisted deadline and terminal state rather than
+estimating from the conversation clock.
+
+A user stop overrides the supervision plan. Stop new actions as requested and
+state whether workers remain active; do not conflate stopping supervision
+with cancelling workers. For an authorized cancellation, inspect ownership and
+target only the intended run:
+
+```bash
+orbit run show <run-id> --json
+orbit run cancel <run-id>
+```
+
+Cancelling a parent may affect children. Inspect that behavior before replacing
+a coordinator; preserve unrelated workers and the original deadline. If no
+safe supported replacement exists, report the limitation. Do not work around
+it with overlapping drains or direct store edits.
+
+Further new work needs authorization that covers it. Existing explicit repair
+or deployment instructions may be broader than a drain window; evaluate the
+actual session scope rather than asking for approval already given. A later
+unrelated request does not inherit a previous window's completion permission.
+
+## Report an evidence-backed handoff
+
+Record the workspace/host, coordinator deadline and outcome, live child run
+IDs, completed task/PR evidence, queued work and its blockers, and the next
+step. Include operational changes requiring restoration and any pending
+binary install, asset sync, or service restart. Task/run comments can preserve
+necessary recovery context; do not substitute an agent summary for live state.
+
+Measure clearly defined cohorts:
+
+- PRs merged during the window versus runs started and finished inside it.
+  Identify pre-existing work that landed during the window.
+- Pipeline duration or task cycle time, with the actual start/end definition;
+  report sample size and median/p90 where useful.
+- Failed attempts, retries, cancellations, and eventual recovered tasks
+  separately, so one task is not counted twice as delivery.
+
+For historical comparisons use the same branch, timezone, and duration.
+Squash merges make raw commit counts incomparable to histories with merge
+commits; report merged PRs or first-parent landings alongside raw counts.
+Do not claim equal task difficulty, quality, or human-only authorship from
+commit counts. Never infer spend from token usage or invent missing costs.

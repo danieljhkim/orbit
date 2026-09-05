@@ -1,50 +1,49 @@
 ---
 name: orbit-orchestrate
-description: Operate as an orchestrator over an Orbit backlog — inspect workspace goals and live evidence, search prior work, author bounded tasks, run task_pilot_pipeline before promotion, supervise an authorized completion window, and route CI/QA/operational findings back into repair tasks. Use `orbit` instead to execute a single already-assigned task; a leaf worker must never become an orchestrator.
+description: Prepare and supervise an Orbit backlog — discover useful work, deduplicate tasks, run task-pilot, promote ready work, supervise authorized delivery, and route CI/QA findings into repairs. Use orbit instead for one assigned implementation task.
 ---
 
 # Orbit Orchestrate
 
-The orchestrator's operating loop, on top of the primitives the `orbit` skill
-already teaches. This file is the router; each reference below is loaded on
-demand. It does not restate tool schemas or job mechanics — read
-[concepts.md](../orbit/references/concepts.md),
-[tool-surface.md](../orbit/references/tool-surface.md), and
-[workflows.md](../orbit/references/workflows.md) there first if that
-vocabulary is new.
+Use Orbit's task and run state to keep authorized work moving. This skill
+teaches the operating loop; the companion [orbit skill](../orbit/SKILL.md)
+teaches the commands and tool contracts. A managed leaf worker executes its
+assigned task and cannot become an orchestrator or dispatch other runs.
 
-## Who this is for
+## Operating loop
 
-An orchestrator prepares and supervises a stream of work; it does not
-implement tasks itself. If you were handed exactly one task ID to execute, use
-[task-execution.md](../orbit/references/task-execution.md) instead. A leaf
-worker running inside a managed activity cannot dispatch or resume a run and
-must never try — see [tool-surface.md](../orbit/references/tool-surface.md).
+Inspect evidence → search open and closed work → author a bounded task → pilot
+→ verify applied context → promote → dispatch → supervise → feed findings back.
 
-## The loop
-
-```text
-inspect → search → author → prepare (pilot) → promote → dispatch → supervise
-                                                              ↑ feed back  ↓
-                                        post-merge review, QA, CI, operational repairs
-```
-
-Preparation only: a task an orchestrator files stays `proposed` until the
-run's actual start signal, and task-pilot fills its context before promotion
-— creating work is never itself authorization to run it.
+- Establish the owning host and authoritative workspace selector first. Use
+  that selector on durable MCP operations; never substitute a local store.
+- Follow the user's current scope, crew limits, and authorization. Preparation
+  can happen before execution starts. Once promotion is authorized and pilot
+  has applied valid context, promote promptly; do not invent another waiting
+  stage. An active drain can immediately claim a task placed in `backlog`.
+- **Completion is opt-in.** Default shipping ends in `review`. When the user
+  authorizes delivery through `done`, use `orbit run ship <task-id> --complete`
+  or `orbit run auto --for <duration> --complete`. The latter covers work
+  admitted throughout that window, including newly prepared tasks. It does
+  not itself authorize promotion or a later window.
+- Under an authorized continuous-completion policy, post-merge review, QA, and
+  CI produce repair tasks; do not insert an unrequested pre-merge review gate.
+  Repository protections still apply.
+- Agent reports are advisory. Verify persisted task changes, run outcomes,
+  merges, tests, and deployed behavior independently. Do not make activity
+  success depend on enforcing the shape of an agent's reported output.
+- Preserve user interventions. A changed status or crew is not automatically
+  a defect to undo. A stop instruction ends your supervision/new dispatches;
+  distinguish that from cancelling workers already running.
 
 ## References
 
 | Reference | Read it for |
 |---|---|
-| [loop.md](references/loop.md) | The full preparation loop: inspecting goals and evidence, searching prior work, authoring bounded tasks, choosing a crew, running task_pilot_pipeline, reading its warnings, and promoting to backlog. |
-| [authorization.md](references/authorization.md) | What an authorized completion window means, base/ship defaults, keeping independent work draining without a blocking pre-merge review phase, resumable handoff, and stopping a run. |
-| [recovery.md](references/recovery.md) | Routing CI findings, QA findings, and operational incidents back into repair tasks through the same preparation loop; evidence-led repair instead of retrying an identical failure. |
-| [walkthroughs.md](references/walkthroughs.md) | Short worked examples for seven recurring situations: missing context, duplicate/already-landed pilot warnings, dependency/lock blockage, an unavailable operator capability, a CI finding after merge, a provider failure, and a window expiring with in-flight work. |
+| [loop.md](references/loop.md) | Discovery, task quality, crew selection, zero-input pilot, immediate promotion, and observation. |
+| [authorization.md](references/authorization.md) | Executable `--complete` examples, concurrency and crew limits, window boundaries, and handoff metrics. |
+| [recovery.md](references/recovery.md) | CI deduplication, triage, failed completion, operational repair tasks, and deployment verification. |
+| [walkthroughs.md](references/walkthroughs.md) | Decisions for missing context, duplicates, locks, unavailable authority, provider limits, and window expiry. |
 
-## Start here
-
-- New to orchestration → [loop.md](references/loop.md).
-- Asked to keep a backlog moving, or to run for a bounded window → [authorization.md](references/authorization.md).
-- A CI failure, QA finding, or blocked run needs to become tracked work → [recovery.md](references/recovery.md).
-- Something unexpected happened mid-loop → [walkthroughs.md](references/walkthroughs.md).
+For unfamiliar Orbit vocabulary, start with [concepts.md](../orbit/references/concepts.md).
+For MCP versus CLI routing, read [tool-surface.md](../orbit/references/tool-surface.md).
