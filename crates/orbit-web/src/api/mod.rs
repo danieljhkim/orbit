@@ -430,6 +430,7 @@ pub(super) fn router() -> Router<crate::state::DashboardState> {
             get(tasks::completion_by_complexity),
         )
         .route("/tasks/all", get(workspaces::list_all_tasks))
+        .route("/job-runs/all", get(workspaces::list_all_job_runs))
         .route("/workspaces", get(workspaces::list_workspaces))
         .route(
             "/tasks/:id",

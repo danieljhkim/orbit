@@ -1792,6 +1792,105 @@ if (operationsDivider.textContent.includes("no observed tool calls or friction t
     );
 }
 
+#[test]
+fn dashboard_aggregate_runs_keep_workspace_identity_filters_and_action_scope() {
+    let css = include_str!("../../assets/dashboard/dashboard.css");
+    let router = include_str!("../../assets/dashboard/router.js");
+    assert!(css.contains(".runs-row.workspace-attributed"));
+    assert!(css.contains("@media (max-width: 760px)"));
+    assert!(css.contains("min-width: 900px"));
+    assert!(router.contains("function navigateToRunImpl(ctx, runId, workspaceId = null)"));
+    assert!(router.contains("setWorkspace(workspaceId);"));
+    assert!(router.contains("persistScopeToUrl();"));
+
+    run_dashboard_javascript_test(
+        r#"
+class Node {
+  constructor(id = "") { this.id = id; this.children = []; this.dataset = {}; this.style = {}; this.listeners = {}; this.className = ""; this._text = ""; this.parentNode = null; this.disabled = false; }
+  appendChild(child) { if (child == null) return child; if (child.parentNode) child.parentNode.removeChild(child); this.children.push(child); child.parentNode = this; return child; }
+  insertBefore(child, before) { if (child.parentNode) child.parentNode.removeChild(child); const index = this.children.indexOf(before); if (index < 0) return this.appendChild(child); this.children.splice(index, 0, child); child.parentNode = this; return child; }
+  removeChild(child) { this.children = this.children.filter((candidate) => candidate !== child); child.parentNode = null; return child; }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  setAttribute(name, value) { this[name] = String(value); }
+  get textContent() { return this._text + this.children.map((child) => child.textContent || "").join(""); }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  set innerHTML(value) { this.textContent = value; }
+  get innerHTML() { return this.textContent; }
+  get lastElementChild() { return this.children[this.children.length - 1] || null; }
+  get classList() { const self = this; return { add: (...classes) => { for (const c of classes) if (!self.className.split(/\s+/).includes(c)) self.className = `${self.className} ${c}`.trim(); }, toggle: (c, on) => { if (on) this.addClass(c); } }; }
+  addClass(c) { if (!this.className.split(/\s+/).includes(c)) this.className = `${this.className} ${c}`.trim(); }
+  querySelectorAll(selector) { const found = []; const visit = (node) => { for (const child of node.children) { if (selector === ".action-error" && child.className.split(/\s+/).includes("action-error")) found.push(child); visit(child); } }; visit(this); return found; }
+}
+const byId = new Map();
+const get = (id) => byId.get(id) || (byId.set(id, new Node(id)), byId.get(id));
+globalThis.document = {
+  getElementById: get,
+  createElement: () => new Node(),
+  createTextNode: (text) => Object.assign(new Node(), { textContent: text }),
+  createDocumentFragment: () => new Node(),
+};
+const location = new URL("http://dashboard.test/?run_state=active");
+globalThis.window = { location, innerWidth: 1200, confirm: () => true };
+globalThis.history = { replaceState: (_, __, url) => { location.href = String(url); } };
+Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: () => Promise.resolve() } }, configurable: true });
+const requests = [];
+globalThis.fetch = async (path) => {
+  requests.push(String(path));
+  const payload = { run_id: "jrun-next" };
+  return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+};
+
+const runs = [
+  { workspace_id: "alpha", workspace_name: "Alpha", run_id: "jrun-shared", job_id: "ship", state: "running", created_at: "2026-09-05T03:00:00Z" },
+  { workspace_id: "beta", workspace_name: "Beta", run_id: "jrun-shared", job_id: "ship", state: "failed", created_at: "2026-09-05T03:00:00Z" },
+];
+let navigated = null;
+const { initRuns, renderRuns, buildReplayRunButton } = await import("./runs.js");
+initRuns({
+  getLastRuns: () => runs,
+  getRunsMeta: () => ({ truncated: false }),
+  getRunSourcesUnavailable: () => [{ workspace_id: "gone", workspace_name: "Gone", error: "query failed" }],
+  navigateToRun: (runId, workspaceId) => { navigated = { runId, workspaceId }; },
+  fetchAndRenderRuns: () => Promise.resolve(),
+  getActiveRunId: () => null,
+});
+renderRuns(runs);
+const body = get("runs-body");
+let rows = body.children.filter((node) => node.className.includes("runs-row workspace-attributed") && !node.className.includes("runs-header"));
+if (rows.length !== 1 || !rows[0].textContent.includes("Alpha")) throw new Error(`active filter rendered wrong rows: ${body.textContent}`);
+if (!body.textContent.includes("Unavailable workspace: Gone")) throw new Error("partial workspace failure was hidden");
+
+let controls = body.children.find((node) => node.className.includes("runs-filter"));
+controls.children.find((node) => node.textContent === "all").listeners.click();
+rows = body.children.filter((node) => node.className.includes("runs-row workspace-attributed") && !node.className.includes("runs-header"));
+if (rows.length !== 2) throw new Error("all filter did not render both duplicate run ids");
+if (new Set(rows.map((row) => row.dataset.key)).size !== 2) throw new Error("duplicate run ids collided across workspaces");
+rows.find((row) => row.textContent.includes("Beta")).listeners.click();
+if (!navigated || navigated.runId !== "jrun-shared" || navigated.workspaceId !== "beta") throw new Error(`wrong detail identity: ${JSON.stringify(navigated)}`);
+
+const betaActions = rows.find((row) => row.textContent.includes("Beta")).children.at(-1);
+betaActions.children.find((node) => node.className.includes("run-resume")).listeners.click({ stopPropagation() {} });
+const alphaActions = rows.find((row) => row.textContent.includes("Alpha")).children.at(-1);
+alphaActions.children.find((node) => node.className.includes("run-cancel")).listeners.click({ stopPropagation() {} });
+const replay = buildReplayRunButton(runs[1], new Node());
+replay.listeners.click({ stopPropagation() {} });
+await new Promise((resolve) => setTimeout(resolve, 0));
+if (!requests.includes("/api/job-runs/jrun-shared/resume?workspace=beta")) throw new Error(`resume lost workspace scope: ${requests}`);
+if (!requests.includes("/api/runs/jrun-shared/cancel?workspace=alpha")) throw new Error(`cancel lost workspace scope: ${requests}`);
+if (!requests.includes("/api/runs/jrun-shared/replay?workspace=beta")) throw new Error(`replay lost workspace scope: ${requests}`);
+
+controls = body.children.find((node) => node.className.includes("runs-filter"));
+controls.children.find((node) => node.textContent === "failed").listeners.click();
+if (new URL(location.href).searchParams.get("run_state") !== "failed") throw new Error("run filter was not persisted in reload-safe URL state");
+window.innerWidth = 480;
+renderRuns(runs);
+rows = body.children.filter((node) => node.className.includes("runs-row workspace-attributed") && !node.className.includes("runs-header"));
+if (rows.length !== 1 || !rows[0].textContent.includes("Beta")) throw new Error("narrow-screen render lost the filtered workspace row");
+"#,
+    );
+}
+
 async fn response_body(response: Response) -> String {
     let bytes = match to_bytes(response.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
