@@ -440,7 +440,7 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
         defaults.get("crew").is_none(),
         "a job-input crew would be dead: the system-crew marker overwrites it before resolution"
     );
-    assert_eq!(asset.spec.steps.len(), 3);
+    assert_eq!(asset.spec.steps.len(), 4);
 
     let JobV2StepBody::TargetRef(prepare) = &asset.spec.steps[0].body else {
         panic!("task pilot preparation must be deterministic activity reference");
@@ -494,6 +494,15 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
         apply_input.get("crew").is_none() && apply_input.get("system_crew").is_none(),
         "the deterministic apply step must carry no crew key: it cannot receive the \
          system-crew injection, which only runs for agent-loop targets"
+    );
+
+    let JobV2StepBody::TargetRef(require_success) = &asset.spec.steps[3].body else {
+        panic!("task pilot must guard the durable partition apply result");
+    };
+    assert_eq!(require_success.target, "activity:pipeline_success_guard");
+    assert_eq!(
+        require_success.default_input.as_ref().expect("guard input")["result"],
+        "{{ steps.apply.output }}"
     );
     assert!(
         !yaml.contains("crew: luna") && !yaml.contains("{{ input.crew }}"),
