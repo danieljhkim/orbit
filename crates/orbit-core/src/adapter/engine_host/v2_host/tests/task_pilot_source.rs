@@ -374,6 +374,61 @@ fn untracked_workspace_file_is_not_admitted_against_the_source_snapshot() {
     );
 }
 
+/// ORB-11269: two concurrent `prepare_task_pilot` calls against the same
+/// shared primary must serialize their fast-forward instead of racing
+/// `git merge --ff-only` and misreporting the loser's index-lock contention
+/// as source staleness.
+#[test]
+fn concurrent_prepare_calls_against_the_same_primary_both_succeed() {
+    let fixture = remote_landing_fixture();
+
+    let results: Vec<Result<Value, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let fixture = &fixture;
+                scope.spawn(move || prepare_landing(fixture))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("prepare thread joined"))
+            .collect()
+    });
+
+    for (index, result) in results.iter().enumerate() {
+        let prepared = result
+            .as_ref()
+            .unwrap_or_else(|error| panic!("concurrent prepare {index} failed: {error}"));
+        assert_eq!(prepared["source"]["base_branch"], LANDING);
+        assert_eq!(
+            prepared["source"]["source_revision"], fixture.current_sha,
+            "prepare {index} must pin the landing-branch tip"
+        );
+    }
+
+    assert_eq!(
+        git(&fixture.repo, &["rev-parse", "HEAD"]),
+        fixture.current_sha,
+        "the primary must land exactly on the pinned revision, not a merge byproduct"
+    );
+    assert!(fixture.repo.join("src/merged.rs").exists());
+
+    let fast_forwarded_count = results
+        .iter()
+        .filter(|result| {
+            result
+                .as_ref()
+                .ok()
+                .and_then(|prepared| prepared["source"]["fast_forwarded"].as_bool())
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        fast_forwarded_count >= 1,
+        "at least one serialized caller must have performed the fast-forward"
+    );
+}
+
 #[test]
 fn non_git_workspace_still_uses_filesystem_existence() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
