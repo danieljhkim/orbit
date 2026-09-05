@@ -110,6 +110,13 @@ impl OrbitRuntime {
     /// surface submitted them. Auto mode has no task ids to key on and is
     /// unaffected.
     ///
+    /// [ORB-11187] `completion` is the caller's explicit authorization for this
+    /// run to finish delivery and perform the guarded `review -> done`
+    /// transition. It defaults to
+    /// [`CompletionPolicy::Review`](crate::application::workflow::CompletionPolicy::Review)
+    /// at every surface and is only ever raised by a per-invocation operator
+    /// flag; nothing derives it from workspace configuration or the environment.
+    ///
     /// [ORB-10709] The workspace claim is checked first, for the case the
     /// duplicate-dispatch guard structurally cannot cover: it is keyed on task
     /// id over a bounded window of recent runs, so a stale non-terminal run
@@ -122,6 +129,7 @@ impl OrbitRuntime {
         mode: crate::application::workflow::ShipMode,
         base_branch: Option<&str>,
         task_ids: &[String],
+        completion: crate::application::workflow::CompletionPolicy,
         actor: Option<&str>,
         claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
@@ -131,7 +139,8 @@ impl OrbitRuntime {
         )
         .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'ship'".to_string()))?;
         let base = base_branch.unwrap_or_else(|| self.workflow_base_branch());
-        let input = crate::application::workflow::build_ship_input(mode, base, task_ids)?;
+        let input =
+            crate::application::workflow::build_ship_input(mode, base, task_ids, completion)?;
         // Validate explicit selections before inspecting runs or creating a
         // pipeline record. Auto mode intentionally carries no task ids: the
         // worker discovers eligible backlog tasks after it starts.
@@ -164,6 +173,7 @@ impl OrbitRuntime {
         &self,
         for_seconds: Option<u64>,
         max_active_leaf_runs: Option<u32>,
+        completion: crate::application::workflow::CompletionPolicy,
         actor: Option<&str>,
         claim_token: Option<&str>,
     ) -> Result<PipelineInvokeResult, OrbitError> {
@@ -173,6 +183,17 @@ impl OrbitRuntime {
         )
         .ok_or_else(|| OrbitError::InvalidInput("unknown workflow 'auto'".to_string()))?;
         let mut input = json!({ "for_seconds": for_seconds.unwrap_or(0) });
+        // [ORB-11187] Blanket authorization: the drain re-lists the backlog
+        // every pass, so this policy governs every task admitted for the whole
+        // window, not only the ones visible at submission.
+        if completion.completes()
+            && let Some(object) = input.as_object_mut()
+        {
+            object.insert(
+                "completion".to_string(),
+                Value::String(completion.as_input_value().to_string()),
+            );
+        }
         if let Some(max_active_leaf_runs) = max_active_leaf_runs {
             if max_active_leaf_runs == 0 {
                 return Err(OrbitError::InvalidInput(

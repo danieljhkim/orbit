@@ -24,6 +24,49 @@ orbit run ship "$TASK_ID" --base main
 
 Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and then routes to `task_pr_pipeline` or `task_local_pipeline` from `--mode`.
 
+## Completing work with `--complete`
+
+By default a successful task ends in `review`, and a separate operator action
+takes it to `done`. `--complete` is your explicit authorization, granted on one
+invocation, for that run to finish delivery itself:
+
+```bash
+orbit run ship "$TASK_ID" --complete
+orbit run auto --for 4h --complete
+```
+
+It is off unless you pass it. No workspace setting, environment variable, or
+unattended routine (including `orbit run ship-sweep`) turns it on.
+
+What the run then does depends on the mode:
+
+- **`--mode local`** — the task reaches `done` only after the bundle has
+  committed, merged, and pushed. A failed merge or push fails the run with the
+  task still in `review`.
+- **`--mode pr`** — the run opens or reuses the PR as usual, then merges it
+  through GitHub. Branch protections and required checks are respected; Orbit
+  never uses an administrative bypass. If required checks are still running it
+  enables GitHub auto-merge and keeps waiting — enabling auto-merge is not
+  success on its own. The task moves to `done` only after the PR is verified
+  merged. A closed or blocked PR, a refused auto-merge, or an expired wait
+  budget fails the run and leaves the task in `review`.
+- **`no-diff-expected` work** — validated work that produced no diff completes
+  without needing a PR.
+
+Two limits are worth knowing:
+
+- `orbit run auto --complete` is *blanket* authorization. It covers every task
+  the drain admits for its whole window, including work that reaches the backlog
+  after the run starts — not only what is visible when you submit.
+- `--complete` authorizes delivery completion and the `review -> done`
+  transition only. It never approves `proposed` work into the backlog, and it
+  does not stand in for an independent review verdict; the transition is
+  recorded against the authorizing run and operator in the task's history.
+
+Submission stays asynchronous either way: the command prints the durable run ID
+and returns without knowing the eventual outcome. Follow it with
+`orbit run show <RUN_ID>`.
+
 ## Direct Job Execution
 
 For schemaVersion 2 jobs without a workflow alias, invoke them directly:

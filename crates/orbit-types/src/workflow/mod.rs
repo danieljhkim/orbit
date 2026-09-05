@@ -52,5 +52,5 @@ pub use routine::{
     RoutineRetries, RoutineTarget, RoutineTrigger,
 };
 pub use run_state::PipelineState;
-pub use ship::{ShipMode, resolved_ship_mode};
+pub use ship::{CompletionPolicy, ShipMode, resolved_ship_mode};
 pub use skill::Skill;

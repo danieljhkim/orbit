@@ -42,6 +42,9 @@ pub(super) fn ship(
         mode,
         base.as_deref(),
         &task_ids,
+        // [ORB-11187] Completion authority is an operator decision made at the
+        // CLI; this tool surface does not advertise or accept it.
+        crate::application::workflow::CompletionPolicy::Review,
         Some(&actor),
         claim_token.as_deref(),
     )?;

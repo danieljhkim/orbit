@@ -21,7 +21,7 @@ use crate::application::job::pipeline::{
     resolve_pipeline_worker_executable,
 };
 use crate::application::task::TaskAddParams;
-use crate::application::workflow::ShipMode;
+use crate::application::workflow::{CompletionPolicy, ShipMode};
 
 fn test_runtime() -> (TempDir, OrbitRuntime) {
     let root = TempDir::new().expect("tempdir");
@@ -843,6 +843,7 @@ fn ship_submission_refuses_a_task_already_carried_by_a_non_terminal_run() {
             ShipMode::Local,
             Some("main"),
             std::slice::from_ref(&selected_task_id),
+            CompletionPolicy::Review,
             Some("test"),
             None,
         )
@@ -898,7 +899,14 @@ fn ship_submission_guard_is_scoped_to_the_selected_tasks() {
         ("auto discovery", Vec::new()),
     ] {
         let error = runtime
-            .submit_ship_run(ShipMode::Local, Some("main"), &task_ids, Some("test"), None)
+            .submit_ship_run(
+                ShipMode::Local,
+                Some("main"),
+                &task_ids,
+                CompletionPolicy::Review,
+                Some("test"),
+                None,
+            )
             .expect_err("no job asset is deployed in this fixture");
         assert!(
             !matches!(error, OrbitError::ShipRunInFlight { .. }),
@@ -924,6 +932,7 @@ fn ship_submission_refuses_a_missing_explicit_task_before_persisting_a_run() {
             ShipMode::Local,
             Some("main"),
             std::slice::from_ref(&missing_id),
+            CompletionPolicy::Review,
             Some("test"),
             None,
         )
@@ -970,6 +979,7 @@ fn ship_submission_refuses_an_epic_root_but_allows_its_child() {
             ShipMode::Local,
             Some("main"),
             std::slice::from_ref(&epic.id),
+            CompletionPolicy::Review,
             Some("test"),
             None,
         )
@@ -988,6 +998,7 @@ fn ship_submission_refuses_an_epic_root_but_allows_its_child() {
             ShipMode::Local,
             Some("main"),
             std::slice::from_ref(&child.id),
+            CompletionPolicy::Review,
             Some("test"),
             None,
         )
@@ -1009,6 +1020,7 @@ fn ship_submission_mixed_explicit_selection_identifies_the_missing_task() {
             ShipMode::Local,
             Some("main"),
             &[existing_id, missing_id.clone()],
+            CompletionPolicy::Review,
             Some("test"),
             None,
         )

@@ -23,6 +23,7 @@ orbit run ship <task-id> ...        # ship exactly these
 orbit run ship --mode local         # implement in a worktree, merge to the base; no PR
 orbit run auto --for 2h             # drain the backlog for a window
 orbit run auto --for 2h --concurrency 8   # ... with 8 tasks in flight at a time
+orbit run ship <task-id> --complete  # ... and also carry it through to `done`
 orbit run ship-sweep --dry-run      # what every registered workspace would ship
 orbit run triage                    # diagnose tasks blocked by failed runs
 ```
@@ -141,14 +142,37 @@ prose. An orchestrator that reads a summary paragraph instead of
 
 ## Delivery and completion
 
-The normal task pipelines end in `review`. PR mode prepares a source branch and
-opens a PR; that is not evidence it merged. Local mode implements in an isolated
-worktree and fast-forwards the configured local base branch; the leaf job's
-`auto_push` input controls its optional push. Inspect the effective wrapper and
-child job inputs rather than assuming local mode means the current checkout was
-edited or a remote branch was updated.
+By default the task pipelines end in `review`. PR mode prepares a source branch
+and opens a PR; that is not evidence it merged. Local mode implements in an
+isolated worktree and fast-forwards the configured local base branch; the leaf
+job's `auto_push` input controls its optional push. Inspect the effective wrapper
+and child job inputs rather than assuming local mode means the current checkout
+was edited or a remote branch was updated.
 
 Record validation, commit, branch/PR, and run evidence, then follow the user's
-approval policy for completion. Do not infer a `--complete` flag or automatic
-merge behavior from planned features; discover the installed CLI/tool schema.
-Task snapshot publication is independent of source delivery and lifecycle.
+approval policy for completion. Task snapshot publication is independent of
+source delivery and lifecycle.
+
+`orbit run ship --complete` and `orbit run auto --complete` are the operator's
+explicit authorization for one submitted run to finish delivery and take the
+tasks it ships from `review` to `done`. Default-off, and never enabled by
+workspace configuration, an environment variable, or an unattended routine such
+as `ship-sweep`.
+
+- Local mode completes only after the bundle merged *and* pushed; a failed
+  publication leaves the task in `review`.
+- PR mode completes only after the PR is verified merged. Branch protections and
+  required checks are respected and never bypassed; pending checks may use
+  GitHub auto-merge, but enabling auto-merge is not success. A closed or blocked
+  PR, a refused auto-merge, or an expired wait leaves the task in `review`.
+- Validated `no-diff-expected` work completes without a PR.
+- `run auto --complete` is blanket authorization for every task the drain admits
+  during its whole window, including work filed after it starts. Do not use it
+  where the user authorized only the currently visible backlog.
+- It authorizes delivery completion and `review -> done` only. It never approves
+  `proposed` work into the backlog and is not an independent review verdict; the
+  transition is recorded against the authorizing run and operator.
+
+Submission stays asynchronous, so a `--complete` run's eventual outcome is not
+known when the command returns — confirm with `orbit run show <run_id>` and
+`orbit.task.show` rather than assuming it completed.

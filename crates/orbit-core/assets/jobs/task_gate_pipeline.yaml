@@ -53,6 +53,8 @@ spec:
     # ORB-10644: forwarded to the child pipeline; empty means the base is the
     # landing branch.
     landing_branch: ""
+    # ORB-11187: forwarded to the leaf pipeline unchanged.
+    completion: review
     max_wait_seconds: 3600
     poll_interval_seconds: 30
     ttl_seconds: 7200
@@ -94,6 +96,7 @@ spec:
           base_branch: "{{ input.base_branch }}"
           base_sync: "{{ input.base_sync }}"
           landing_branch: "{{ input.landing_branch }}"
+          completion: "{{ input.completion }}"
           auto_push: true
         admission_task_ids: "{{ input.task_ids }}"
         admission_workflow: worktree_setup

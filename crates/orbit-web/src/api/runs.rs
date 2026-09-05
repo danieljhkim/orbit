@@ -74,6 +74,10 @@ pub(super) async fn ship_workflow_action(
         mode,
         body.base.as_deref(),
         &body.task_ids,
+        // [ORB-11187] Completion authority is granted per invocation at the CLI
+        // (`orbit run ship --complete`); the dashboard does not offer it, so
+        // this endpoint always ends successful work at `review`.
+        orbit_core::CompletionPolicy::Review,
         Some("dashboard"),
         body.claim_token.as_deref(),
     ) {
