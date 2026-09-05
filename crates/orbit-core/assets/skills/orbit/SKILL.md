@@ -96,6 +96,7 @@ is seeded disabled and requires deliberate enablement:
 | Reference | Read it for |
 |---|---|
 | [setup/first-run.md](references/setup/first-run.md) | Zero to a working workspace: install, host identity and task prefix, `workspace init`, MCP client registration, verification. |
+| [setup/linux-sandbox.md](references/setup/linux-sandbox.md) | Linux Bubblewrap/AppArmor prerequisite, capability probe, sandbox guarantees, and supported remediation before dispatch. |
 | [setup/configuration.md](references/setup/configuration.md) | `orbit config` keys, crews and executors, policies and filesystem profiles, environment passthrough. |
 | [setup/automation.md](references/setup/automation.md) | The scheduler: OS clock → `orbit sweep` → routines → jobs. The seven seeded routines and the order to enable them. |
 | [setup/auto-tasks.md](references/setup/auto-tasks.md) | Recurring work as data — definitions that mint tasks on a schedule, instead of new code. |
@@ -107,6 +108,7 @@ is seeded disabled and requires deliberate enablement:
 ## Start here
 
 - New to Orbit, or `.orbit/` is absent → [concepts.md](references/concepts.md), then [setup/first-run.md](references/setup/first-run.md).
+- Preparing Linux for dispatch → [setup/linux-sandbox.md](references/setup/linux-sandbox.md) before starting an agent.
 - Given a task ID → [task-execution.md](references/task-execution.md).
 - Asked to create work → [task-authoring.md](references/task-authoring.md).
 - "Why didn't this fire / run / clean up?" → [setup/automation.md](references/setup/automation.md), then [setup/maintenance.md](references/setup/maintenance.md).
