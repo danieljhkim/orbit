@@ -2,7 +2,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use orbit_common::test_fixtures::TEST_CODEX_MODEL;
@@ -10,7 +10,9 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use crate::command::log::format::{LevelFilter, format_message};
-use crate::command::log::tail::{TailArgs, build_filters, run_tail};
+use crate::command::log::tail::{
+    FollowTestControl, TailArgs, build_filters, run_tail, run_tail_with_test_control,
+};
 
 fn fixture_lines() -> Vec<String> {
     vec![
@@ -234,27 +236,10 @@ fn follow_mode_emits_appended_line_within_window() {
     let path = dir.path().join("orbit.jsonl");
     write_fixture(&path, &fixture_lines());
 
-    let path_clone = path.clone();
-    let (tx, rx) = mpsc::channel::<String>();
-    let handle = thread::spawn(move || {
-        let mut buf = TeeWriter::new(tx);
-        let args = TailArgs {
-            lines: 0,
-            follow: true,
-            target: None,
-            level: None,
-            since: None,
-            json: false,
-            path: Some(path_clone.clone()),
-        };
-        let filters = build_filters(&args).expect("filters");
-        // Tail should never return because of follow mode — we let the
-        // join handle leak (test process exits when done).
-        let _ = run_tail(&path_clone, &args, &filters, false, &mut buf);
-    });
-
-    // Give the follower a moment to seek to EOF and start polling.
-    thread::sleep(Duration::from_millis(75));
+    // The worker starts late on purpose: appending is nevertheless safe
+    // because readiness is the post-offset transition, not elapsed time.
+    let mut follower = spawn_follower(path.clone(), false, Duration::from_millis(100));
+    follower.wait_until_ready();
 
     let mut file = OpenOptions::new()
         .append(true)
@@ -277,7 +262,7 @@ fn follow_mode_emits_appended_line_within_window() {
     let deadline = Instant::now() + Duration::from_millis(500);
     let mut found = false;
     while Instant::now() < deadline {
-        if let Ok(line) = rx.recv_timeout(Duration::from_millis(50))
+        if let Ok(line) = follower.recv_timeout(Duration::from_millis(50))
             && line.contains("post-fixture")
         {
             found = true;
@@ -285,10 +270,8 @@ fn follow_mode_emits_appended_line_within_window() {
         }
     }
 
-    // The follower thread is intentionally not joined; the test process
-    // exits once the assertion completes.
-    drop(handle);
     assert!(found, "follow mode did not surface appended line");
+    follower.finish();
 }
 
 #[test]
@@ -299,24 +282,8 @@ fn follow_mode_with_json_flag_emits_appended_line_as_raw_jsonl() {
     let path = dir.path().join("orbit.jsonl");
     write_fixture(&path, &fixture_lines());
 
-    let path_clone = path.clone();
-    let (tx, rx) = mpsc::channel::<String>();
-    let handle = thread::spawn(move || {
-        let mut buf = TeeWriter::new(tx);
-        let args = TailArgs {
-            lines: 0,
-            follow: true,
-            target: None,
-            level: None,
-            since: None,
-            json: true,
-            path: Some(path_clone.clone()),
-        };
-        let filters = build_filters(&args).expect("filters");
-        let _ = run_tail(&path_clone, &args, &filters, false, &mut buf);
-    });
-
-    thread::sleep(Duration::from_millis(75));
+    let mut follower = spawn_follower(path.clone(), true, Duration::ZERO);
+    follower.wait_until_ready();
 
     let mut file = OpenOptions::new()
         .append(true)
@@ -339,7 +306,7 @@ fn follow_mode_with_json_flag_emits_appended_line_as_raw_jsonl() {
     let deadline = Instant::now() + Duration::from_millis(500);
     let mut got_raw = false;
     while Instant::now() < deadline {
-        if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
+        if let Ok(chunk) = follower.recv_timeout(Duration::from_millis(50)) {
             // Followed JSON output is the raw JSONL line — i.e. the same
             // string we appended, optionally followed by a newline. The
             // formatted four-column view would render `step json-followed
@@ -352,11 +319,87 @@ fn follow_mode_with_json_flag_emits_appended_line_as_raw_jsonl() {
         }
     }
 
-    drop(handle);
     assert!(
         got_raw,
         "follow mode with --json did not surface appended line as raw JSONL",
     );
+    follower.finish();
+}
+
+fn spawn_follower(path: PathBuf, json: bool, startup_delay: Duration) -> FollowWorker {
+    let (output_tx, output_rx) = mpsc::channel();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let handle = thread::spawn(move || {
+        thread::sleep(startup_delay);
+        let mut buf = TeeWriter::new(output_tx);
+        let args = TailArgs {
+            lines: 0,
+            follow: true,
+            target: None,
+            level: None,
+            since: None,
+            json,
+            path: Some(path.clone()),
+        };
+        let filters = build_filters(&args).expect("filters");
+        run_tail_with_test_control(
+            &path,
+            &args,
+            &filters,
+            false,
+            &mut buf,
+            FollowTestControl::new(ready_tx, stop_rx),
+        )
+    });
+    FollowWorker {
+        output_rx,
+        ready_rx,
+        stop_tx,
+        handle: Some(handle),
+    }
+}
+
+struct FollowWorker {
+    output_rx: mpsc::Receiver<String>,
+    ready_rx: mpsc::Receiver<()>,
+    stop_tx: mpsc::Sender<()>,
+    handle: Option<JoinHandle<io::Result<()>>>,
+}
+
+impl FollowWorker {
+    fn wait_until_ready(&self) {
+        self.ready_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("follower established its initial offset");
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> Result<String, mpsc::RecvTimeoutError> {
+        self.output_rx.recv_timeout(timeout)
+    }
+
+    fn finish(&mut self) {
+        let _ = self.stop_tx.send(());
+        self.join();
+    }
+
+    fn join(&mut self) {
+        self.handle
+            .take()
+            .expect("follower handle is present")
+            .join()
+            .expect("follower thread did not panic")
+            .expect("follower exited cleanly");
+    }
+}
+
+impl Drop for FollowWorker {
+    fn drop(&mut self) {
+        let _ = self.stop_tx.send(());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 #[test]
