@@ -13,9 +13,10 @@ use axum::response::{IntoResponse, Json, Response};
 use orbit_core::DEFAULT_TASK_LIST_LIMIT;
 use serde_json::{Value, json};
 
-use super::server_error;
-use super::tasks::list_tasks_json;
+use super::{blocking, server_error};
+use crate::projections::task_row_to_json;
 use crate::state::DashboardState;
+use orbit_core::application::task::TaskListFilter;
 
 /// `GET /api/workspaces` — list every workspace the dashboard can serve, with
 /// the currently-selected default flagged.
@@ -55,54 +56,56 @@ pub(super) async fn list_workspaces(State(state): State<DashboardState>) -> Resp
 /// any that fail to open — the aggregate view stays available even when one
 /// workspace is broken.
 pub(super) async fn list_all_tasks(State(state): State<DashboardState>) -> Response {
-    // Refresh and pin one snapshot so every task's workspace tag (id, name,
-    // root) and the runtime it was listed from come from the same generation —
-    // never old metadata spliced onto a runtime resolved from a newer binding.
+    match blocking("aggregate task list", move || Ok(all_tasks_json(&state))).await {
+        Ok(Ok(values)) => Json(values).into_response(),
+        Ok(Err(error)) => server_error(error),
+        Err(response) => *response,
+    }
+}
+
+fn all_tasks_json(state: &DashboardState) -> Result<Vec<Value>, orbit_core::OrbitError> {
     let pinned = state.pin();
     let home = home_dir();
-    let mut all = Vec::new();
+    let mut candidates = Vec::new();
     for entry in pinned.entries().iter().filter(|entry| entry.active) {
         let Ok(runtime) = pinned.runtime_for(&entry.id) else {
             continue;
         };
-        let values = match list_tasks_json(&runtime) {
-            Ok(values) => values,
-            Err(e) => return server_error(e),
-        };
-        let workspace_root = abbreviate_home(&entry.repo_root, home.as_deref());
-        for mut value in values {
-            if let Value::Object(map) = &mut value {
-                map.insert("workspace_id".to_string(), json!(entry.id));
-                map.insert("workspace_name".to_string(), json!(entry.name));
-                map.insert("workspace_root".to_string(), json!(workspace_root));
-            }
-            all.push(value);
+        let page = runtime.task_candidates(&TaskListFilter::default(), DEFAULT_TASK_LIST_LIMIT)?;
+        for task in page.items {
+            candidates.push((task, runtime.clone(), entry));
         }
     }
-    // Each workspace already contributes its newest tasks; re-sort the union so
-    // the aggregate is globally newest-first and bounded to the same default
-    // limit as every other task-listing surface (ORB-10310). `created_at` is a
-    // fixed-format UTC RFC 3339 string, so lexical order is chronological; task
-    // ID breaks timestamp ties ascending.
-    all.sort_by(|a, b| {
-        let created = |value: &Value| {
-            value
-                .get("created_at")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string()
-        };
-        let id = |value: &Value| {
-            value
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string()
-        };
-        created(b).cmp(&created(a)).then_with(|| id(a).cmp(&id(b)))
+    candidates.sort_by(|(a, _, _), (b, _, _)| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.id.cmp(&b.id))
     });
-    all.truncate(DEFAULT_TASK_LIST_LIMIT);
-    Json(Value::Array(all)).into_response()
+    candidates.truncate(DEFAULT_TASK_LIST_LIMIT);
+    // All runtimes in a dashboard share one coordination registry. Read its
+    // global dependency projection once, after the metadata selection.
+    let statuses = candidates
+        .first()
+        .map(|(_, runtime, _)| runtime.task_status_index())
+        .transpose()?
+        .unwrap_or_default();
+    let mut values = Vec::with_capacity(candidates.len());
+    for (task, runtime, entry) in candidates {
+        let Some(row) = runtime.get_listed_task_row(&task.id)? else {
+            continue;
+        };
+        let mut value = task_row_to_json(&runtime, &row, &statuses)?;
+        if let Value::Object(map) = &mut value {
+            map.insert("workspace_id".to_string(), json!(entry.id));
+            map.insert("workspace_name".to_string(), json!(entry.name));
+            map.insert(
+                "workspace_root".to_string(),
+                json!(abbreviate_home(&entry.repo_root, home.as_deref())),
+            );
+        }
+        values.push(value);
+    }
+    Ok(values)
 }
 
 /// Render a filesystem path for display, collapsing the user's home directory

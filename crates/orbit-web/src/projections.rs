@@ -177,23 +177,31 @@ pub(crate) fn task_to_json_with_sidecars(
     task: &Task,
     status_by_id: &BTreeMap<String, TaskStatus>,
 ) -> Result<Value, OrbitError> {
+    let row = runtime.get_task_row(&task.id)?;
+    task_row_to_json(runtime, &row, status_by_id)
+}
+
+pub(crate) fn task_row_to_json(
+    runtime: &OrbitRuntime,
+    row: &orbit_core::application::task::TaskRow,
+    status_by_id: &BTreeMap<String, TaskStatus>,
+) -> Result<Value, OrbitError> {
+    let task = &row.task;
     let mut value = task_to_json(task, status_by_id);
     let object = value.as_object_mut().ok_or_else(|| {
         OrbitError::Execution("task JSON projection did not produce an object".to_string())
     })?;
     object.insert(
         "comments".to_string(),
-        serde_json::to_value(runtime.get_task_comments(&task.id)?)
-            .map_err(|e| OrbitError::Io(e.to_string()))?,
+        serde_json::to_value(&row.comments).map_err(|e| OrbitError::Io(e.to_string()))?,
     );
     object.insert(
         "history".to_string(),
-        serde_json::to_value(runtime.get_task_history(&task.id)?)
-            .map_err(|e| OrbitError::Io(e.to_string()))?,
+        serde_json::to_value(&row.history).map_err(|e| OrbitError::Io(e.to_string()))?,
     );
     object.insert(
         "artifacts".to_string(),
-        task_artifact_manifest_to_json(&runtime.get_task_artifact_manifest(&task.id)?),
+        task_artifact_manifest_to_json(&row.artifacts),
     );
     if let Some(projection) = dashboard_resolved_crew_projection(runtime, task)? {
         object.insert("resolved_crew".to_string(), Value::String(projection.name));
