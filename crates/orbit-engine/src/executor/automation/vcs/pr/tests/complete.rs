@@ -12,7 +12,8 @@ use tempfile::tempdir;
 use super::super::super::super::task_update::task_complete;
 use super::super::complete::pr_complete;
 use super::test_support::{
-    PR_MERGE_OPERATION, PR_STATUS_OPERATION, PrOpenTestHost, review_batch_task,
+    PR_MERGE_CAPABILITIES_OPERATION, PR_MERGE_OPERATION, PR_STATUS_OPERATION, PrOpenTestHost,
+    review_batch_task,
 };
 
 fn host(tasks: Vec<orbit_types::task::Task>) -> (tempfile::TempDir, PrOpenTestHost) {
@@ -80,6 +81,8 @@ fn a_mergeable_pr_is_merged_and_then_verified_before_completing() {
     let merges = merge_calls(&host);
     assert_eq!(merges.len(), 1, "exactly one merge request");
     assert_eq!(merges[0]["auto"], false);
+    assert_eq!(merges[0]["strategy"], "squash");
+    assert_eq!(output["merge"]["strategy"], "squash");
     assert_eq!(host.task_status("T1"), TaskStatus::Done);
 }
 
@@ -103,11 +106,105 @@ fn pending_checks_use_auto_merge_and_completion_waits_for_the_merged_state() {
         "auto-merge is requested once, not per poll"
     );
     assert_eq!(merges[0]["auto"], true);
+    assert_eq!(merges[0]["strategy"], "squash");
     assert!(
         merges[0].get("admin").is_none(),
         "completion must never request an administrative bypass"
     );
     assert_eq!(host.task_status("T1"), TaskStatus::Done);
+}
+
+/// The live incident shape: squash is disabled while rebase and merge commits
+/// are enabled. Linear history keeps merge commits out, so both immediate and
+/// auto merge must select rebase and retain that method in completion evidence.
+#[test]
+fn squash_disabled_repository_uses_rebase_for_direct_and_auto_merge() {
+    for (initial, auto) in [("CLEAN", false), ("PENDING", true)] {
+        let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+        host.queue_pr_status([state(initial), merged_state()]);
+        host.queue_merge_capabilities(false, true, true, true);
+        let mut input = complete_input(root.path(), &["T1"]);
+        input["max_wait_seconds"] = json!(1);
+
+        let output = pr_complete(&host, &input).expect("rebase completion");
+
+        let merges = merge_calls(&host);
+        assert_eq!(merges.len(), 1);
+        assert_eq!(merges[0]["strategy"], "rebase");
+        assert_eq!(merges[0]["auto"], auto);
+        assert_eq!(output["merge"]["strategy"], "rebase");
+        assert_eq!(host.task_status("T1"), TaskStatus::Done);
+    }
+}
+
+#[test]
+fn merge_only_repository_uses_merge_commit_when_linear_history_allows_it() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("CLEAN"), merged_state()]);
+    host.queue_merge_capabilities(false, false, true, false);
+
+    let output = pr_complete(&host, &complete_input(root.path(), &["T1"]))
+        .expect("merge-only repository completion");
+
+    assert_eq!(merge_calls(&host)[0]["strategy"], "merge");
+    assert_eq!(output["merge"]["strategy"], "merge");
+}
+
+#[test]
+fn no_policy_permitted_merge_method_fails_without_request_or_bypass() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("CLEAN")]);
+    host.queue_merge_capabilities(false, false, true, true);
+
+    let error = pr_complete(&host, &complete_input(root.path(), &["T1"]))
+        .expect_err("linear-history merge-only repository has no permitted method");
+
+    let message = error.to_string();
+    assert!(message.contains("no permitted merge method"), "{message}");
+    assert!(
+        message.contains("requires_linear_history=true"),
+        "{message}"
+    );
+    assert!(merge_calls(&host).is_empty());
+    assert_eq!(host.task_status("T1"), TaskStatus::Review);
+}
+
+#[test]
+fn repository_capability_api_failure_is_explicit_and_precedes_merge() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("CLEAN")]);
+    host.fail_vcs(
+        PR_MERGE_CAPABILITIES_OPERATION,
+        "gh: Resource not accessible by integration",
+    );
+
+    let error = pr_complete(&host, &complete_input(root.path(), &["T1"]))
+        .expect_err("capability permission failure must propagate");
+
+    let message = error.to_string();
+    assert!(message.contains("could not resolve a permitted merge method"));
+    assert!(message.contains("Resource not accessible by integration"));
+    assert!(merge_calls(&host).is_empty());
+    assert_eq!(host.task_status("T1"), TaskStatus::Review);
+}
+
+#[test]
+fn direct_merge_api_failure_names_the_selected_method_and_keeps_review() {
+    let (root, host) = host(vec![review_batch_task("T1", None, None)]);
+    host.queue_pr_status([state("CLEAN")]);
+    host.queue_merge_capabilities(false, true, true, true);
+    host.fail_vcs(PR_MERGE_OPERATION, "gh: merge permission denied");
+
+    let error = pr_complete(&host, &complete_input(root.path(), &["T1"]))
+        .expect_err("merge permission failure must propagate");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("could not request rebase merge"),
+        "{message}"
+    );
+    assert!(message.contains("merge permission denied"), "{message}");
+    assert_eq!(host.task_status("T1"), TaskStatus::Review);
 }
 
 /// Enabling auto-merge is not terminal success: if the PR never reaches the

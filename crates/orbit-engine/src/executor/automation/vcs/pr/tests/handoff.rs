@@ -411,6 +411,50 @@ fn conflicting_rebase_publishes_clean_pre_rebase_branch_and_blocks_task() {
 }
 
 #[test]
+fn completion_failure_preserves_published_candidate_and_review_state() {
+    let workspace = pr_workspace();
+    let task_id = "ORB-COMPLETE-RECOVERY";
+    let host = PrOpenTestHost::new(
+        vec![review_batch_task(task_id, Some("codex"), None)],
+        workspace.repo.clone(),
+    );
+    let head_before = git(&workspace.repo, &["rev-parse", "HEAD"]);
+
+    let recovered = pr_failure_handoff(
+        &host,
+        &json!({
+            "failed_step_id": "complete_pr",
+            "activity_name": "pr_complete",
+            "error_code": "pipeline_step_failed",
+            "error_message": "GraphQL: Squash merges are not allowed on this repository",
+            "run_id": "batch-1",
+            "job_input": { "task_ids": [task_id] },
+            "pipeline": {},
+        }),
+    )
+    .expect("completion failure recovery");
+
+    assert_eq!(recovered["decision"], "review_completion_failure");
+    assert_eq!(recovered["pr_number"], "42");
+    assert_eq!(recovered["candidate_preserved"], true);
+    assert_eq!(host.task_status(task_id), TaskStatus::Review);
+    assert_eq!(git(&workspace.repo, &["rev-parse", "HEAD"]), head_before);
+    assert!(
+        host.vcs_calls().is_empty(),
+        "recovery must not rewrite the PR"
+    );
+    let task = host.get_task(task_id).expect("task");
+    assert_eq!(task.github_pr_number(), Some("42"));
+    let comment = host
+        .comments_for(task_id)
+        .pop()
+        .expect("diagnostic comment");
+    assert!(comment.message.contains("preserved PR #42"));
+    assert!(comment.message.contains("Squash merges are not allowed"));
+    assert!(!comment.message.contains("Manual resolution required"));
+}
+
+#[test]
 fn non_fast_forward_drift_handoff_commits_dirty_work_and_raises_pr() {
     let workspace = no_diff_pr_workspace();
     fs::create_dir_all(workspace.repo.join("src")).expect("create source dir");
