@@ -1249,6 +1249,10 @@ fn crew_allowlist_rejects_a_crew_this_workspace_does_not_configure() {
 
 /// A running drain with checkpoint state, as the engine leaves one behind.
 fn seed_running_drain(runtime: &OrbitRuntime, submitted: u32) -> String {
+    seed_running_drain_input(runtime, json!({ "max_active_leaf_runs": submitted }))
+}
+
+fn seed_running_drain_input(runtime: &OrbitRuntime, input: Value) -> String {
     let run = runtime
         .stores()
         .jobs()
@@ -1256,7 +1260,7 @@ fn seed_running_drain(runtime: &OrbitRuntime, submitted: u32) -> String {
             "workspace_auto_pipeline",
             1,
             Utc::now(),
-            Some(json!({ "max_active_leaf_runs": submitted })),
+            Some(input.clone()),
             None,
         )
         .expect("insert drain run");
@@ -1268,7 +1272,7 @@ fn seed_running_drain(runtime: &OrbitRuntime, submitted: u32) -> String {
     let state = orbit_types::workflow::PipelineState::new(
         run.run_id.clone(),
         "workspace_auto_pipeline".to_string(),
-        json!({ "max_active_leaf_runs": submitted }),
+        input,
     );
     runtime
         .stores()
@@ -1426,4 +1430,34 @@ fn readiness_reports_the_live_ceiling_and_who_moved_it() {
     let previewed = readiness(&runtime, &backlog, Some(2));
     assert_eq!(previewed["capacity"]["max_active_leaf_runs"], 2);
     assert_eq!(previewed["capacity"]["limit_source"], "requested");
+}
+
+/// [ORB-11273] `orbit run job ... --input max_active_leaf_runs=7` persists the
+/// ceiling as a JSON string. Readiness must report that live drain ceiling
+/// (and the same source the classifier uses), not the numeric-only fallback of 5.
+#[test]
+fn readiness_parses_numeric_and_string_run_input_ceilings() {
+    for submitted in [json!(7), json!("7")] {
+        let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+        write_workspace_file(&repo_root, "crates/leaf_0/src/lib.rs");
+        let backlog = seed_backlog_leaves(&runtime, 1);
+        let drain_run_id =
+            seed_running_drain_input(&runtime, json!({ "max_active_leaf_runs": submitted }));
+
+        let output = readiness(&runtime, &backlog, None);
+        assert_eq!(
+            output["capacity"]["max_active_leaf_runs"], 7,
+            "submitted {submitted} must report the live ceiling, not the default 5"
+        );
+        assert_eq!(output["capacity"]["limit_source"], "run_input");
+        assert_eq!(output["capacity"]["drain_run_id"], drain_run_id);
+
+        let classified = classify_with(
+            &runtime,
+            json!({ "run_id": drain_run_id, "max_active_leaf_runs": submitted }),
+        );
+        assert_eq!(classified["max_active_leaf_runs"], 7);
+        assert_eq!(classified["submitted_max_active_leaf_runs"], 7);
+        assert_eq!(classified["worker_limit_source"], "run_input");
+    }
 }

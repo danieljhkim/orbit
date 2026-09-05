@@ -470,8 +470,7 @@ fn active_drain(runtime: &OrbitRuntime) -> Result<Option<ActiveDrain>, OrbitErro
         .input
         .as_ref()
         .and_then(|input| input.get("max_active_leaf_runs"))
-        .and_then(Value::as_u64)
-        .and_then(|value| u32::try_from(value).ok())
+        .and_then(json_u32)
         .unwrap_or(DEFAULT_MAX_ACTIVE_LEAF_RUNS as u32);
     let limit = read_drain_worker_limit(runtime, &run.run_id);
     Ok(Some(ActiveDrain {
@@ -489,6 +488,17 @@ fn read_drain_worker_limit(runtime: &OrbitRuntime, run_id: &str) -> Option<Drain
         .ok()
         .flatten()
         .and_then(|state| state.drain_worker_limit)
+}
+
+/// A durable run-input ceiling. The generic job surface persists every
+/// `--input key=value` as a JSON string, so `"7"` must parse the same as `7`
+/// ([ORB-11273]). Matches `job_input_u32` on the worker-limit write path.
+fn json_u32(value: &Value) -> Option<u32> {
+    match value {
+        Value::Number(number) => number.as_u64().and_then(|value| u32::try_from(value).ok()),
+        Value::String(text) => text.trim().parse::<u32>().ok(),
+        _ => None,
+    }
 }
 
 /// A numeric loop input, tolerating the string a template renders. A step's
