@@ -6,12 +6,12 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use orbit_engine::{
-    DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, V2AuditWriter,
+    DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, TaskActivityUpdate, V2AuditWriter,
     execute_job_with_resume, resolve_job_catalog_refs_for_execution,
 };
 use orbit_store::{InvocationQuery, TaskReservationReleaseReason, V2AuditEventFilter};
 use orbit_tools::{FsAuditLogger, ToolContext};
-use orbit_types::task::{TaskPriority, TaskStatus, TaskType};
+use orbit_types::task::{Task, TaskPriority, TaskStatus, TaskType};
 use orbit_types::telemetry::AuditEventStatus;
 use orbit_types::workflow::{
     ActivityV2Spec, ExecutorDef, ExecutorType, JobRunState, JobV2Step, JobV2StepBody,
@@ -913,6 +913,21 @@ impl RuntimeHost for ScriptedEpicHost<'_> {
             proc_allowed_programs,
         )
     }
+
+    // `task_complete` runs as the real production activity (it is never
+    // retargeted to a scripted action), so it needs a real task to read and
+    // mutate rather than a scripted echo.
+    fn get_task(&self, task_id: &str) -> Result<Task, orbit_common::OrbitError> {
+        self.runtime.get_task(task_id)
+    }
+
+    fn update_task_from_activity(
+        &self,
+        task_id: &str,
+        update: TaskActivityUpdate,
+    ) -> Result<Task, orbit_common::OrbitError> {
+        self.runtime.update_task_from_activity(task_id, update)
+    }
 }
 
 fn write_job(path: &Path, name: &str, action: &str) {
@@ -1386,6 +1401,54 @@ fn epic_pipeline_no_diff_skips_empty_pr_and_promotes_the_root() {
     assert_eq!(updates.len(), 1);
     assert_eq!(updates[0]["task_id"], "ORB-EPIC");
     assert_eq!(updates[0]["status"], "review");
+}
+
+/// [ORB-11214] `commit_delivery` sets `allow_empty: true` unconditionally, so
+/// an ordinary untagged epic root can report `skipped_no_diff_expected: true`
+/// with no `no-diff-expected` tag involved at all — unlike task_pr_pipeline,
+/// where the same signal is tag-derived. A `--complete` run must still finish
+/// this epic root, not fail on a tag guard the operator never asked for. This
+/// drives `complete_pr_no_diff`'s real activity (never scripted) against a
+/// real, untagged task to prove the completion itself succeeds, not just that
+/// the pipeline steps are shaped correctly.
+#[test]
+fn epic_pipeline_completes_an_untagged_no_diff_root_when_authorized() {
+    let (_root, runtime, repo_root, global_root) = test_runtime();
+    seed_default_catalogs(&global_root);
+    stub_epic_finisher(&global_root);
+    let epic_task_id = seed_gate_task(&runtime, &repo_root, TaskStatus::Review);
+    assert!(
+        runtime
+            .get_task(&epic_task_id)
+            .expect("seeded epic root")
+            .tags
+            .is_empty(),
+        "the epic root under test must not carry the no-diff-expected tag"
+    );
+    let host = ScriptedEpicHost::new(&runtime, Vec::new()).no_diff();
+
+    let outcome = try_execute_full_epic_job(
+        &runtime,
+        &repo_root,
+        &host,
+        json!({ "epic_task_id": epic_task_id, "completion": "done" }),
+        "jrun-scripted-epic-no-diff-complete",
+    )
+    .expect(
+        "an untagged no-diff epic root must complete under authorization, not demand the \
+         no-diff-expected tag pr_complete requires",
+    );
+
+    assert!(outcome.success);
+    assert!(host.inputs_for("pr_open").is_empty());
+    assert!(host.inputs_for("git_push").is_empty());
+    assert_eq!(
+        runtime
+            .get_task(&epic_task_id)
+            .expect("completed epic root")
+            .status,
+        TaskStatus::Done
+    );
 }
 
 #[test]

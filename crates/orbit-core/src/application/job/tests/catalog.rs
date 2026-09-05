@@ -2084,25 +2084,25 @@ fn pr_pipelines_complete_only_when_authorized_and_handle_no_diff_without_a_pr() 
         let asset =
             load_job_asset(yaml).unwrap_or_else(|error| panic!("parse {job_name}: {error}"));
 
-        let (complete_id, no_diff_id) = if job_name == "task_pr_pipeline" {
-            ("complete_pr", "complete_no_diff")
+        let no_diff_id = if job_name == "task_pr_pipeline" {
+            "complete_no_diff"
         } else {
-            ("complete_pr", "complete_pr_no_diff")
+            "complete_pr_no_diff"
         };
 
         let complete = asset
             .spec
             .steps
             .iter()
-            .find(|step| step.id == complete_id)
-            .unwrap_or_else(|| panic!("{job_name} has a {complete_id} step"));
+            .find(|step| step.id == "complete_pr")
+            .unwrap_or_else(|| panic!("{job_name} has a complete_pr step"));
         let when = complete.when.as_deref().unwrap_or_default();
         assert!(
             when.contains("{{ input.completion }} == done"),
             "{job_name} completion must be gated on the authorization: {when}"
         );
         let JobV2StepBody::TargetRef(complete) = &complete.body else {
-            panic!("{job_name} {complete_id} must reference pr_complete");
+            panic!("{job_name} complete_pr must reference pr_complete");
         };
         assert_eq!(complete.target, "activity:pr_complete");
 
@@ -2112,14 +2112,48 @@ fn pr_pipelines_complete_only_when_authorized_and_handle_no_diff_without_a_pr() 
             .iter()
             .find(|step| step.id == no_diff_id)
             .unwrap_or_else(|| panic!("{job_name} has a {no_diff_id} step"));
-        let JobV2StepBody::TargetRef(no_diff) = &no_diff.body else {
-            panic!("{job_name} {no_diff_id} must reference pr_complete");
-        };
-        let input = no_diff.default_input.as_ref().expect("no-diff input");
-        assert_eq!(input["no_diff_expected"], true);
+        let when = no_diff.when.as_deref().unwrap_or_default();
         assert!(
-            input.get("pr_number").is_none(),
-            "{job_name} no-diff completion must not require a nonexistent PR"
+            when.contains("{{ input.completion }} == done"),
+            "{job_name} no-diff completion must be gated on the authorization: {when}"
         );
+
+        // task_pr_pipeline's `skipped_no_diff_expected` is tag-derived (its
+        // `commit` step passes no `allow_empty`), so its no-diff completion
+        // still asserts the tag through `pr_complete`, exactly like
+        // `pr_promote`'s equivalent guard. epic_pipeline's `commit_delivery`
+        // passes `allow_empty: true` unconditionally, so the same signal does
+        // NOT imply the tag there; it must route through the tag-agnostic
+        // `task_complete` instead, matching `promote_pr_no_diff` routing
+        // around `pr_promote`'s guard on the same branch.
+        if job_name == "task_pr_pipeline" {
+            let JobV2StepBody::TargetRef(no_diff) = &no_diff.body else {
+                panic!("{job_name} {no_diff_id} must reference pr_complete");
+            };
+            assert_eq!(no_diff.target, "activity:pr_complete");
+            let input = no_diff.default_input.as_ref().expect("no-diff input");
+            assert_eq!(input["no_diff_expected"], true);
+            assert!(
+                input.get("pr_number").is_none(),
+                "{job_name} no-diff completion must not require a nonexistent PR"
+            );
+        } else {
+            let JobV2StepBody::TargetRef(no_diff) = &no_diff.body else {
+                panic!("{job_name} {no_diff_id} must reference task_complete");
+            };
+            assert_eq!(
+                no_diff.target, "activity:task_complete",
+                "epic no-diff completion must not carry pr_complete's tag guard"
+            );
+            let input = no_diff.default_input.as_ref().expect("no-diff input");
+            assert!(
+                input.get("no_diff_expected").is_none(),
+                "task_complete has no tag guard to gate"
+            );
+            assert!(
+                input.get("pr_number").is_none(),
+                "{job_name} no-diff completion must not require a nonexistent PR"
+            );
+        }
     }
 }

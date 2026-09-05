@@ -220,13 +220,18 @@ spec:
 
     - id: complete_pr_no_diff
       when: "{{ steps.resolve_ship_input.output.mode }} == pr && {{ input.completion }} == done && {{ steps.commit_delivery.output.skipped_no_diff_expected }} == true"
-      target: activity:pr_complete
+      # `pr_complete`'s no_diff_expected branch asserts the no-diff-expected tag
+      # on every task, which is correct for task_pr_pipeline (where the tag is
+      # what implied skipped_no_diff_expected in the first place) but wrong
+      # here: `commit_delivery` above sets allow_empty: true unconditionally,
+      # so an ordinary untagged epic root can land this branch too. `promote_pr_no_diff`
+      # already routes around pr_promote's equivalent guard for the same
+      # reason; task_complete is the tag-agnostic status-only transition that
+      # matches it.
+      target: activity:task_complete
       default_input:
         job_run_id: "{{ steps.worktree.output.job_run_id }}"
-        completed_task_ids:
-          - "{{ input.epic_task_id }}"
-        workspace_path: "{{ steps.worktree.output.workspace_path }}"
-        no_diff_expected: true
+        task_id: "{{ input.epic_task_id }}"
 
     - id: merge
       when: "{{ steps.resolve_ship_input.output.mode }} == local"
