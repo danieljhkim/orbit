@@ -193,6 +193,7 @@ impl RuntimeHost for CompletionFailureHost<'_> {
                     "allow_squash_merge": false,
                     "allow_rebase_merge": true,
                     "allow_merge_commit": true,
+                    "allow_auto_merge": true,
                     "requires_linear_history": true,
                 }
             })),
