@@ -1000,6 +1000,44 @@
     "name": "orbit_workflow_run_show"
   },
   {
+    "description": "Adjust how many tasks a running workspace drain keeps in flight, without replacing its run. The run ID, deadline, completion authorization, and already-dispatched children are preserved; a lower ceiling stops new admissions until enough children finish and cancels nothing.",
+    "inputSchema": {
+      "additionalProperties": true,
+      "properties": {
+        "claim_token": {
+          "description": "Token for this workspace's exclusive claim, required when another operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`.",
+          "type": "string"
+        },
+        "concurrency": {
+          "description": "New ceiling on tasks in flight, from 1 to the ship job's own active-run limit.",
+          "type": "integer"
+        },
+        "id": {
+          "description": "Job run ID.",
+          "type": "string"
+        },
+        "if_revision": {
+          "description": "Apply only if the run's ceiling is still at this revision, so a concurrent adjustment is reported rather than overwritten.",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "Optional note recorded with the change.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace selector for the authoritative server: a registered workspace name, a logical workspace ID (`ws_*`), or an absolute path registered on that server. Optional in this session, which is already bound to a workspace — by `orbit mcp serve --workspace` at launch or `_meta.orbit.workspace` at initialize. Pass it to address a different registered workspace; never inferred from the server process cwd.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "concurrency"
+      ],
+      "type": "object"
+    },
+    "name": "orbit_workflow_run_workers"
+  },
+  {
     "description": "Submit an explicit set of tasks to the ship workflow and return its durable run ID.",
     "inputSchema": {
       "additionalProperties": true,
