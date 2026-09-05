@@ -924,3 +924,257 @@ fn a_terminal_run_never_projects_an_unfinished_step_as_still_running() {
     );
     assert_eq!(steps[0]["outcome"], "interrupted");
 }
+
+// ─── bounded auto-drain dashboard action [ORB-11250] ──────────────────────
+
+mod auto_drain {
+    use orbit_common::governance::authorization::OPERATOR_OVERRIDE_ENV;
+
+    use super::*;
+
+    async fn request_auto(runtime: OrbitRuntime, body: Option<Value>) -> Response {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/workflows/auto")
+            .header(header::ORIGIN, "http://localhost:3000");
+        let body = match body {
+            Some(json) => {
+                builder = builder.header(header::CONTENT_TYPE, "application/json");
+                Body::from(json.to_string())
+            }
+            None => Body::empty(),
+        };
+        router()
+            .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+            .oneshot(builder.body(body).expect("request"))
+            .await
+            .expect("response")
+    }
+
+    async fn request_readiness(runtime: OrbitRuntime, query: &str) -> Response {
+        router()
+            .with_state(crate::state::DashboardState::single(Arc::new(runtime)))
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/workflows/auto/readiness{query}"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response")
+    }
+
+    /// Pin the process signals `CallerCapabilities::resolve` reads, for the
+    /// whole request. Mirrors `api::tests::auto_tasks`'s helper of the same
+    /// shape: the guard in `orbit_common::test_env` is process-wide, so every
+    /// case whose expected status depends on caller identity must go through
+    /// it rather than reading/setting the env var directly [ORB-10894].
+    #[allow(clippy::await_holding_lock)]
+    async fn with_caller_env<'a, T>(
+        vars: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+        fut: impl std::future::Future<Output = T>,
+    ) -> T {
+        let _env = orbit_common::test_env::scoped(vars);
+        fut.await
+    }
+
+    async fn as_operator<T>(fut: impl std::future::Future<Output = T>) -> T {
+        with_caller_env([(OPERATOR_OVERRIDE_ENV, Some("1"))], fut).await
+    }
+
+    async fn as_agent<T>(fut: impl std::future::Future<Output = T>) -> T {
+        with_caller_env(
+            [
+                (OPERATOR_OVERRIDE_ENV, None),
+                ("ORBIT_AGENT_NAME", Some("orbit-web-test")),
+                ("ORBIT_AGENT_MODEL", Some("orbit-web-test")),
+            ],
+            fut,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn auto_endpoint_rejects_missing_duration() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        let response = request_auto(runtime, None).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = body_json(response).await;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("for_duration"))
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_endpoint_rejects_invalid_duration_format() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        let response = request_auto(runtime, Some(json!({ "for_duration": "soon" }))).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = body_json(response).await;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("invalid duration"))
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_endpoint_rejects_zero_length_window() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        let response = request_auto(runtime, Some(json!({ "for_duration": "0s" }))).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = body_json(response).await;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("bounded window"))
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_endpoint_rejects_zero_concurrency() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        write_replay_job(&runtime, "workspace_auto_pipeline");
+
+        let response = request_auto(
+            runtime,
+            Some(json!({ "for_duration": "30m", "concurrency": 0 })),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let payload = body_json(response).await;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("concurrency must be at least 1"))
+        );
+    }
+
+    /// Default completion (no `complete` opt-in) needs no authorization, the
+    /// same as the ship endpoint's always-review submission.
+    #[tokio::test]
+    async fn auto_endpoint_defaults_to_review_without_authorization() {
+        as_agent(async {
+            let runtime = OrbitRuntime::in_memory().expect("build runtime");
+            write_replay_job(&runtime, "workspace_auto_pipeline");
+
+            let response = request_auto(runtime, Some(json!({ "for_duration": "30m" }))).await;
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let payload = body_json(response).await;
+            assert_eq!(payload["completion"].as_str(), Some("review"));
+            assert!(payload["run_id"].as_str().is_some_and(|id| !id.is_empty()));
+        })
+        .await;
+    }
+
+    /// Opting into `complete` is separately governed: an unauthorized caller
+    /// is refused before any run is submitted.
+    #[tokio::test]
+    async fn auto_endpoint_refuses_complete_opt_in_without_authorization() {
+        as_agent(async {
+            let runtime = OrbitRuntime::in_memory().expect("build runtime");
+            write_replay_job(&runtime, "workspace_auto_pipeline");
+
+            let response = request_auto(
+                runtime.clone(),
+                Some(json!({ "for_duration": "30m", "complete": true })),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            let payload = body_json(response).await;
+            assert_eq!(payload["code"].as_str(), Some("authorization_denied"));
+
+            let runs = runtime
+                .list_job_runs(JobRunListParams::default())
+                .expect("list runs");
+            assert!(
+                runs.is_empty(),
+                "a denied completion opt-in must not submit a run: {runs:?}"
+            );
+        })
+        .await;
+    }
+
+    /// An authorized operator's `complete` opt-in propagates to the same
+    /// `CompletionPolicy::Done` the CLI's `--complete` sends.
+    #[tokio::test]
+    async fn auto_endpoint_propagates_authorized_complete_opt_in() {
+        as_operator(async {
+            let runtime = OrbitRuntime::in_memory().expect("build runtime");
+            write_replay_job(&runtime, "workspace_auto_pipeline");
+
+            let response = request_auto(
+                runtime.clone(),
+                Some(json!({ "for_duration": "2h", "complete": true })),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let payload = body_json(response).await;
+            assert_eq!(payload["completion"].as_str(), Some("done"));
+            let run_id = payload["run_id"].as_str().expect("run_id").to_string();
+
+            let run = runtime.show_job_run(&run_id).expect("show run");
+            let input = run.input.expect("run input");
+            assert_eq!(input["completion"], "done");
+            assert_eq!(input["for_seconds"], 7200);
+        })
+        .await;
+    }
+
+    /// ORB-10008: an unknown `?workspace=` is a clean 404 JSON rejection from
+    /// the workspace extractor, matching the ship endpoint's behavior — this
+    /// is how the endpoint refuses all-workspace mode too, since aggregate
+    /// state has no default workspace to fall back on.
+    #[tokio::test]
+    async fn auto_endpoint_rejects_unknown_workspace_with_404_json() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+        let state = crate::state::DashboardState::single(Arc::new(runtime));
+
+        let response = router()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/workflows/auto?workspace=ghost")
+                    .header(header::ORIGIN, "http://localhost:7878")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "for_duration": "30m" }).to_string()))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let payload = body_json(response).await;
+        assert!(
+            payload["error"]
+                .as_str()
+                .is_some_and(|m| m.contains("unknown workspace: ghost"))
+        );
+    }
+
+    #[tokio::test]
+    async fn readiness_endpoint_returns_read_only_snapshot() {
+        let runtime = OrbitRuntime::in_memory().expect("build runtime");
+
+        let response = request_readiness(runtime, "").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload = body_json(response).await;
+        assert_eq!(payload["snapshot"]["read_only"], true);
+        assert!(payload["capacity"]["free_slots"].is_number());
+        assert!(payload["controls_authorized"].is_boolean());
+    }
+}

@@ -431,7 +431,9 @@ fn dashboard_operations_are_typed_guarded_and_responsive() {
         !operations.contains("hashchange") && !operations.contains("location.reload"),
         "refresh/back must not replay a toggle or mint POST"
     );
-    assert!(router.contains(r#"const OPERATIONS_SUBTABS = ["routines", "auto-tasks"];"#));
+    assert!(
+        router.contains(r#"const OPERATIONS_SUBTABS = ["routines", "auto-tasks", "auto-drain"];"#)
+    );
     assert!(router.contains(r#"hash = `#operations/${sub}`;"#));
     assert!(css.contains("@media (max-width: 720px)"));
     assert!(css.contains("@media (max-width: 600px)"));
@@ -439,6 +441,78 @@ fn dashboard_operations_are_typed_guarded_and_responsive() {
     assert!(css.contains("body.operations-active"));
     assert!(css.contains(".operation-mint-warning"));
     assert!(router.contains(r#"classList.toggle("operations-active", top === "operations")"#));
+}
+
+/// ORB-11250: the bounded auto-delivery window action. Default completion
+/// (review) needs no operator authorization, the same as the ship endpoint;
+/// only the `--complete`-equivalent opt-in is separately governed. The panel
+/// reuses the mint/clock in-flight idiom — one fixed `pendingOperations` key,
+/// guard released in `finally` — rather than a per-row guard, since this is a
+/// single workspace-scoped action, not one per task.
+#[test]
+fn dashboard_auto_drain_action_is_bounded_governed_and_guarded() {
+    let index = include_str!("../../assets/dashboard/index.html");
+    let operations = include_str!("../../assets/dashboard/operations.js");
+    let router = include_str!("../../assets/dashboard/router.js");
+
+    for id in [
+        "operations-auto-drain-main",
+        "auto-drain-panel",
+        "auto-drain-count",
+        "auto-drain-operation-feedback",
+        "auto-drain-body",
+    ] {
+        assert!(index.contains(&format!(r#"id="{id}""#)), "{id}");
+    }
+    assert!(
+        index.contains(r#"<button class="subtab" data-subtab="auto-drain" type="button">"#),
+        "auto-drain must be offered as an Operations subtab"
+    );
+    assert!(
+        router.contains(r#"const autoDrain = $("operations-auto-drain-main");"#)
+            && router.contains(r#"autoDrain.hidden = name !== "auto-drain";"#),
+        "the router must toggle the auto-drain main like its siblings"
+    );
+
+    assert!(
+        operations.contains(r#"postJson("/api/workflows/auto""#),
+        "starting the window must submit through the dashboard auto-drain endpoint"
+    );
+    assert!(
+        operations.contains(r#"fetchJson(`/api/workflows/auto/readiness"#),
+        "the panel must project the read-only readiness snapshot, not recompute eligibility"
+    );
+    assert!(
+        operations.contains("for_duration: autoDrainDuration"),
+        "the submitted duration must come from the bounded picker, not free text"
+    );
+    assert!(
+        operations.contains("complete: autoDrainComplete"),
+        "the completion opt-in must be explicit, not inferred"
+    );
+
+    // Duplicate-click guard: same fixed-key idiom as the clock/mint buttons.
+    assert!(operations.contains(r#"const key = "auto-drain:start";"#));
+    assert!(
+        operations.contains("if (pendingOperations.has(key)) return;")
+            && operations.contains("pendingOperations.add(key);")
+            && operations.contains("pendingOperations.delete(key);"),
+        "the start action must guard against a duplicate submission while one is pending"
+    );
+
+    // Explicit opt-in requires confirmation and states the run's scope.
+    assert!(operations.contains("window.confirm(confirmText)"));
+    assert!(
+        operations.contains("Currently eligible: ${counts.eligible} · waiting: ${counts.waiting}")
+    );
+    assert!(
+        operations.contains("Proposed tasks are never drained automatically"),
+        "the panel must explain proposed tasks require separate authorization"
+    );
+
+    // Failure recovery: an error must surface, not silently no-op, and must
+    // not leave the guard held.
+    assert!(operations.contains("Auto-delivery window failed to start"));
 }
 
 /// The global `main` rule establishes the visible grid while this narrow

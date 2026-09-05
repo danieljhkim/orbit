@@ -179,6 +179,15 @@ pub const DASHBOARD_AUTO_TASK_MINT: GovernedOperation = GovernedOperation {
     rationale: "manual mint ignores schedule, enabled state, and scheduler dedupe",
 };
 
+/// Opt-in `CompletionPolicy::Done` for a dashboard-submitted bounded
+/// auto-drain window (the `--complete` equivalent of `orbit run auto`).
+pub const DASHBOARD_AUTO_DRAIN_COMPLETE: GovernedOperation = GovernedOperation {
+    id: "auto_drain.complete",
+    surface: OperationSurface::Dashboard,
+    allowed: &[McpCapability::Operator],
+    rationale: "opting into automatic completion authorizes review -> done for every task the drain window ships, not only the ones visible at submission",
+};
+
 /// Every governed operation, declared exactly once.
 ///
 /// This is the single enumerable place the required capability lives. A call
@@ -293,6 +302,7 @@ pub const GOVERNED_OPERATIONS: &[GovernedOperation] = &[
     DASHBOARD_CLOCK_CADENCE,
     DASHBOARD_AUTO_TASK_TOGGLE,
     DASHBOARD_AUTO_TASK_MINT,
+    DASHBOARD_AUTO_DRAIN_COMPLETE,
 ];
 
 /// Look up the governed tool operation for `tool_name`, if any.
