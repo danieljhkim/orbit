@@ -36,12 +36,22 @@ pub(crate) fn resolve_executor_sandbox(
             }
             #[cfg(target_os = "macos")]
             {
-                let mut resolved = resolve_fs_profile_absolute(runtime, fs_profile, subprocess_cwd)
+                // Read-only reviewer activities may run from an invocation-owned
+                // inspection checkout, so their read grants must follow that
+                // checkout. Implementer profiles stay anchored at the registered
+                // workspace; the active worktree is re-allowed separately below
+                // after the workspace's `.orbit` deny rules.
+                let profile_root = if fs_profile == Some("reviewer") {
+                    subprocess_cwd
+                } else {
+                    None
+                };
+                let mut resolved = resolve_fs_profile_absolute(runtime, fs_profile, profile_root)
                     .map_err(|err| {
-                        DispatchError::CliInvocationFailed(format!(
-                            "resolve fsProfile for sandbox: {err}"
-                        ))
-                    })?;
+                    DispatchError::CliInvocationFailed(format!(
+                        "resolve fsProfile for sandbox: {err}"
+                    ))
+                })?;
                 append_codex_side_write_roots(runtime, provider, &mut resolved)?;
                 append_orbit_child_runtime_write_roots(runtime, &mut resolved);
                 append_active_worktree_root(runtime, subprocess_cwd, &mut resolved);
