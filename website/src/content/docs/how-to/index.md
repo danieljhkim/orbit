@@ -24,4 +24,8 @@ sidebar:
     <h3>Set Up MCP</h3>
     <p>Connect Orbit tools to agent clients.</p>
   </a>
+  <a class="orbit-card" href="./continuous-delivery/">
+    <h3>Run Continuous Delivery</h3>
+    <p>Prepare tasks, authorize a bounded delivery window, and recover safely.</p>
+  </a>
 </div>
