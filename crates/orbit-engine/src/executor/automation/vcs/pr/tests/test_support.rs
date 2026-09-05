@@ -27,6 +27,7 @@ pub const PR_LIST_OPERATION: &str = operations::PR_LIST;
 pub const PR_CREATE_OPERATION: &str = operations::PR_CREATE;
 pub const PR_VIEW_OPERATION: &str = operations::PR_VIEW;
 pub const PR_MERGE_OPERATION: &str = operations::PR_MERGE;
+pub const PR_MERGE_CAPABILITIES_OPERATION: &str = operations::PR_MERGE_CAPABILITIES;
 pub const PR_STATUS_OPERATION: &str = operations::PR_STATUS;
 
 #[derive(Clone, Debug)]
@@ -139,6 +140,28 @@ impl PrOpenTestHost {
         for state in states {
             self.queue_vcs_result(operations::PR_STATUS, json!({ "pull_request": state }));
         }
+    }
+
+    pub fn queue_merge_capabilities(
+        &self,
+        squash: bool,
+        rebase: bool,
+        merge: bool,
+        requires_linear_history: bool,
+    ) {
+        self.queue_vcs_result(
+            operations::PR_MERGE_CAPABILITIES,
+            json!({
+                "repository": {
+                    "name_with_owner": "orbit/test",
+                    "base_branch": "agent-main",
+                    "allow_squash_merge": squash,
+                    "allow_rebase_merge": rebase,
+                    "allow_merge_commit": merge,
+                    "requires_linear_history": requires_linear_history,
+                }
+            }),
+        );
     }
 
     pub fn activity_updates(&self) -> Vec<(String, TaskActivityUpdate)> {
@@ -377,6 +400,16 @@ impl RuntimeHost for PrOpenTestHost {
         match operation {
             operations::PUSH => Ok(json!({})),
             operations::PR_MERGE => Ok(json!({})),
+            operations::PR_MERGE_CAPABILITIES => Ok(json!({
+                "repository": {
+                    "name_with_owner": "orbit/test",
+                    "base_branch": "agent-main",
+                    "allow_squash_merge": true,
+                    "allow_rebase_merge": true,
+                    "allow_merge_commit": true,
+                    "requires_linear_history": true,
+                }
+            })),
             operations::PR_LIST => {
                 let head = input.get("head").and_then(Value::as_str).ok_or_else(|| {
                     OrbitError::InvalidInput("private PR list requires a head branch".to_string())

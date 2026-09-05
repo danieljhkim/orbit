@@ -4,6 +4,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod completion;
+
 use chrono::Utc;
 use orbit_engine::{
     DispatchError, JobOutcome, ResolvedCliExecutor, RuntimeHost, TaskActivityUpdate, V2AuditWriter,
@@ -138,6 +140,17 @@ pub(super) fn try_execute_named_job(
     run_id: &str,
 ) -> Result<JobOutcome, DispatchError> {
     let job = resolved_job(runtime, job_name);
+    try_execute_job(runtime, repo_root, host, job, input, run_id)
+}
+
+pub(super) fn try_execute_job(
+    runtime: &OrbitRuntime,
+    repo_root: &Path,
+    host: &dyn RuntimeHost,
+    job: orbit_types::workflow::activity_job::JobV2,
+    input: Value,
+    run_id: &str,
+) -> Result<JobOutcome, DispatchError> {
     let writer = V2AuditWriter::with_disk_sinks(
         &runtime.paths().audit_dir,
         runtime
