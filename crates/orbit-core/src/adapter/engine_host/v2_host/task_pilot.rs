@@ -22,8 +22,10 @@ use serde_json::{Value, json};
 use crate::OrbitRuntime;
 
 mod apply;
+mod source;
 
 pub(super) use apply::apply;
+use source::{GitPathKind, SourceSnapshot, requested_base_branch, resolve_source_snapshot};
 
 const DEFAULT_MAX_PARTITION_SIZE: usize = 5;
 const HARD_MAX_PARTITION_SIZE: usize = 5;
@@ -38,6 +40,7 @@ pub(super) fn prepare(
     input: &Value,
 ) -> Result<Value, DispatchError> {
     let workspace_root = requested_workspace_root(runtime, action, input)?;
+    let source = resolve_source_snapshot(runtime, action, input, &workspace_root)?;
     let max_partition_size = bounded_usize(
         action,
         input,
@@ -149,6 +152,14 @@ pub(super) fn prepare(
     Ok(json!({
         "mode": mode,
         "workspace_path": workspace_root,
+        "source": source.as_ref().map(SourceSnapshot::to_json).unwrap_or_else(|| {
+            json!({
+                "base_branch": requested_base_branch(runtime, input),
+                "source_ref": Value::Null,
+                "source_revision": Value::Null,
+                "fast_forwarded": false,
+            })
+        }),
         "task_count": selected.len(),
         "task_ids": selected.iter().map(|task| task.id.clone()).collect::<Vec<_>>(),
         "tasks": task_snapshots,
@@ -272,6 +283,7 @@ fn validate_after_selectors(
     assessment: &Value,
     selectors: &[String],
     workspace_root: &Path,
+    source: Option<&SourceSnapshot>,
 ) -> Result<(), DispatchError> {
     if selectors.is_empty() {
         if !matches!(disposition, "verified_no_diff" | "host_operational") {
@@ -321,15 +333,19 @@ fn validate_after_selectors(
                 ),
             ));
         }
-        if !exists_in_workspace(&canonical, workspace_root) {
-            return Err(action_failed(
-                action,
-                format!(
-                    "task {task_id} selector {selector:?} does not resolve to an existing in-workspace target"
-                ),
-            ));
+        if let Some(source) = source {
+            validate_selector_at_source(action, task_id, &canonical, workspace_root, source)?;
+        } else {
+            if !exists_in_workspace(&canonical, workspace_root) {
+                return Err(action_failed(
+                    action,
+                    format!(
+                        "task {task_id} selector {selector:?} does not resolve to an existing in-workspace target"
+                    ),
+                ));
+            }
+            validate_selector_target_kind(action, task_id, &canonical, workspace_root)?;
         }
-        validate_selector_target_kind(action, task_id, &canonical, workspace_root)?;
         if !seen.insert(canonical) {
             return Err(action_failed(
                 action,
@@ -376,6 +392,40 @@ fn validate_recommendations(
         }
     }
     Ok(())
+}
+
+fn validate_selector_at_source(
+    action: &str,
+    task_id: &str,
+    selector: &str,
+    workspace_root: &Path,
+    source: &SourceSnapshot,
+) -> Result<(), DispatchError> {
+    let anchor = anchor_path(selector).map_err(|error| {
+        action_failed(
+            action,
+            format!("task {task_id} selector {selector:?} has no filesystem anchor: {error}"),
+        )
+    })?;
+    let kind = source.path_kind(action, workspace_root, &anchor)?;
+    let expected_dir = selector.starts_with("dir:");
+    match (kind, expected_dir) {
+        (GitPathKind::Tree, true) | (GitPathKind::Blob, false) => Ok(()),
+        (GitPathKind::Missing, _) => Err(action_failed(
+            action,
+            format!(
+                "task {task_id} selector {selector:?} does not resolve to an existing in-workspace target at source revision {} ({})",
+                source.source_revision, source.source_ref
+            ),
+        )),
+        _ => Err(action_failed(
+            action,
+            format!(
+                "task {task_id} selector {selector:?} does not match the target's file/directory kind at source revision {} ({})",
+                source.source_revision, source.source_ref
+            ),
+        )),
+    }
 }
 
 fn validate_selector_target_kind(

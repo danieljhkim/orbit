@@ -12,6 +12,7 @@ use crate::OrbitRuntime;
 use crate::adapter::engine_host::v2_host::ci_failure_admission;
 use crate::application::task::TaskUpdateParams;
 
+use super::source::SourceSnapshot;
 use super::{
     action_failed, requested_workspace_root, required_string, required_string_array,
     string_array_value, validate_after_selectors, validate_recommendations,
@@ -39,9 +40,11 @@ pub(in super::super) fn apply(
     input: &Value,
 ) -> Result<Value, DispatchError> {
     let workspace_root = requested_workspace_root(runtime, action, input)?;
-    let prepared = input
+    let prepared_value = input
         .get("prepared")
-        .and_then(Value::as_object)
+        .ok_or_else(|| action_failed(action, "`prepared` must be an object"))?;
+    let prepared = prepared_value
+        .as_object()
         .ok_or_else(|| action_failed(action, "`prepared` must be an object"))?;
     let prepared_workspace = prepared
         .get("workspace_path")
@@ -72,6 +75,10 @@ pub(in super::super) fn apply(
         .get("results")
         .and_then(Value::as_array)
         .ok_or_else(|| action_failed(action, "`results` must be an array"))?;
+    let source = SourceSnapshot::from_prepared(prepared_value, action)?;
+    if let Some(source) = &source {
+        source.ensure_commit(action, &workspace_root)?;
+    }
 
     let prepared_before = prepared_tasks
         .iter()
@@ -314,6 +321,7 @@ pub(in super::super) fn apply(
                 assessment,
                 &after,
                 &workspace_root,
+                source.as_ref(),
             ) {
                 validation_error = Some(error.to_string());
                 break;
@@ -458,6 +466,7 @@ pub(in super::super) fn apply(
         "error": error,
         "mode": mode,
         "workspace_path": workspace_root,
+        "source": prepared.get("source").cloned().unwrap_or(Value::Null),
         "discovery": {
             "task_ids": prepared.get("task_ids").cloned().unwrap_or_else(|| json!([])),
             "excluded": prepared.get("excluded").cloned().unwrap_or_else(|| json!([])),

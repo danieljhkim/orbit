@@ -448,6 +448,7 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     assert_eq!(prepare.target, "activity:prepare_task_pilot");
     let prepare_input = prepare.default_input.as_ref().expect("prepare input");
     assert_eq!(prepare_input["task_ids"], "{{ input.task_ids }}");
+    assert_eq!(prepare_input["base_branch"], "{{ input.base_branch }}");
 
     let JobV2StepBody::FanOut { fan_out, fan_in } = &asset.spec.steps[1].body else {
         panic!("task pilot agent work must fan out");
@@ -465,6 +466,14 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     assert_eq!(pilot.target, "activity:task_pilot");
     let pilot_input = pilot.default_input.as_ref().expect("pilot input");
     assert_eq!(pilot_input["task_ids"], "{{ item.task_ids }}");
+    assert_eq!(
+        pilot_input["base_branch"],
+        "{{ steps.prepare.output.source.base_branch }}"
+    );
+    assert_eq!(
+        pilot_input["source_revision"],
+        "{{ steps.prepare.output.source.source_revision }}"
+    );
     assert_eq!(
         pilot_input["crew"],
         json!("system"),

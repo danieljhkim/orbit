@@ -5,11 +5,16 @@
 # proposed/backlog tasks in the active workspace with empty context_files,
 # excluding no-diff tasks. Explicit mode audits exactly the named workspace
 # tasks, including non-empty selectors.
-# Preparation never promotes or dispatches a task. Each read-only pilot
-# receives at most five tasks. Agent dispatch failures still stop at the
+# Preparation never promotes or dispatches a task. In a Git workspace it
+# fetches the landing branch, pins one source revision, and fast-forwards a
+# clean primary on that branch when it is behind; dirty or unfetchable
+# checkouts fail as source-staleness before any agent call. Each read-only
+# pilot receives at most five tasks and inspects that pinned revision.
+# Agent dispatch failures still stop at the
 # all-join. Apply isolates stale or malformed assessments by partition, applies
 # every independently valid partition, then a guard fails the total run when
-# any partition did not apply. Apply normally changes only context_files. A CI sweep may pass its exact filing record plus
+# any partition did not apply. Selector existence is validated against the
+# prepared source revision, not a later checkout. Apply normally changes only context_files. A CI sweep may pass its exact filing record plus
 # literal promotion authority; only then can apply promote a warning-free,
 # selector-backed proposed repair to backlog.
 #
@@ -49,6 +54,7 @@ spec:
       default_input:
         task_ids: "{{ input.task_ids }}"
         workspace_path: "{{ input.workspace_path }}"
+        base_branch: "{{ input.base_branch }}"
         max_tasks: "{{ input.max_tasks }}"
         max_partition_size: "{{ input.max_partition_size }}"
 
@@ -63,7 +69,8 @@ spec:
             task_ids: "{{ item.task_ids }}"
             partition_index: "{{ item.partition_index }}"
             workspace_path: "{{ steps.prepare.output.workspace_path }}"
-            base_branch: "{{ input.base_branch }}"
+            base_branch: "{{ steps.prepare.output.source.base_branch }}"
+            source_revision: "{{ steps.prepare.output.source.source_revision }}"
             # See the crew-resolution note at the top of this file.
             crew: system
       fan_in:

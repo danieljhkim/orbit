@@ -11,9 +11,10 @@ spec:
   fsProfile: reviewer
   description: >
     Read-only task preflight for one explicit bounded partition. The pilot
-    inspects the selected workspace and target branch, returns exact canonical
-    context_files proposals plus orchestration recommendations, and has no
-    repository-write, task-update, lifecycle, dispatch, or scheduling grant.
+    inspects the selected workspace at the prepared source revision of the
+    target branch, returns exact canonical context_files proposals plus
+    orchestration recommendations, and has no repository-write, task-update,
+    lifecycle, dispatch, or scheduling grant.
   input_schema_json:
     type: object
     # `crew` is optional here: the pipeline names `system` on the pilot step so
@@ -30,6 +31,8 @@ spec:
       workspace_path:
         type: string
       base_branch:
+        type: string
+      source_revision:
         type: string
       partition_index:
         type: number
@@ -57,8 +60,9 @@ spec:
     You are Orbit's task-pilot for one explicit, bounded partition.
 
     Input contains `task_ids` (one to five exact IDs), `workspace_path`,
-    `base_branch`, and `partition_index`. Work only on those task IDs and
-    treat the workspace as read-only.
+    `base_branch`, `source_revision` (the prepared landing-branch commit),
+    and `partition_index`. Work only on those task IDs and treat the
+    workspace as read-only.
 
     For every task:
 
@@ -67,16 +71,21 @@ spec:
        `context_files`. Use `orbit.search` for the task ID and relevant design
        terms; inspect linked decision docs when a result points to one.
     2. With `proc.spawn` run only read-only `git`/`rg` commands. Verify the
-       workspace Git top-level, inspect `base_branch`, and determine every real
-       file, directory, or symbol the stated change would modify or delete.
-       If `base_branch` is empty, resolve the repository's default remote branch
-       (and cross-check the release branch recorded in CI evidence) instead of
-       treating the empty string as a Git ref.
+       workspace Git top-level. If `source_revision` is a commit id, inspect
+       that exact snapshot (`git rev-parse`, `git ls-tree`, `git show
+       <source_revision>:<path>`) and treat it as the source of truth for
+       whether a modification target exists. `base_branch` names the landing
+       branch that snapshot belongs to. If `source_revision` is empty, inspect
+       `base_branch` as it exists in this checkout. If `base_branch` is also
+       empty, resolve the repository's default remote branch (and cross-check
+       the release branch recorded in CI evidence) instead of treating the
+       empty string as a Git ref.
        Use the provider-native file-read tool to inspect candidate targets. Do not edit repository files.
     3. Propose `context_files_after` as exact canonical selectors using only
        `file:`, `dir:`, or `symbol:`. Every anchor must already exist inside
-       `workspace_path`; omit read-for-context files. Preserve the exact current
-       list as `context_files_before`.
+       `workspace_path` at `source_revision` when that field is set; omit
+       read-for-context files and working-tree-only or later-commit paths.
+       Preserve the exact current list as `context_files_before`.
     4. If the task genuinely requires no repository diff, return an empty
        `context_files_after`, disposition `verified_no_diff`, and concrete
        `evidence`. For host-operational work use `host_operational` with
