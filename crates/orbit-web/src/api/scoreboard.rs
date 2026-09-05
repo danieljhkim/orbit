@@ -6,7 +6,7 @@ use crate::state::Ws;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use orbit_cmd::DiagnosticsCommands;
 use orbit_core::scoreboard_summary::ScoreboardWindow;
 use orbit_core::{FailureIncidentQuery, OrbitRuntime};
@@ -54,10 +54,12 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
     // logged-and-swallowed so the existing scoreboard surface still renders if
     // a side log is missing or malformed.
     //
-    // Denials honor the same window as the rest of the scoreboard so the
-    // dashboard column lines up with the windowed counts.
-    let metrics_extras = compute_metrics_extras(&runtime).unwrap_or_default();
-    let since_window = window.duration().map(|d| Utc::now() - d);
+    // One `now`/`since_window` pair scopes every join below (metrics extras,
+    // denials, failure rollup) so the response mixes only compatible
+    // populations for the requested window.
+    let now = Utc::now();
+    let since_window = window.duration().map(|d| now - d);
+    let metrics_extras = compute_metrics_extras(&runtime, since_window, now).unwrap_or_default();
     let denials_by_role = runtime
         .audit_denials_by_role(since_window.as_ref())
         .unwrap_or_default();
@@ -144,27 +146,30 @@ pub(super) async fn scoreboard(Ws(runtime): Ws, Query(query): Query<ScoreboardQu
 }
 
 /// Per-agent extras derived from `MetricsEntry` JSONL.
-#[derive(Debug, Clone, Default)]
-struct MetricsExtras {
-    avg_duration_ms: i64,
-    p95_duration_ms: i64,
-    retry_count: i64,
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct MetricsExtras {
+    pub(super) avg_duration_ms: i64,
+    pub(super) p95_duration_ms: i64,
+    pub(super) retry_count: i64,
 }
 
-fn compute_metrics_extras(
+// `pub(super)`: exercised directly by the sibling `api/tests/scoreboard.rs`
+// unit tests (window/month-boundary arithmetic), per the crate's sibling
+// test-layout convention — see docs/design-patterns/test_layout.md.
+pub(super) fn compute_metrics_extras(
     runtime: &OrbitRuntime,
+    since: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
 ) -> Result<BTreeMap<String, MetricsExtras>, orbit_core::OrbitError> {
     use orbit_types::identity::ActorIdentity;
 
-    let now = Utc::now();
-    let mut months = Vec::new();
-    months.push(now.format("%Y-%m").to_string());
-    if let Some(prev) = now.checked_sub_signed(Duration::days(31)) {
-        let key = prev.format("%Y-%m").to_string();
-        if !months.contains(&key) {
-            months.push(key);
-        }
-    }
+    // A finite window only needs its own partitions; lifetime (`since ==
+    // None`) enumerates every partition that has ever been written so
+    // records older than a couple of months are still counted.
+    let months = match since {
+        Some(since) => months_in_range(since, now),
+        None => runtime.list_metrics_months()?,
+    };
 
     let mut by_actor: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut retries: BTreeMap<String, i64> = BTreeMap::new();
@@ -175,6 +180,12 @@ fn compute_metrics_extras(
             Err(e) => return Err(e),
         };
         for entry in entries {
+            // A month partition covers a superset of the requested range
+            // (e.g. the first/last day of the month), so re-check each
+            // record against the exact boundary.
+            if since.is_some_and(|since| entry.ts < since) || entry.ts > now {
+                continue;
+            }
             let key = match &entry.actor_identity {
                 ActorIdentity::Agent { model } if !model.is_empty() => model.clone(),
                 ActorIdentity::Human { label } if !label.is_empty() => label.clone(),
@@ -219,6 +230,30 @@ fn compute_metrics_extras(
         });
     }
     Ok(out)
+}
+
+/// Ascending `YYYY-MM` partitions spanning `since..=now`, inclusive of both
+/// endpoints' months. Steps by calendar month rather than a fixed day offset
+/// so a window whose start falls on an early-month date (e.g. subtracting 30
+/// days from March 1st) still includes every month it actually touches.
+pub(super) fn months_in_range(since: DateTime<Utc>, now: DateTime<Utc>) -> Vec<String> {
+    let (mut year, mut month) = (since.year(), since.month());
+    let (end_year, end_month) = (now.year(), now.month());
+
+    let mut months = Vec::new();
+    loop {
+        months.push(format!("{year:04}-{month:02}"));
+        if year > end_year || (year == end_year && month >= end_month) {
+            break;
+        }
+        if month == 12 {
+            month = 1;
+            year += 1;
+        } else {
+            month += 1;
+        }
+    }
+    months
 }
 
 /// Looks up an agent's grouped failure counts. The rollup is already keyed by
