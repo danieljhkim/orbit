@@ -25,6 +25,7 @@ mod tests;
 
 pub use connect::{ConnectArgs, connect};
 
+use std::future::{Future, IntoFuture};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +39,7 @@ use clap::Args;
 use orbit_core::{OrbitError, OrbitRuntime};
 use orbit_registry::workspace_registry;
 use orbit_types::workspace::{WorkspaceRegistry, WorkspaceStatus};
+use tokio::sync::Notify;
 
 const INDEX_HTML: &str = include_str!("../assets/dashboard/index.html");
 const DASHBOARD_CSS: &str = include_str!("../assets/dashboard/dashboard.css");
@@ -277,27 +279,78 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
             open_browser(&url);
         }
 
-        let shutdown = async {
+        // Shared with `drain_with_grace_period` below: the grace-period timer
+        // must not start until shutdown is actually requested, so the signal
+        // handler notifies it rather than the drain deadline starting
+        // unconditionally when serving starts (see ORB-11255). `notify_one`
+        // (not `notify_waiters`) is required here: `drain` (polled as part of
+        // the `select!` in `drain_with_grace_period`) can resolve this signal
+        // and reach this call before `grace_elapsed`'s `notified().await` has
+        // ever been polled for the first time -- `notify_waiters` only wakes
+        // *already-registered* waiters and would silently drop that
+        // notification, leaving the grace timer never started. `notify_one`
+        // stores a permit for exactly this case: a `notified().await` that
+        // starts after the notify already fired consumes it immediately.
+        // There is exactly one waiter (`grace_elapsed`), so `notify_one` is
+        // sufficient.
+        let shutdown_notify = Arc::new(Notify::new());
+        let notify_on_signal = Arc::clone(&shutdown_notify);
+        let shutdown = async move {
             shutdown_signal().await;
             // Ask cooperating long-lived connections (the `/api/log/stream`
             // SSE handler) to close now, before the bounded drain deadline
             // below is reached.
             api::request_shutdown();
+            notify_on_signal.notify_one();
         };
-        let drain = axum::serve(listener, app).with_graceful_shutdown(shutdown);
-        match tokio::time::timeout(SHUTDOWN_GRACE_PERIOD, drain).await {
-            Ok(result) => result.map_err(|e| OrbitError::Execution(format!("serve: {e}")))?,
-            Err(_) => {
-                tracing::warn!(
-                    grace_period_secs = SHUTDOWN_GRACE_PERIOD.as_secs(),
-                    "dashboard shutdown grace period elapsed with connections \
-                     still open; exiting without waiting further"
-                );
-            }
-        }
+        let drain = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .into_future();
 
-        Ok::<(), OrbitError>(())
+        drain_with_grace_period(drain, shutdown_notify, SHUTDOWN_GRACE_PERIOD).await
     })
+}
+
+/// Race a server-drain future against a grace-period timeout that only
+/// starts counting down once `shutdown_notify` fires. Returns `drain`'s
+/// result if it finishes first (normal completion of graceful shutdown, or a
+/// serve error). Otherwise, once `grace_period` elapses after shutdown was
+/// signaled, logs a warning and returns `Ok(())` so the process exits without
+/// waiting further for connections that never close on their own.
+///
+/// Critically, `grace_elapsed` cannot resolve before `shutdown_notify` fires:
+/// this is what stops a healthy, unsignaled server from being torn down after
+/// `grace_period` elapses (ORB-11255 -- the prior `tokio::time::timeout`
+/// wrapped the whole drain and started counting down when serving began, not
+/// when shutdown was requested).
+///
+/// Callers must signal `shutdown_notify` with [`Notify::notify_one`], not
+/// `notify_waiters`: `drain` is polled as part of the `select!` below and may
+/// resolve the signal and notify before `grace_elapsed`'s `notified().await`
+/// is ever polled for the first time. `notify_one` stores a permit for that
+/// case; `notify_waiters` would silently drop the notification and leave the
+/// grace timer never started.
+async fn drain_with_grace_period(
+    drain: impl Future<Output = std::io::Result<()>>,
+    shutdown_notify: Arc<Notify>,
+    grace_period: Duration,
+) -> Result<(), OrbitError> {
+    let grace_elapsed = async {
+        shutdown_notify.notified().await;
+        tokio::time::sleep(grace_period).await;
+    };
+
+    tokio::select! {
+        result = drain => result.map_err(|e| OrbitError::Execution(format!("serve: {e}"))),
+        () = grace_elapsed => {
+            tracing::warn!(
+                grace_period_secs = grace_period.as_secs(),
+                "dashboard shutdown grace period elapsed with connections \
+                 still open; exiting without waiting further"
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Reject binding the dashboard to anything other than a loopback address.
