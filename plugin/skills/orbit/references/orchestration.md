@@ -82,6 +82,16 @@ can inspect new work without repeating the expensive assessment. Explicit
 selectors, but refuses an ID already prepared by an active run; inspect or
 resume the named run instead.
 
+The prepare step fetches the landing branch (`base_branch`, defaulting to
+`workflow.base_branch`) and pins one `source_revision`. A clean primary that
+already sits on that branch and is behind origin is fast-forwarded so inspection
+sees the landed tree; a dirty, divergent, or unfetchable checkout fails as
+source-staleness *before* any agent call. The pilot inspects that pinned
+revision. Apply validates selector existence against the same snapshot, not a
+later working tree, so a newly merged file is not reported as missing merely
+because the primary lagged origin, and a later origin advance cannot admit a
+path that did not exist at prepare.
+
 The pilot agent inspection is read-only; its deterministic apply step mutates
 validated task selectors. It runs five
 partitions concurrently, and returns selector proposals plus duplicate,

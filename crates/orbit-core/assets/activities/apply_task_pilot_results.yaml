@@ -7,9 +7,9 @@ spec:
   description: >
     Partition-isolated, fail-closed task-pilot apply boundary. It validates each
     partition's exact before snapshots, dispositions, canonical in-workspace
-    file/dir/symbol selectors, and target existence before mutating that
-    partition. Stale or malformed partitions are reported without writes while
-    independently valid partitions still apply. Every other task
+    file/dir/symbol selectors, and target existence against the prepared source
+    revision when one was pinned. Stale or malformed partitions are reported
+    without writes while independently valid partitions still apply. Every other task
     field, lifecycle state, dispatch state, and recommendation remains unchanged
     unless a CI sweep supplies its exact filing record and explicit promotion
     authority. In that mode only a proposed, selector-backed task with no
@@ -38,7 +38,7 @@ spec:
   output_schema_json:
     type: object
     required:
-      [status, error, mode, workspace_path, discovery,
+      [status, error, mode, workspace_path, source, discovery,
        partition_decisions, partition_count, received_partition_count,
        failed_partitions, skipped_stale_partitions, tasks, ci_sweep_admission]
     properties:
@@ -54,6 +54,10 @@ spec:
         enum: [automatic, explicit]
       workspace_path:
         type: string
+      source:
+        oneOf:
+          - type: object
+          - type: "null"
       discovery:
         type: object
       partition_decisions:
