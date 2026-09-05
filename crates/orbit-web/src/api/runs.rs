@@ -122,6 +122,7 @@ pub(super) async fn cancel_run_action(Ws(runtime): Ws, Path(id): Path<String>) -
     match runtime.cancel_job_run_with_context(id, "dashboard", "web") {
         Ok(result) => Json(json!({
             "run_id": result.run_id,
+            "outcome": result.outcome,
             "previous_state": result.previous_state,
             "final_state": result.final_state,
             "actor": result.actor,

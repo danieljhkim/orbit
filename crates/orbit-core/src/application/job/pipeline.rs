@@ -33,6 +33,11 @@ use crate::application::job::resume::ResumePlan;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
+#[cfg(unix)]
+use super::run::CANCELLATION_WORKER_EXIT_AUDIT;
 
 const PIPELINE_WAIT_DEFAULT_TIMEOUT_SECONDS: u64 = 3600;
 const PIPELINE_WAIT_MAX_TIMEOUT_SECONDS: u64 = 7200;
@@ -1099,6 +1104,24 @@ impl OrbitRuntime {
                     );
                     return Ok(());
                 }
+                #[cfg(unix)]
+                if let Some(signal) = status
+                    .signal()
+                    .filter(|signal| matches!(*signal, libc::SIGTERM | libc::SIGKILL))
+                    && self.record_pipeline_worker_cancellation_exit(
+                        &run,
+                        signal,
+                        &status.to_string(),
+                        actor,
+                    )?
+                {
+                    // The cancelling caller owns terminalization after it has
+                    // verified both the recorded leader and process group are
+                    // gone. Reaping the worker proves only the leader exited;
+                    // finalizing here could release reservations while a
+                    // run-owned child remains alive.
+                    return Ok(());
+                }
                 if run.state.is_terminal() {
                     return Ok(());
                 }
@@ -1121,6 +1144,41 @@ impl OrbitRuntime {
 
             thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// Record a TERM/KILL worker exit that belongs to an outstanding
+    /// cancellation request, without terminalizing the run. The signalling
+    /// caller performs the authoritative liveness verification and then
+    /// finalizes `cancelled`; this observer only preserves the completion
+    /// cause and suppresses the misleading generic worker-failure path.
+    #[cfg(unix)]
+    pub(crate) fn record_pipeline_worker_cancellation_exit(
+        &self,
+        run: &JobRun,
+        signal: i32,
+        exit_status: &str,
+        actor: Option<&str>,
+    ) -> Result<bool, OrbitError> {
+        let Some(request_id) = self.active_job_run_cancellation_request(&run.run_id)? else {
+            return Ok(false);
+        };
+        self.record_pipeline_audit(
+            CANCELLATION_WORKER_EXIT_AUDIT,
+            Some(&run.run_id),
+            actor,
+            AuditEventStatus::Success,
+            json!({
+                "request_id": request_id,
+                "run_id": run.run_id,
+                "owner_pid": run.pid,
+                "signal": signal,
+                "signal_name": worker_cancellation_signal_name(signal),
+                "exit_status": exit_status,
+                "observed_at": Utc::now().to_rfc3339(),
+            }),
+            None,
+        )?;
+        Ok(true)
     }
 
     /// Terminalize a worker process that exited while it still owned a
@@ -1325,6 +1383,15 @@ impl OrbitRuntime {
             activity_id: None,
             step_index: None,
         })
+    }
+}
+
+#[cfg(unix)]
+fn worker_cancellation_signal_name(signal: i32) -> &'static str {
+    match signal {
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGKILL => "SIGKILL",
+        _ => "unknown",
     }
 }
 

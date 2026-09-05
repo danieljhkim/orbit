@@ -98,6 +98,14 @@ fn cancel_requires_confirmation_before_terminalizing_pending_run() {
             .state,
         JobRunState::Cancelled
     );
+
+    RunCancelArgs {
+        run_id: run.run_id.clone(),
+        json: true,
+        confirm: true,
+    }
+    .execute(&runtime)
+    .expect("duplicate cancellation reports already-terminal success");
 }
 
 #[test]

@@ -19,6 +19,8 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+#[cfg(unix)]
+pub(crate) use actions::CANCELLATION_WORKER_EXIT_AUDIT;
 #[cfg(test)]
 pub(crate) use conflict::TERMINAL_OUTCOME_CONFLICT_CODE;
 pub(crate) use owner::{RunOwnerLiveness, run_owner_liveness};

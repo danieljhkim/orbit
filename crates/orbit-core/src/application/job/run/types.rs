@@ -20,6 +20,10 @@ pub struct JobRunListParams {
 #[derive(Debug, Clone, Serialize)]
 pub struct JobRunCancelResult {
     pub run_id: String,
+    /// `cancelled` when this request terminalized the run, or
+    /// `already_terminal` when the run reached a durable terminal outcome
+    /// before this request could do so.
+    pub outcome: String,
     pub previous_state: String,
     pub final_state: String,
     pub actor: String,

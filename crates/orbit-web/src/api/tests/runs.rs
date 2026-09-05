@@ -403,6 +403,7 @@ async fn cancel_run_endpoint_cancels_pending_run() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = body_json(response).await;
     assert_eq!(payload["run_id"], run.run_id);
+    assert_eq!(payload["outcome"], "cancelled");
     assert_eq!(payload["previous_state"], "pending");
     assert_eq!(payload["final_state"], "cancelled");
     assert_eq!(payload["signal_attempted"], false);
@@ -412,7 +413,7 @@ async fn cancel_run_endpoint_cancels_pending_run() {
 }
 
 #[tokio::test]
-async fn cancel_run_endpoint_rejects_terminal_run_without_mutating_bundle() {
+async fn cancel_run_endpoint_reports_terminal_run_idempotently_without_mutating_bundle() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run = seed_run(
         &runtime,
@@ -425,13 +426,12 @@ async fn cancel_run_endpoint_rejects_terminal_run_without_mutating_bundle() {
     let response =
         request_cancel(runtime.clone(), &run.run_id, Some("http://localhost:3000")).await;
 
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::OK);
     let payload = body_json(response).await;
-    assert!(
-        payload["error"]
-            .as_str()
-            .is_some_and(|message| message.contains("cannot cancel job run"))
-    );
+    assert_eq!(payload["outcome"], "already_terminal");
+    assert_eq!(payload["previous_state"], "success");
+    assert_eq!(payload["final_state"], "success");
+    assert_eq!(payload["signal_attempted"], false);
     let after = runtime.show_job_run(&run.run_id).expect("show after");
     assert_eq!(after, before);
 }
