@@ -10,10 +10,13 @@ use std::path::{Path, PathBuf};
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Json, Response};
-use orbit_core::DEFAULT_TASK_LIST_LIMIT;
+use chrono::{DateTime, Utc};
+use orbit_core::application::job::{JobRunListParams, job_run_to_json};
+use orbit_core::{DEFAULT_TASK_LIST_LIMIT, JobRun, JobRunState, OrbitRuntime};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{blocking, server_error};
+use super::{HISTORY_DEFAULT_LIMIT, bad_request, blocking, bounded_limit, server_error};
 use crate::projections::task_row_to_json;
 use crate::state::DashboardState;
 use orbit_core::application::task::TaskListFilter;
@@ -61,6 +64,163 @@ pub(super) async fn list_all_tasks(State(state): State<DashboardState>) -> Respo
         Ok(Err(error)) => server_error(error),
         Err(response) => *response,
     }
+}
+
+#[derive(Deserialize, Default)]
+pub(super) struct AllJobRunsQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum AllJobRunsState {
+    All,
+    Active,
+    Failed,
+}
+
+impl AllJobRunsState {
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None | Some("all") => Ok(Self::All),
+            Some("active") => Ok(Self::Active),
+            Some("failed") => Ok(Self::Failed),
+            Some(_) => Err("invalid state; expected one of: all, active, failed".to_string()),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Active => "active",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// `GET /api/job-runs/all` — a bounded run list across every visible workspace.
+///
+/// Run ids are workspace-local, so every item carries its workspace identity.
+/// Unavailable sources remain in the response instead of being represented as
+/// an empty workspace, allowing the dashboard to distinguish partial data from
+/// a genuine zero-run result.
+pub(super) async fn list_all_job_runs(
+    State(state): State<DashboardState>,
+    axum::extract::Query(query): axum::extract::Query<AllJobRunsQuery>,
+) -> Response {
+    let limit = bounded_limit(query.limit, HISTORY_DEFAULT_LIMIT);
+    let state_filter = match AllJobRunsState::parse(query.state.as_deref()) {
+        Ok(filter) => filter,
+        Err(message) => return bad_request(message),
+    };
+    match blocking("aggregate job run list", move || {
+        Ok::<_, orbit_core::OrbitError>(all_job_runs_json(&state, limit, state_filter))
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(response) => *response,
+    }
+}
+
+fn all_job_runs_json(state: &DashboardState, limit: usize, state_filter: AllJobRunsState) -> Value {
+    let pinned = state.pin();
+    let mut candidates = Vec::new();
+    let mut unavailable = Vec::new();
+    let mut source_truncated = false;
+
+    for entry in pinned.entries() {
+        if !entry.active {
+            unavailable.push(json!({
+                "workspace_id": entry.id,
+                "workspace_name": entry.name,
+                "error": "workspace is unavailable",
+            }));
+            continue;
+        }
+        let runtime = match pinned.runtime_for(&entry.id) {
+            Ok(runtime) => runtime,
+            Err(_) => {
+                unavailable.push(json!({
+                    "workspace_id": entry.id,
+                    "workspace_name": entry.name,
+                    "error": "failed to open workspace",
+                }));
+                continue;
+            }
+        };
+        match workspace_job_runs(&runtime, limit, state_filter) {
+            Ok(runs) => {
+                source_truncated |= runs.len() == limit;
+                candidates.extend(
+                    runs.into_iter()
+                        .map(|run| (run, entry.id.clone(), entry.name.clone())),
+                );
+            }
+            Err(error) => unavailable.push(json!({
+                "workspace_id": entry.id,
+                "workspace_name": entry.name,
+                "error": error.to_string(),
+            })),
+        }
+    }
+
+    candidates.sort_by(|(left, left_workspace, _), (right, right_workspace, _)| {
+        run_timestamp(right)
+            .cmp(&run_timestamp(left))
+            .then_with(|| left_workspace.cmp(right_workspace))
+            .then_with(|| left.run_id.cmp(&right.run_id))
+    });
+    let truncated = source_truncated || candidates.len() > limit;
+    candidates.truncate(limit);
+    let items = candidates
+        .into_iter()
+        .map(|(run, workspace_id, workspace_name)| {
+            let mut value = job_run_to_json(&run, None);
+            if let Value::Object(map) = &mut value {
+                map.insert("workspace_id".to_string(), json!(workspace_id));
+                map.insert("workspace_name".to_string(), json!(workspace_name));
+            }
+            value
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "items": items,
+        "limit": limit,
+        "state": state_filter.label(),
+        "truncated": truncated,
+        "unavailable": unavailable,
+    })
+}
+
+fn workspace_job_runs(
+    runtime: &OrbitRuntime,
+    limit: usize,
+    state_filter: AllJobRunsState,
+) -> Result<Vec<JobRun>, orbit_core::OrbitError> {
+    let list = |state| {
+        runtime.list_job_runs(JobRunListParams {
+            state,
+            limit: Some(limit),
+            ..Default::default()
+        })
+    };
+    match state_filter {
+        AllJobRunsState::All => list(None),
+        AllJobRunsState::Failed => list(Some(JobRunState::Failed)),
+        AllJobRunsState::Active => {
+            let mut runs = list(Some(JobRunState::Pending))?;
+            runs.extend(list(Some(JobRunState::Running))?);
+            Ok(runs)
+        }
+    }
+}
+
+fn run_timestamp(run: &JobRun) -> DateTime<Utc> {
+    run.finished_at.or(run.started_at).unwrap_or(run.created_at)
 }
 
 fn all_tasks_json(state: &DashboardState) -> Result<Vec<Value>, orbit_core::OrbitError> {

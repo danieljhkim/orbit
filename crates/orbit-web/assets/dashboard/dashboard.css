@@ -1434,6 +1434,51 @@
         align-items: center;
         border-bottom: 1px solid rgba(255, 255, 255, 0.03);
       }
+      #runs-body { overflow-x: auto; }
+      .runs-row.workspace-attributed {
+        grid-template-columns:
+          80px minmax(90px, 0.65fr) minmax(100px, 1fr) minmax(100px, 0.7fr)
+          58px 74px 86px 80px 72px;
+      }
+      .runs-row .run-workspace {
+        color: var(--accent);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .runs-filter {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+      .runs-filter-label { color: var(--fg-dim); margin-right: 2px; }
+      .runs-filter-button {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 9px;
+        background: transparent;
+        color: var(--fg-dim);
+        font: inherit;
+        cursor: pointer;
+      }
+      .runs-filter-button:hover,
+      .runs-filter-button.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-dim);
+      }
+      .runs-source-warning {
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+        color: var(--state-failed);
+        background: rgba(239, 68, 68, 0.08);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
       
       .runs-row:last-child {
         border-bottom: none;
@@ -1524,6 +1569,17 @@
         cursor: pointer;
       }
       .runs-sort.active { color: var(--fg); }
+
+      @media (max-width: 760px) {
+        .runs-row { min-width: 790px; }
+        .runs-row.workspace-attributed { min-width: 900px; }
+        .runs-filter,
+        .runs-source-warning {
+          min-width: max-content;
+          position: sticky;
+          left: 0;
+        }
+      }
       
       .scoreboard-row {
         display: grid;

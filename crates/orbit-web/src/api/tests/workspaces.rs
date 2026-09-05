@@ -7,10 +7,10 @@ use std::sync::{Arc, Barrier, Mutex};
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode, header};
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use orbit_core::application::task::TaskAddParams;
 use orbit_core::runtime::WorkspaceRuntimeBinding;
-use orbit_core::{ActorIdentity, OrbitRuntime, ShipMode, TaskStatus};
+use orbit_core::{ActorIdentity, JobRunState, OrbitRuntime, ShipMode, TaskStatus};
 use orbit_types::workspace::{Workspace, WorkspaceCheckout, WorkspaceRegistry, WorkspaceStatus};
 use serde_json::json;
 use tower::ServiceExt;
@@ -19,7 +19,7 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
 
 use super::super::*;
-use super::test_support::body_json;
+use super::test_support::{body_json, seed_run, write_seeded_run};
 use crate::state::{DashboardState, RegistrySource, WsEntry};
 
 fn get(uri: &str) -> Request<Body> {
@@ -198,6 +198,105 @@ async fn tasks_all_aggregates_active_workspaces_and_skips_inactive() {
         alpha["orbit_dir"]
             .as_str()
             .is_some_and(|dir| dir.ends_with(".orbit"))
+    );
+}
+
+#[tokio::test]
+async fn job_runs_all_preserves_workspace_identity_order_bounds_and_unavailable_sources() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let global_root = tmp.path().join("global");
+    std::fs::create_dir_all(&global_root).expect("create global root");
+    let (alpha_orbit, alpha_repo) = seed_workspace(&global_root, tmp.path(), "alpha");
+    let (beta_orbit, beta_repo) = seed_workspace(&global_root, tmp.path(), "beta");
+
+    let alpha = OrbitRuntime::from_roots(&global_root, &alpha_orbit).expect("alpha runtime");
+    let beta = OrbitRuntime::from_roots(&global_root, &beta_orbit).expect("beta runtime");
+    let shared_time = Utc::now();
+    let mut alpha_duplicate = seed_run(&alpha, "jrun-shared", "aggregate", JobRunState::Pending);
+    alpha_duplicate.created_at = shared_time;
+    alpha_duplicate.scheduled_at = shared_time;
+    alpha_duplicate.started_at = None;
+    write_seeded_run(&alpha, &alpha_duplicate);
+    let mut beta_duplicate = seed_run(&beta, "jrun-shared", "aggregate", JobRunState::Failed);
+    beta_duplicate.created_at = shared_time;
+    beta_duplicate.scheduled_at = shared_time;
+    beta_duplicate.started_at = Some(shared_time);
+    beta_duplicate.finished_at = Some(shared_time);
+    write_seeded_run(&beta, &beta_duplicate);
+    let mut old = seed_run(&alpha, "jrun-old", "aggregate", JobRunState::Success);
+    old.created_at = shared_time - Duration::days(1);
+    old.scheduled_at = old.created_at;
+    old.started_at = Some(old.created_at);
+    old.finished_at = Some(old.created_at);
+    write_seeded_run(&alpha, &old);
+
+    let entries = vec![
+        workspace_entry("alpha", alpha_repo, alpha_orbit, true),
+        workspace_entry("beta", beta_repo, beta_orbit, true),
+        workspace_entry(
+            "gone",
+            tmp.path().join("missing"),
+            tmp.path().join("missing/.orbit"),
+            false,
+        ),
+    ];
+    let state = DashboardState::global(global_root, entries, Some("alpha".to_string()));
+    let bounded = router()
+        .with_state(state.clone())
+        .oneshot(get("/job-runs/all?limit=999"))
+        .await
+        .expect("bounded response");
+    let bounded = body_json(bounded).await;
+    assert_eq!(bounded["limit"], json!(HISTORY_MAX_LIMIT));
+    assert_eq!(bounded["items"].as_array().expect("bounded items").len(), 3);
+
+    let active = router()
+        .with_state(state.clone())
+        .oneshot(get("/job-runs/all?state=active&limit=2"))
+        .await
+        .expect("active response");
+    let active = body_json(active).await;
+    assert_eq!(active["state"], json!("active"));
+    assert_eq!(active["items"].as_array().expect("active items").len(), 1);
+    assert_eq!(active["items"][0]["workspace_id"], json!("alpha"));
+
+    let failed = router()
+        .with_state(state.clone())
+        .oneshot(get("/job-runs/all?state=failed&limit=2"))
+        .await
+        .expect("failed response");
+    let failed = body_json(failed).await;
+    assert_eq!(failed["state"], json!("failed"));
+    assert_eq!(failed["items"].as_array().expect("failed items").len(), 1);
+    assert_eq!(failed["items"][0]["workspace_id"], json!("beta"));
+
+    let invalid = router()
+        .with_state(state.clone())
+        .oneshot(get("/job-runs/all?state=terminal"))
+        .await
+        .expect("invalid response");
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let response = router()
+        .with_state(state)
+        .oneshot(get("/job-runs/all?limit=2"))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["limit"], json!(2));
+    assert_eq!(body["truncated"], json!(true));
+    let rows = body["items"].as_array().expect("items");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["run_id"], json!("jrun-shared"));
+    assert_eq!(rows[0]["workspace_id"], json!("alpha"));
+    assert_eq!(rows[1]["run_id"], json!("jrun-shared"));
+    assert_eq!(rows[1]["workspace_id"], json!("beta"));
+    assert!(rows.iter().all(|run| run["workspace_name"].is_string()));
+    assert_eq!(body["unavailable"][0]["workspace_id"], json!("gone"));
+    assert_eq!(
+        body["unavailable"][0]["error"],
+        json!("workspace is unavailable")
     );
 }
 

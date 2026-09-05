@@ -17,7 +17,7 @@
 //
 // Also exports parseHashRoute for symmetry (used only internally today).
 
-import { el, isAggregateView, renderPanelPlaceholder, getWindow, setWindow, parseDashboardWindow, persistScopeToUrl, syncWindowSelectors } from './common.js';
+import { el, isAggregateView, renderPanelPlaceholder, getWindow, setWindow, setWorkspace, parseDashboardWindow, persistScopeToUrl, syncWindowSelectors } from './common.js';
 import { renderRuns } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
@@ -126,18 +126,12 @@ function setDiagSubtabImpl(ctx, name) {
     return;
   }
 
-  // ORB-00044: in the aggregate "All workspaces" view the diagnostics fetches
-  // are skipped (activeRefreshJobs), so a subtab switch must not repaint the
-  // previous workspace's stale rows over the placeholder — render the
-  // placeholder for the now-visible body instead.
+  // Runs remains live in the aggregate view. Other per-workspace diagnostics
+  // must keep their placeholder and never repaint a prior workspace's rows.
   if (name === "runs") {
     $("diag-body").style.display = "none";
     $("runs-body").style.display = "block";
-    if (isAggregateView()) {
-      renderPanelPlaceholder("runs-body");
-    } else {
-      renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
-    }
+    renderRuns(ctx.getLastRuns ? ctx.getLastRuns() : []);
   } else {
     $("diag-body").style.display = "block";
     $("runs-body").style.display = "none";
@@ -299,7 +293,13 @@ function setActiveTabImpl(ctx, raw, opts = {}) {
   if (opts.refresh !== false && (!hashChanged || !shouldUpdateHash)) ctx.refreshDashboard();
 }
 
-function navigateToRunImpl(ctx, runId) {
+function navigateToRunImpl(ctx, runId, workspaceId = null) {
+  if (workspaceId) {
+    setWorkspace(workspaceId);
+    persistScopeToUrl();
+    const selector = $("workspace-select");
+    if (selector) selector.value = workspaceId;
+  }
   ctx.setRunId(runId);
   ctx.setExpandedSteps(new Set());
   ctx.setRunDetail(null);
@@ -368,9 +368,9 @@ export function setActiveTab(raw, opts = {}) {
   return setActiveTabImpl(ctx, raw, opts);
 }
 
-export function navigateToRun(runId) {
+export function navigateToRun(runId, workspaceId = null) {
   const ctx = getCtx();
-  return navigateToRunImpl(ctx, runId);
+  return navigateToRunImpl(ctx, runId, workspaceId);
 }
 
 export function initTabs() {
