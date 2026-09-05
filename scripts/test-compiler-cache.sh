@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Fallback and enablement tests for scripts/rustc-compiler-cache.sh [ORB-11259].
+# No full crate compile: the wrapper is a rustc argv passthrough.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WRAPPER="$ROOT/scripts/rustc-compiler-cache.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+fail() {
+  printf 'test-compiler-cache: FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+assert_eq() {
+  local got="$1" want="$2" msg="$3"
+  [[ "$got" == "$want" ]] || fail "$msg: got '$got' want '$want'"
+}
+
+mkdir -p "$TMP/bin"
+# Fake rustc: records argv and exits 0.
+cat > "$TMP/bin/rustc" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${FAKE_RUSTC_LOG}"
+exit 0
+EOF
+chmod +x "$TMP/bin/rustc"
+
+# Fake sccache kept off PATH; tests opt in through ORBIT_COMPILER_CACHE_BIN.
+cat > "$TMP/sccache" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${FAKE_SCCACHE_LOG}"
+{
+  printf 'SCCACHE_DIR=%s\n' "${SCCACHE_DIR-}"
+  printf 'SCCACHE_BASEDIRS=%s\n' "${SCCACHE_BASEDIRS-}"
+  printf 'SCCACHE_CLIENT_SIDE=%s\n' "${SCCACHE_CLIENT_SIDE-}"
+} > "${FAKE_SCCACHE_ENV:-/dev/null}"
+exec "$@"
+EOF
+chmod +x "$TMP/sccache"
+
+export HOME="$TMP/home"
+mkdir -p "$HOME"
+unset SCCACHE_DIR ORBIT_COMPILER_CACHE_BIN RUSTC_WRAPPER ORBIT_COMPILER_CACHE
+export ORBIT_COMPILER_CACHE_DEBUG=0
+# Isolate PATH so a host sccache cannot leak into fallback cases.
+export PATH="$TMP/bin:/usr/bin:/bin"
+
+# 1. Forced off -> exec rustc with original argv even if sccache is configured.
+export ORBIT_COMPILER_CACHE_BIN="$TMP/sccache"
+export FAKE_RUSTC_LOG="$TMP/rustc-forced-off.log"
+export FAKE_SCCACHE_LOG="$TMP/sccache-forced-off.log"
+rm -f "$FAKE_RUSTC_LOG" "$FAKE_SCCACHE_LOG"
+ORBIT_COMPILER_CACHE=0 "$WRAPPER" "$TMP/bin/rustc" --crate-name demo -o /dev/null
+[[ -f "$FAKE_RUSTC_LOG" ]] || fail "forced-off wrapper did not exec rustc"
+[[ ! -f "$FAKE_SCCACHE_LOG" ]] || fail "forced-off wrapper must not exec sccache"
+assert_eq "$(tr '\n' ' ' < "$FAKE_RUSTC_LOG" | sed 's/ *$//')" "--crate-name demo -o /dev/null" "forced-off argv"
+
+# 2. Missing sccache -> exec rustc.
+unset ORBIT_COMPILER_CACHE_BIN
+export FAKE_RUSTC_LOG="$TMP/rustc-missing.log"
+export FAKE_SCCACHE_LOG="$TMP/sccache-missing.log"
+rm -f "$FAKE_RUSTC_LOG" "$FAKE_SCCACHE_LOG"
+"$WRAPPER" "$TMP/bin/rustc" --crate-name demo
+[[ -f "$FAKE_RUSTC_LOG" ]] || fail "missing-sccache wrapper did not exec rustc"
+[[ ! -f "$FAKE_SCCACHE_LOG" ]] || fail "missing sccache must not exec sccache"
+
+# 3. Unwritable cache dir -> rustc, not sccache.
+mkdir -p "$HOME/.orbit/cache/compiler"
+chmod a-w "$HOME/.orbit/cache/compiler"
+export ORBIT_COMPILER_CACHE_BIN="$TMP/sccache"
+export FAKE_SCCACHE_LOG="$TMP/sccache-unwritable.log"
+export FAKE_RUSTC_LOG="$TMP/rustc-unwritable.log"
+rm -f "$FAKE_SCCACHE_LOG" "$FAKE_RUSTC_LOG"
+"$WRAPPER" "$TMP/bin/rustc" --emit metadata
+[[ -f "$FAKE_RUSTC_LOG" ]] || fail "unwritable cache did not exec rustc"
+[[ ! -f "$FAKE_SCCACHE_LOG" ]] || fail "unwritable cache must not exec sccache"
+chmod u+w "$HOME/.orbit/cache/compiler"
+
+# 4. Writable cache + sccache -> sccache then rustc, with path-stripping basedirs.
+export FAKE_SCCACHE_LOG="$TMP/sccache-hit.log"
+export FAKE_SCCACHE_ENV="$TMP/sccache-hit.env"
+export FAKE_RUSTC_LOG="$TMP/rustc-hit.log"
+rm -f "$FAKE_SCCACHE_LOG" "$FAKE_SCCACHE_ENV" "$FAKE_RUSTC_LOG"
+"$WRAPPER" "$TMP/bin/rustc" --crate-name cached
+[[ -f "$FAKE_SCCACHE_LOG" ]] || fail "writable cache did not exec sccache"
+[[ -f "$FAKE_RUSTC_LOG" ]] || fail "sccache did not exec rustc"
+head -n 1 "$FAKE_SCCACHE_LOG" | grep -Fq "$TMP/bin/rustc" || fail "sccache first arg should be rustc"
+grep -E -q '^SCCACHE_DIR=/.+' "$FAKE_SCCACHE_ENV" || fail "wrapper must export SCCACHE_DIR"
+
+# 5. Operator surfaces exist and do not require a host sccache.
+"$ROOT/scripts/compiler-cache.sh" --help >/dev/null
+HOME="$HOME" "$ROOT/scripts/compiler-cache.sh" status >/dev/null
+
+# 6. When the Linux stable mounts alias this checkout, argv paths are rewritten.
+fake_tgt="$TMP/stable-target"
+mkdir -p "$fake_tgt" /tmp/orbit-workspace
+ln -s "$ROOT/Cargo.toml" /tmp/orbit-workspace/Cargo.toml
+ln -sfn "$fake_tgt" /tmp/orbit-build
+cleanup_stable() {
+  rm -f /tmp/orbit-workspace/Cargo.toml
+  rmdir /tmp/orbit-workspace 2>/dev/null || true
+  rm -f /tmp/orbit-build
+}
+trap 'cleanup_stable; rm -rf "$TMP"' EXIT
+export FAKE_SCCACHE_LOG="$TMP/sccache-rewrite.log"
+export FAKE_SCCACHE_ENV="$TMP/sccache-rewrite.env"
+export FAKE_RUSTC_LOG="$TMP/rustc-rewrite.log"
+export CARGO_TARGET_DIR="$fake_tgt"
+rm -f "$FAKE_SCCACHE_LOG" "$FAKE_SCCACHE_ENV" "$FAKE_RUSTC_LOG"
+"$WRAPPER" "$TMP/bin/rustc" --out-dir "$fake_tgt/debug" "$ROOT/crates/orbit-types/src/lib.rs"
+grep -Fq "/tmp/orbit-build/debug" "$FAKE_SCCACHE_LOG" || fail "out-dir should rewrite onto the stable build mount"
+grep -Fq "/tmp/orbit-workspace/crates/orbit-types/src/lib.rs" "$FAKE_SCCACHE_LOG" || fail "source path should rewrite onto the stable workspace mount"
+cleanup_stable
+trap 'rm -rf "$TMP"' EXIT
+unset CARGO_TARGET_DIR
+
+printf 'test-compiler-cache: ok\n'

@@ -44,11 +44,11 @@ pub mod sandbox;
 mod supervision;
 
 pub use linux_sandbox::{
-    BwrapProbeOutcome, LinuxBwrapPlan, LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest,
-    PreparedWriteGrants, UnsatisfiedWriteGrant, WriteAnchorKind, WriteGrant, bwrap_path,
-    bwrap_program_for_audit, bwrap_unavailable_message, compile_linux_bwrap_argv,
-    linux_bwrap_write_grant_diagnostic, linux_bwrap_write_grants, prepare_linux_bwrap_write_grants,
-    probe_bwrap, spawn_under_linux_bwrap,
+    BwrapProbeOutcome, LINUX_STABLE_BUILD_MOUNT, LINUX_STABLE_WORKSPACE_MOUNT, LinuxBwrapPlan,
+    LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, PreparedWriteGrants, UnsatisfiedWriteGrant,
+    WriteAnchorKind, WriteGrant, bwrap_path, bwrap_program_for_audit, bwrap_unavailable_message,
+    compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic, linux_bwrap_write_grants,
+    prepare_linux_bwrap_write_grants, probe_bwrap, spawn_under_linux_bwrap,
 };
 pub use macos_sandbox::{
     MacosLoginKeychainAccess, MacosSandboxSpawnRequest, claude_state_dir_from_env,
