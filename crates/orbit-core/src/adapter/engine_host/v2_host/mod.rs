@@ -9,6 +9,7 @@
 
 pub(super) mod backlog_exclusion;
 pub(super) mod child_dispatch;
+pub(super) mod ci_failure_admission;
 pub(super) mod ci_failure_tasks;
 pub(super) mod cli_executor;
 pub(super) mod dependabot_alert_tasks;

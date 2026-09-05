@@ -1,8 +1,11 @@
 //! Deterministic support actions for the task-pilot workflow [ORB-10510].
 //!
 //! The agent leg only proposes task metadata. These actions own discovery,
-//! partitioning, canonical selector validation, and the sole permitted write:
-//! replacing `context_files` on the exact tasks prepared for the run.
+//! partitioning and canonical selector validation. Ordinarily the sole write
+//! is replacing `context_files` on the exact tasks prepared for the run. A
+//! CI-failure sweep may additionally request explicit admission: after the
+//! selectors and every recommendation validate, this boundary promotes only a
+//! current, warning-free repair from `proposed` to `backlog`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -15,6 +18,7 @@ use orbit_types::task::{Task, TaskStatus};
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
+use crate::adapter::engine_host::v2_host::ci_failure_admission;
 use crate::application::task::TaskUpdateParams;
 
 const DEFAULT_MAX_PARTITION_SIZE: usize = 5;
@@ -194,6 +198,25 @@ pub(super) fn apply(
     // Validate every partition and every selector before the first mutation.
     // A malformed or failed partition therefore cannot partially apply the
     // otherwise-valid partitions that happened to precede it.
+    let ci_sweep_filing = input
+        .get("ci_sweep_filing")
+        .filter(|value| !value.is_null());
+    let promotion_authorized = input
+        .get("promotion_authorized")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| action_failed(action, "promotion_authorized must be a boolean"))
+        })
+        .transpose()?
+        .unwrap_or(false);
+    if ci_sweep_filing.is_some() && prepared_before.len() != 1 {
+        return Err(action_failed(
+            action,
+            "CI-sweep admission requires exactly one prepared task",
+        ));
+    }
+
     let mut validated = Vec::with_capacity(prepared_before.len());
     let mut seen_task_ids = BTreeSet::new();
     for (position, (expected, result)) in expected_partitions.iter().zip(results).enumerate() {
@@ -326,6 +349,7 @@ pub(super) fn apply(
                 expected_before.clone(),
                 after,
                 (*assessment).clone(),
+                current,
             ));
         }
     }
@@ -338,14 +362,36 @@ pub(super) fn apply(
     }
 
     let mut task_results = Vec::with_capacity(validated.len());
-    for (task_id, before, after, mut assessment) in validated {
+    let mut ci_sweep_admission = Vec::new();
+    for (task_id, before, after, mut assessment, current) in validated {
         let changed = before != after;
-        if changed {
+        let admission = ci_sweep_filing
+            .map(|filing| {
+                ci_failure_admission::assess(
+                    action,
+                    &task_id,
+                    &current,
+                    &assessment,
+                    &after,
+                    filing,
+                    promotion_authorized,
+                )
+            })
+            .transpose()?;
+        let promote = admission
+            .as_ref()
+            .is_some_and(|decision| decision["decision"] == "promote");
+        if changed || promote {
             runtime
                 .update_task(
                     &task_id,
                     TaskUpdateParams {
-                        context_files: Some(after.clone()),
+                        context_files: changed.then_some(after.clone()),
+                        status: promote.then_some(TaskStatus::Backlog),
+                        comment: promote.then(|| {
+                            "CI-sweep admission: task-pilot validated current relevance and selectors; promoted proposed repair to backlog."
+                                .to_string()
+                        }),
                         ..TaskUpdateParams::default()
                     },
                 )
@@ -358,6 +404,12 @@ pub(super) fn apply(
         }
         if let Value::Object(fields) = &mut assessment {
             fields.insert("applied".to_string(), Value::Bool(changed));
+            if let Some(admission) = admission.clone() {
+                fields.insert("ci_sweep_admission".to_string(), admission);
+            }
+        }
+        if let Some(admission) = admission {
+            ci_sweep_admission.push(admission);
         }
         task_results.push(assessment);
     }
@@ -374,6 +426,7 @@ pub(super) fn apply(
         "partition_count": expected_partitions.len(),
         "failed_partitions": [],
         "tasks": task_results,
+        "ci_sweep_admission": ci_sweep_admission,
     }))
 }
 

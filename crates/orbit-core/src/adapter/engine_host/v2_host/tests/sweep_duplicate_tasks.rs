@@ -168,6 +168,29 @@ fn ci_does_not_suppress_a_distinct_error_signature() {
 }
 
 #[test]
+fn completed_ci_repair_is_evidence_not_blanket_immunity_for_a_current_failure() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
+    let completed = seed_manual_task(
+        &runtime,
+        "Fix red CI: ci / build / cargo build",
+        "Workflow: ci\nFailing job: build\nFailing step: cargo build\n\
+         Normalized error signature: error: expected <n> arguments, found <n>",
+        TaskStatus::Done,
+    );
+
+    let output = file_ci(&runtime, ci_evidence());
+
+    assert_eq!(output["filed_count"], json!(1));
+    let filed = filed_task_ids(&output);
+    assert_ne!(filed[0], completed);
+    assert_eq!(
+        runtime.get_task(&filed[0]).expect("current task").status,
+        TaskStatus::Proposed,
+        "the fresh finding must be quarantined for current-relevance pilot assessment"
+    );
+}
+
+#[test]
 fn ci_exact_key_replay_does_not_require_the_broader_lookup() {
     let (_root, runtime, _repo_root) = runtime_with_workspace_layout();
     let evidence = ci_evidence();

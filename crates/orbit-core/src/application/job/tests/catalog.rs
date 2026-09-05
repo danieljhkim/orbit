@@ -198,18 +198,17 @@ fn default_activity_catalog() -> V2ActivityCatalog {
     catalog
 }
 
-/// The CI-failure sweep only looks and files. An agent step or a worktree in
-/// this pipeline would mean an agent had been handed the credentialed side of
-/// the sweep, or that the sweep had started building checkouts it never needs.
+/// The CI-failure sweep quarantines first, then delegates read-only inspection
+/// to the existing pilot job. It must never invoke an implementation pipeline
+/// or build a worktree itself.
 #[test]
-fn ci_failure_sweep_pipeline_is_two_deterministic_steps_and_single_flight() {
+fn ci_failure_sweep_pipeline_pilots_proposed_findings_before_authorized_admission() {
     let yaml = DEFAULT_JOB_FILES
         .iter()
         .find_map(|(name, yaml)| (*name == "ci_failure_sweep_pipeline").then_some(*yaml))
         .expect("CI-failure sweep job default exists");
-    let mut asset = load_job_asset(yaml).expect("parse CI-failure sweep pipeline");
+    let asset = load_job_asset(yaml).expect("parse CI-failure sweep pipeline");
     let catalog = default_activity_catalog();
-    resolve_job_target_refs(&mut asset.spec, &catalog).expect("resolve sweep target refs");
 
     assert_eq!(asset.spec.max_active_runs, 1);
 
@@ -219,25 +218,54 @@ fn ci_failure_sweep_pipeline_is_two_deterministic_steps_and_single_flight() {
         .iter()
         .map(|step| step.id.as_str())
         .collect();
-    assert_eq!(step_ids, ["collect", "file"], "collect must precede file");
+    assert_eq!(
+        step_ids,
+        ["collect", "file", "pilots"],
+        "proposed filing must precede pilot admission"
+    );
 
-    for step in &asset.spec.steps {
-        let JobV2StepBody::Target(target) = &step.body else {
-            panic!(
-                "sweep step `{}` must be a resolved activity target",
-                step.id
-            );
+    for step in &asset.spec.steps[..2] {
+        let JobV2StepBody::TargetRef(target) = &step.body else {
+            panic!("sweep step `{}` must reference an activity", step.id);
         };
         assert!(
-            matches!(target.spec, ActivityV2Spec::Deterministic(_)),
-            "sweep step `{}` must be deterministic; this sweep launches no agent",
-            step.id
+            matches!(
+                target.target.as_str(),
+                "activity:collect_ci_evidence" | "activity:file_ci_failure_tasks"
+            ),
+            "unexpected pre-pilot step {}",
+            target.target
         );
     }
+    let JobV2StepBody::FanOut { fan_out, fan_in } = &asset.spec.steps[2].body else {
+        panic!("new CI findings must fan out into independent pilots");
+    };
+    assert_eq!(fan_out.items, "{{ steps.file.output.pilot_candidates }}");
+    assert_eq!(fan_out.max_workers, 3);
+    assert_eq!(fan_in.collect.as_deref(), Some("pilot_results"));
+    let JobV2StepBody::TargetRef(pilot) = &fan_out.worker.body else {
+        panic!("pilot worker must invoke the existing task-pilot job");
+    };
+    assert_eq!(pilot.target, "activity:invoke_and_wait");
+    let input = pilot
+        .default_input
+        .as_ref()
+        .expect("pilot invocation input");
+    assert_eq!(input["job_name"], "task_pilot_pipeline");
+    assert_eq!(
+        input["run_input"]["task_ids"],
+        json!(["{{ item.task_id }}"])
+    );
+    assert_eq!(input["run_input"]["ci_sweep_filing"], "{{ item }}");
+    assert_eq!(input["run_input"]["promotion_authorized"], true);
+
+    let mut resolved = asset.clone();
+    resolve_job_target_refs(&mut resolved.spec, &catalog).expect("resolve sweep target refs");
     assert!(
         !yaml.contains("worktree_setup"),
-        "the sweep only looks and files, so it must never build a worktree"
+        "the sweep never implements, so it must never build a worktree"
     );
+    assert!(!yaml.contains("job_name: task_auto_pipeline"));
 }
 
 #[test]
@@ -406,6 +434,8 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     let defaults = asset.spec.default_input.as_ref().expect("default input");
     assert_eq!(defaults["task_ids"], json!([]));
     assert_eq!(defaults["max_partition_size"], 5);
+    assert_eq!(defaults["promotion_authorized"], false);
+    assert_eq!(defaults["ci_sweep_filing"], Value::Null);
     assert!(
         defaults.get("crew").is_none(),
         "a job-input crew would be dead: the system-crew marker overwrites it before resolution"
@@ -452,6 +482,14 @@ fn task_pilot_pipeline_resolves_system_crew_and_bounded_all_join_partitions() {
     let apply_input = apply.default_input.as_ref().expect("apply input");
     assert_eq!(apply_input["prepared"], "{{ steps.prepare.output }}");
     assert_eq!(apply_input["results"], "{{ steps.pilot_results.output }}");
+    assert_eq!(
+        apply_input["promotion_authorized"],
+        "{{ input.promotion_authorized }}"
+    );
+    assert_eq!(
+        apply_input["ci_sweep_filing"],
+        "{{ input.ci_sweep_filing }}"
+    );
     assert!(
         apply_input.get("crew").is_none() && apply_input.get("system_crew").is_none(),
         "the deterministic apply step must carry no crew key: it cannot receive the \

@@ -67,7 +67,7 @@ workspace-unique name (`<base>-<workspace>`) resolved at seed time. Run
 | `task-pilot` | every 4h | `task_pilot_pipeline` | Preflights proposed/backlog tasks with empty `context_files` and fills in validated selectors. |
 | `task-triage` | hourly | `task_triage_pipeline` | Diagnoses tasks blocked by failed runs; re-backlogs environmental casualties, leaves real failures blocked with a diagnosis. |
 | `auto-task-scheduler` | every minute | `auto_task_scheduler_pipeline` | Mints tasks from every due, enabled auto-task definition. → [auto-tasks.md](auto-tasks.md) |
-| `ci-failure-sweep` | hourly at :05 | `ci_failure_sweep_pipeline` | Collects GitHub Actions evidence and files deduped backlog bug tasks. |
+| `ci-failure-sweep` | hourly at :05 | `ci_failure_sweep_pipeline` | Files deduped proposed CI findings, pilots them, and admits only current warning-free repairs to backlog. |
 | `dependabot-alert-sweep` | daily at 03:25 host-local time | `dependabot_alert_sweep_pipeline` | Collects Dependabot, code-scanning, and secret-scanning findings and files remediation tasks. |
 | `ship-sweep` | every 20m | `workspace_ship_pipeline` | Ships this workspace's ready backlog through the gated pipeline, unattended. |
 
@@ -173,7 +173,13 @@ orbit job show dependabot_alert_sweep_pipeline
 orbit run job dependabot_alert_sweep_pipeline --input min_severity=high --input max_tasks=10
 ```
 
-These commands can create backlog tasks; they are not dry runs. Set the CI
+These commands can create and pilot proposed tasks; they are not dry runs.
+The CI job promotes only tasks whose pilot applied non-empty canonical
+selectors and reported no duplicate, already-landed, conflict, or warning
+finding. Pilot failure and stale/no-diff findings remain proposed, so an active
+auto-drain cannot claim them. Invoking this named job, or enabling its shipped
+inert routine, is explicit promotion authorization; the filing activity and a
+standalone `task_pilot_pipeline` run carry no such authority. Set the CI
 integration branch explicitly when it differs from GitHub's default branch.
 CI defaults bound investigation to six runs and filing to five tasks. The
 security job defaults to high-severity Dependabot/code-scanning findings and
@@ -185,5 +191,9 @@ A missing GitHub client, authentication, or API permission is a capability gap,
 not evidence of a clean repository. Read the collect/file step outcomes. CI
 failure-key dedupe and security alert identity suppress already-covered work;
 they do not promise general semantic duplicate detection. Discovery and filing
-errors must remain visible and retryable. Choose these routines independently
-of `ship-sweep`; filing does not authorize unattended repair.
+errors must remain visible and retryable. A previous done repair is evidence to
+inspect, not blanket dedupe: an old failed release already fixed on the current
+integration branch stays proposed as already-landed, while a distinct defect
+that still reproduces at the current revision remains eligible. Choose these
+routines independently of `ship-sweep`; admission to backlog does not authorize
+implementation or completion.

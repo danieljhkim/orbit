@@ -58,17 +58,27 @@ not a rewrite of failed history.
 | `task_local_pipeline` | Implement in a worktree and merge to the configured local base without a PR; optional push. |
 | `task_auto_pipeline` | Discover ready backlog tasks and ship them. |
 | `task_gate_pipeline` | Gated shipment with windowing and starvation handling. |
-| `task_pilot_pipeline` | Read-only agent preflight plus a deterministic apply step that writes validated `context_files`. |
+| `task_pilot_pipeline` | Read-only agent preflight plus deterministic validated-selector apply; it defaults to no lifecycle promotion. |
 | `task_triage_pipeline` | Diagnose tasks blocked by failed runs. |
 | `epic_pipeline` | Ship an epic and its descendants against one worktree. |
 | `workspace_ship_pipeline` / `workspace_auto_pipeline` | Workspace-scoped wrappers that resolve mode and base branch, then invoke the pipelines above. |
 | `auto_task_scheduler_pipeline` | Mint tasks from due auto-task definitions. |
-| `ci_failure_sweep_pipeline` | Collect GitHub Actions failures and file evidence-backed tasks, without implementing repairs. |
+| `ci_failure_sweep_pipeline` | File GitHub Actions findings as proposed, pilot them, and admit only current warning-free repairs to backlog; never implements them. |
 | `dependabot_alert_sweep_pipeline` | Collect Dependabot/code/secret-scanning evidence and file remediation tasks. |
 | `worktree_gc_pipeline` | Reclaim settled worktrees. |
 
 Inspect any of them with `orbit job show <id>` before invoking — the step list is
 the contract.
+
+CI-sweep filing is deliberately non-executable: `file_ci_failure_tasks` always
+creates `proposed` tasks. The CI job invokes `task_pilot_pipeline` for each new
+task and retries matching tasks that a prior pilot left proposed, carrying
+explicit promotion authority into its deterministic apply boundary. Invalid or
+empty selectors, pilot failure, duplicates, already-landed
+work, conflicts, and warnings leave that task proposed without blocking other
+pilot children. A standalone task-pilot run has no promotion authority. The
+source run/job/SHA/step remains in the task description, while parent and child
+run state retain the pilot run ID, result, and admission decision.
 
 ### The `completion` input
 

@@ -5,15 +5,17 @@ metadata:
 spec:
   type: deterministic
   description: >
-    Turn one `collect_ci_evidence` snapshot into ordinary backlog bug tasks.
+    Turn one `collect_ci_evidence` snapshot into quarantined proposed bug tasks.
     Clusters the snapshot's current, non-stale failures by root cause
     (workflow, failing job, failing step, normalized error signature, and the
     commit the runner actually tested) so one regression repeated across a push
     run and a pull-request run of the same commit becomes one task rather than
-    several. Each surviving cluster is filed at `status: backlog` with the
+    several. Each surviving cluster is filed at `status: proposed` with the
     collected evidence rendered inline in the description, so the implementing
     agent never needs a GitHub credential; no `required_tools` are attached and
-    the task ships through the ordinary pull-request route. Filing is deduped
+    the task can later ship through the ordinary pull-request route only after
+    task-pilot validation and explicit CI-sweep admission. Filing itself never
+    promotes or dispatches implementation. It is deduped
     against still-open tasks by a commit-independent failure key carried as a
     `ci-failure:<key>` tag, so a repeated sweep over a run that is still red
     does not file the same root cause twice. The three endings stay distinct
@@ -27,7 +29,8 @@ spec:
     converted to `no_current_failure` merely because its handoff failed. Every
     successful output includes an `audit` object with counts and identities for
     latest runs, current and investigated failures, created tasks, and existing
-    dedupe owners.
+    dedupe owners. The filing entries retain workflow, job, step, runner-tested
+    commit, and source run URLs for the later pilot/admission audit.
   input_schema_json:
     type: object
     required: [ci_evidence]
@@ -46,7 +49,7 @@ spec:
           in `skipped_over_cap` rather than dropped silently.
   output_schema_json:
     type: object
-    required: [outcome, clusters, filed_count, filed, skipped_existing, skipped_over_cap, audit]
+    required: [outcome, clusters, filed_count, filed, pilot_candidates, skipped_existing, skipped_over_cap, audit]
     properties:
       outcome:
         type: string
@@ -87,6 +90,15 @@ spec:
               type: array
               items:
                 type: string
+      pilot_candidates:
+        type: array
+        description: >
+          Newly filed proposed tasks plus matching proposed CI tasks whose
+          earlier pilot did not admit them. Each entry carries the current
+          sweep provenance used by the pilot/admission boundary.
+        items:
+          type: object
+          required: [task_id, failure_key, workflow, job, step, tested_commit, run_urls]
       skipped_existing:
         type: array
         items:
