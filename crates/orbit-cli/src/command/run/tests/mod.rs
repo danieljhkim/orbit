@@ -140,6 +140,31 @@ fn parses_workspace_auto_drain_window() {
 }
 
 #[test]
+fn parses_readiness_selection_and_json_projection() {
+    let command = parse_run(&[
+        "orbit",
+        "run",
+        "readiness",
+        "TASK-123",
+        "TASK-124",
+        "--concurrency",
+        "8",
+        "--limit",
+        "20",
+        "--json",
+    ]);
+    match command.command {
+        RunSubcommand::Readiness(args) => {
+            assert_eq!(args.task_ids, vec!["TASK-123", "TASK-124"]);
+            assert_eq!(args.concurrency, Some(8));
+            assert_eq!(args.limit, 20);
+            assert!(args.json);
+        }
+        _ => panic!("expected readiness"),
+    }
+}
+
+#[test]
 fn parses_explicit_ship_defaults() {
     let command = parse_run(&["orbit", "run", "ship", "T1", "T2"]);
     match command.command {

@@ -109,6 +109,23 @@ impl RegisteredRuntimeFactory {
         root_override: Option<&Path>,
         workspace_selector: Option<&str>,
     ) -> Result<OrbitRuntime, OrbitError> {
+        Self::initialize_with_overrides_mode(root_override, workspace_selector, false)
+    }
+
+    /// Construct a workspace runtime for an observation command without the
+    /// usual stale-run reconciliation performed during normal runtime open.
+    pub fn initialize_read_only_with_overrides(
+        root_override: Option<&Path>,
+        workspace_selector: Option<&str>,
+    ) -> Result<OrbitRuntime, OrbitError> {
+        Self::initialize_with_overrides_mode(root_override, workspace_selector, true)
+    }
+
+    fn initialize_with_overrides_mode(
+        root_override: Option<&Path>,
+        workspace_selector: Option<&str>,
+        read_only: bool,
+    ) -> Result<OrbitRuntime, OrbitError> {
         let selector = workspace_selector
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -129,7 +146,12 @@ impl RegisteredRuntimeFactory {
                 .as_ref()
                 .and_then(|selection| replica_owner_for_checkout(&selection.checkout));
             let global_root = roots.global_root.clone();
-            return OrbitRuntime::initialize_from_resolved_roots(roots, binding).map(|runtime| {
+            let runtime = if read_only {
+                OrbitRuntime::initialize_from_resolved_roots_read_only(roots, binding)
+            } else {
+                OrbitRuntime::initialize_from_resolved_roots(roots, binding)
+            };
+            return runtime.map(|runtime| {
                 attach_workspace_catalog(
                     runtime.with_coordination_write_owner(replica_owner),
                     &global_root,
@@ -139,7 +161,15 @@ impl RegisteredRuntimeFactory {
 
         let global_root = global_root_for(root_override)?;
         let selected = Self::resolve_workspace_selector(&global_root, &selector)?;
-        Self::open_registered_checkout(&global_root, &selected.workspace, &selected.checkout)
+        if read_only {
+            Self::open_registered_checkout_read_only(
+                &global_root,
+                &selected.workspace,
+                &selected.checkout,
+            )
+        } else {
+            Self::open_registered_checkout(&global_root, &selected.workspace, &selected.checkout)
+        }
     }
 
     /// Resolve a workspace selector against this machine's registry.
@@ -202,6 +232,27 @@ impl RegisteredRuntimeFactory {
                 )
             },
         )
+    }
+
+    fn open_registered_checkout_read_only(
+        global_root: &Path,
+        workspace: &Workspace,
+        checkout: &WorkspaceCheckout,
+    ) -> Result<OrbitRuntime, OrbitError> {
+        sync_task_prefix(global_root)?;
+        let binding = workspace_runtime_binding(workspace, checkout)?;
+        OrbitRuntime::from_resolved_roots_read_only_with_binding(
+            global_root,
+            &checkout.orbit_dir,
+            &checkout.orbit_dir,
+            binding,
+        )
+        .map(|runtime| {
+            attach_workspace_catalog(
+                runtime.with_coordination_write_owner(replica_owner_for_checkout(checkout)),
+                global_root,
+            )
+        })
     }
 
     pub fn open_resolved_checkout(

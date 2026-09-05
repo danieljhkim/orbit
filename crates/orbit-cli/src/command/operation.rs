@@ -31,6 +31,8 @@ pub struct CommandMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeNeed {
     Required,
+    /// Read an existing workspace without stale-run reconciliation on open.
+    ReadOnly,
     Forbidden,
     /// Bind the workspace that owns this task ID rather than the one the cwd
     /// or `--workspace` walk would pick [ORB-10797] [ORB-10961].
@@ -344,6 +346,12 @@ impl Commands {
                         Some("workflow"),
                         Some("triage"),
                         RuntimeNeed::Required,
+                    ),
+                    RunSubcommand::Readiness(_) => (
+                        "readiness",
+                        Some("workspace"),
+                        Some("auto_readiness"),
+                        RuntimeNeed::ReadOnly,
                     ),
                     RunSubcommand::History(args) => (
                         "history",
