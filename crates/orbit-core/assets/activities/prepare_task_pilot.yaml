@@ -14,7 +14,11 @@ spec:
     landing branch, pins one verified source revision, and fast-forwards a
     clean primary on that branch when it is behind. Dirty, divergent, or
     unfetchable checkouts fail closed as source-staleness before any agent
-    call. This action never promotes or dispatches work.
+    call. This action never promotes or dispatches work. In automatic mode,
+    `excluded` itemizes only a bounded sample of routine exclusions; the full
+    breakdown is always available via `excluded_total` and
+    `excluded_by_reason`, with `excluded_sample_truncated` and
+    `excluded_omitted_count` marking what the sample left out.
   input_schema_json:
     type: object
     properties:
@@ -71,5 +75,13 @@ spec:
         type: array
         items:
           type: object
+      excluded_total:
+        type: number
+      excluded_by_reason:
+        type: object
+      excluded_sample_truncated:
+        type: boolean
+      excluded_omitted_count:
+        type: number
   action: prepare_task_pilot
   config: {}
