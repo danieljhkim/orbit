@@ -177,6 +177,56 @@ fn checkout_evidence_caps_and_dedups_commits() {
     unique.dedup();
     assert_eq!(unique.len(), evidence.commits.len());
     assert_eq!(evidence.commits[0], format!("{:040x}", 0));
+    // The display cap reduces what is reported, but every commit up to the
+    // cap was still seen — this is not the same as missing identity.
+    assert!(
+        evidence.complete,
+        "a display-count cap alone must not mark identity incomplete"
+    );
+    assert!(evidence.display_truncated);
+}
+
+/// An overlong line that has nothing to do with checkout (ordinary build
+/// spam) is dropped for display reasons only: it could never have carried
+/// checkout identity, so losing it must not taint the identity verdict.
+#[test]
+fn an_overlong_line_unrelated_to_checkout_is_dropped_without_marking_identity_incomplete() {
+    let sha = "5".repeat(40);
+    let overlong = "x".repeat(20_000);
+    let log = format!(
+        "build\tRun tests\t2026-01-01T00:00:00.0000000Z {overlong}\n\
+         ci\tCheckout\t2026-01-01T00:00:01.0000000Z HEAD is now at {sha}\n"
+    );
+
+    let evidence = scan_checkout_evidence(&log, 40);
+
+    assert!(
+        evidence.complete,
+        "an unrelated overlong line must not mark identity incomplete"
+    );
+    assert!(evidence.display_truncated);
+    assert_eq!(evidence.commits, vec![sha]);
+}
+
+/// An overlong line inside a checkout step could have carried the checked-out
+/// commit; dropping it must leave identity marked incomplete rather than
+/// silently reporting whatever else was found.
+#[test]
+fn an_overlong_checkout_line_is_dropped_and_marks_identity_incomplete() {
+    let overlong = "z".repeat(20_000);
+    let log = format!("ci\tCheckout\t2026-01-01T00:00:00.0000000Z {overlong}\n");
+
+    let evidence = scan_checkout_evidence(&log, 40);
+
+    assert!(
+        !evidence.complete,
+        "a dropped checkout-step line must mark identity incomplete"
+    );
+    assert!(evidence.commits.is_empty());
+    assert!(
+        !evidence.display_truncated,
+        "identity incompleteness is distinct from a display-only cap"
+    );
 }
 
 #[test]

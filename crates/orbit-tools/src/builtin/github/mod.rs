@@ -331,9 +331,18 @@ const MAX_CHECKOUT_EVIDENCE_LINE_BYTES: usize = 16 * 1024;
 pub struct CheckoutEvidence {
     pub commits: Vec<String>,
     pub lines: Vec<String>,
+    /// False only when identity itself may have been missed: the source byte
+    /// cap (`source_truncated`) was hit, or a dropped overlong line could
+    /// plausibly have carried checkout identity. A reduced *display* — the
+    /// evidence line/commit count cap, or an overlong line unrelated to
+    /// checkout — does not clear this; see `display_truncated`.
     pub complete: bool,
     pub scanned_bytes: usize,
     pub source_truncated: bool,
+    /// True when what is reported was capped for display reasons that do not
+    /// bear on checkout identity: the evidence line or commit count limit was
+    /// reached, or an overlong line unrelated to checkout was dropped.
+    pub display_truncated: bool,
 }
 
 /// A bounded excerpt and checkout evidence collected while a log is drained.
@@ -424,6 +433,7 @@ struct CheckoutEvidenceCollector {
     seen_commits: HashSet<String>,
     lines: Vec<String>,
     complete: bool,
+    display_truncated: bool,
 }
 
 impl CheckoutEvidenceCollector {
@@ -439,6 +449,7 @@ impl CheckoutEvidenceCollector {
             seen_commits: HashSet::new(),
             lines: Vec::new(),
             complete: true,
+            display_truncated: false,
         }
     }
 
@@ -458,9 +469,14 @@ impl CheckoutEvidenceCollector {
                 continue;
             }
             if self.pending_line.len() + part.len() > MAX_CHECKOUT_EVIDENCE_LINE_BYTES {
+                let identity_bearing = overlong_line_is_identity_bearing(&self.pending_line, part);
                 self.pending_line.clear();
                 self.dropping_line = !part.ends_with('\n');
-                self.complete = false;
+                if identity_bearing {
+                    self.complete = false;
+                } else {
+                    self.display_truncated = true;
+                }
                 continue;
             }
             self.pending_line.push_str(part);
@@ -480,6 +496,7 @@ impl CheckoutEvidenceCollector {
             complete: self.complete,
             scanned_bytes: self.scanned_bytes,
             source_truncated: self.source_truncated,
+            display_truncated: self.display_truncated,
         }
     }
 
@@ -497,14 +514,14 @@ impl CheckoutEvidenceCollector {
         if self.lines.len() < self.max_lines {
             self.lines.push(redact_all(payload.trim()));
         } else {
-            self.complete = false;
+            self.display_truncated = true;
         }
         for token in commit_sha_tokens(payload) {
             if self.seen_commits.contains(token) {
                 continue;
             }
             if self.commits.len() == self.max_lines {
-                self.complete = false;
+                self.display_truncated = true;
                 continue;
             }
             let token = token.to_string();
@@ -533,6 +550,30 @@ fn split_log_line(line: &str) -> (&str, &str) {
         _ => rest,
     };
     (step, payload)
+}
+
+/// Whether a line dropped for exceeding [`MAX_CHECKOUT_EVIDENCE_LINE_BYTES`]
+/// could plausibly have carried checkout identity, judged from whatever
+/// prefix was captured before the drop.
+///
+/// The job/step columns and runner timestamp sit at the very start of a
+/// `gh run view --log` line, long before any payload could reach this
+/// threshold, so the accumulated prefix (or, when nothing had accumulated yet,
+/// a short probe from the start of the new part) is enough to classify it
+/// without buffering the whole overlong line.
+fn overlong_line_is_identity_bearing(pending: &str, part: &str) -> bool {
+    let probe = if pending.is_empty() {
+        let cap = ceil_char_boundary(part, part.len().min(512));
+        &part[..cap]
+    } else {
+        pending
+    };
+    let (step, payload) = split_log_line(probe);
+    let lowered = payload.to_ascii_lowercase();
+    step.to_ascii_lowercase().contains("checkout")
+        || CHECKOUT_MARKERS
+            .iter()
+            .any(|marker| lowered.contains(marker))
 }
 
 fn is_hex(byte: u8) -> bool {
