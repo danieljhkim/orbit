@@ -24,6 +24,41 @@ orbit run ship "$TASK_ID" --base main
 
 Underlying job: `task_auto_pipeline`, which fans into `task_gate_pipeline` and then routes to `task_pr_pipeline` or `task_local_pipeline` from `--mode`.
 
+## Restricting a drain to some crews
+
+`orbit run auto --allow-crew` limits one drain to the crews you name. Reach for it
+when a provider is down, rate-limited, or out of budget and you want the rest of
+the backlog to keep moving:
+
+```bash
+orbit run auto --for 4h --allow-crew opus,sonnet
+orbit run readiness --allow-crew opus,sonnet    # preview what that would skip
+```
+
+It is opt-in — omit it and the drain runs every crew, exactly as before — and it
+is scoped to that one run:
+
+- **Validated up front.** Every name must be a crew this workspace configures.
+  An unknown or empty one fails the command before anything is dispatched. No
+  configuration file is written or changed.
+- **Inherited by the whole run.** The leaf and epic pipelines the drain starts
+  carry the same restriction, and it is re-checked at each activity against the
+  crew that actually resolved — including an activity that uses
+  `[workflow].system_crew`. An excluded provider cannot be reached by naming a
+  different alias for it. The check compares effective configured identity, so a
+  crew resolving to the same provider and model as a permitted one is permitted;
+  naming a wrapper is not by itself provider usage. Crew precedence is unchanged
+  (explicit, then `task.crew`, then `[workflow].default_crew`) — the allowlist
+  gates the winner rather than picking one.
+- **Skips, never remaps.** A backlog task whose crew is excluded stays in
+  `backlog` on its own crew; the drain simply does not start it, and
+  `orbit run readiness --allow-crew ...` reports it as `crew_not_allowed` along
+  with the crew it would have run as. To actually move that work, reassign the
+  task's crew yourself. There is no automatic fallback to another provider.
+- **Only affects what this run starts.** Work another invocation already has in
+  flight keeps running; nothing is cancelled. Permitted tasks keep filling the
+  free slots at the usual rate.
+
 ## Completing work with `--complete`
 
 By default a successful task ends in `review`, and a separate operator action

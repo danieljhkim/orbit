@@ -28,6 +28,11 @@ spec:
     # `review` (default) ends successful tasks at review. `done` is explicit
     # per-invocation operator authorization to finish delivery.
     completion: review
+    # ORB-11242: the run-scoped crew restriction the auto-drain admitting this
+    # run applied. Empty means unrestricted. This is the innermost carrier: the
+    # agent activities below resolve their crew against this run input, so the
+    # dispatch gate refuses a crew the window excluded before a provider starts.
+    allowed_crews: []
   
   steps:
     - id: worktree

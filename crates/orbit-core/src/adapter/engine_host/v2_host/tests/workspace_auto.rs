@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use chrono::{SecondsFormat, Utc};
 use orbit_engine::RuntimeHost;
 use orbit_tools::ToolContext;
@@ -6,7 +8,8 @@ use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
 use crate::adapter::engine_host::v2_host::test_support::{
-    runtime_with_workspace_layout, seed_list_backlog_task, write_workspace_file,
+    runtime_with_workspace_config, runtime_with_workspace_layout, seed_list_backlog_task,
+    write_workspace_file,
 };
 use crate::application::task::{TaskAddParams, TaskUpdateParams};
 
@@ -87,8 +90,17 @@ fn list_epic_descendants_err(
 }
 
 fn readiness(runtime: &OrbitRuntime, task_ids: &[String], concurrency: Option<u32>) -> Value {
+    readiness_allowing(runtime, task_ids, concurrency, &[])
+}
+
+fn readiness_allowing(
+    runtime: &OrbitRuntime,
+    task_ids: &[String],
+    concurrency: Option<u32>,
+    allowed_crews: &[String],
+) -> Value {
     runtime
-        .workspace_auto_readiness(task_ids, concurrency, 50)
+        .workspace_auto_readiness(task_ids, concurrency, 50, allowed_crews)
         .expect("explain readiness")
 }
 
@@ -1088,4 +1100,147 @@ fn loop_inputs_survive_template_rendering_as_strings() {
 
     let empty_string_falls_back = classify_with(&runtime, json!({ "max_active_leaf_runs": "" }));
     assert_eq!(empty_string_falls_back["free_slots"], 5);
+}
+
+/// Two crews plus a `system` entry that mirrors `opus` exactly — the shape that
+/// makes "a wrapper is not provider usage" testable: `system` is a different
+/// registry name for the same effective `(provider, model)`.
+const ALLOWLIST_CREW_CONFIG: &str = r#"
+[workflow]
+default_crew = "opus"
+system_crew = "system"
+
+[crews.opus]
+provider = "claude"
+model = "claude-opus-4-6"
+backend = "cli"
+
+[crews.fable]
+provider = "claude"
+model = "claude-fable-5-1"
+backend = "cli"
+
+[crews.system]
+provider = "claude"
+model = "claude-opus-4-6"
+backend = "cli"
+"#;
+
+fn seed_crewed_backlog_task(runtime: &OrbitRuntime, title: &str, crew: &str) -> String {
+    let task = seed_list_backlog_task(
+        runtime,
+        title,
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Chore,
+        None,
+        vec![],
+    );
+    runtime
+        .update_task(
+            &task.id,
+            TaskUpdateParams {
+                crew: Some(Some(crew.to_string())),
+                ..Default::default()
+            },
+        )
+        .expect("assign task crew");
+    task.id
+}
+
+/// [ORB-11242] A restricted window skips the crews it excludes and keeps
+/// draining everything else. The excluded task is left exactly as it is — still
+/// `backlog`, still on its own crew — and readiness says so by name, which is
+/// what makes "reassign it yourself" an instruction the operator can follow.
+#[test]
+fn crew_allowlist_skips_excluded_tasks_and_keeps_draining_the_rest() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_config(Some(ALLOWLIST_CREW_CONFIG));
+    let permitted = seed_crewed_backlog_task(&runtime, "Permitted leaf", "opus");
+    let excluded = seed_crewed_backlog_task(&runtime, "Excluded leaf", "fable");
+
+    let classified = classify_with(&runtime, json!({ "allowed_crews": ["opus"] }));
+    assert_eq!(classified["loose_task_ids"], json!([permitted]));
+    assert_eq!(classified["has_leaves"], json!(true));
+
+    let readiness = readiness_allowing(&runtime, &[], None, &["opus".to_string()]);
+    assert_eq!(readiness_task(&readiness, &permitted)["reason"], "ready");
+    let blocked = readiness_task(&readiness, &excluded);
+    assert_eq!(blocked["eligible"], json!(false));
+    assert_eq!(blocked["reason"], "crew_not_allowed");
+    assert_eq!(blocked["crew"], "fable");
+    assert_eq!(blocked["allowed_crews"], json!(["opus"]));
+
+    // The drain never rewrites the task it skipped.
+    assert_eq!(
+        runtime.get_task(&excluded).expect("excluded task").crew,
+        Some("fable".to_string())
+    );
+
+    // Omitting the option is the pre-ORB-11242 behavior: both tasks admitted.
+    let unrestricted = classify(&runtime);
+    let admitted = unrestricted["loose_task_ids"]
+        .as_array()
+        .expect("loose task ids")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        admitted,
+        BTreeSet::from([permitted.as_str(), excluded.as_str()])
+    );
+}
+
+/// A crew that resolves to the *same* configured provider/model as a permitted
+/// one is permitted under its own name too: the allowlist restricts what runs,
+/// not which alias names it.
+#[test]
+fn crew_allowlist_permits_an_alias_of_a_permitted_identity() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_config(Some(ALLOWLIST_CREW_CONFIG));
+    let aliased = seed_crewed_backlog_task(&runtime, "System-aliased leaf", "system");
+
+    let classified = classify_with(&runtime, json!({ "allowed_crews": ["opus"] }));
+    assert_eq!(classified["loose_task_ids"], json!([aliased]));
+}
+
+/// An epic root is admitted through the same effective-crew rule as a leaf, so
+/// a restricted window cannot start one whose crew it excluded.
+#[test]
+fn crew_allowlist_withholds_an_excluded_epic_root() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_config(Some(ALLOWLIST_CREW_CONFIG));
+    let epic = seed_list_backlog_task(
+        &runtime,
+        "Excluded epic",
+        TaskStatus::Backlog,
+        TaskPriority::Medium,
+        TaskType::Feature,
+        None,
+        vec![],
+    );
+    runtime
+        .update_task(
+            &epic.id,
+            TaskUpdateParams {
+                crew: Some(Some("fable".to_string())),
+                tags: Some(vec!["epic".to_string()]),
+                ..Default::default()
+            },
+        )
+        .expect("tag epic root");
+
+    assert_eq!(
+        classify_with(&runtime, json!({ "allowed_crews": ["opus"] }))["has_epic"],
+        json!(false)
+    );
+    assert_eq!(classify(&runtime)["epic_task_id"], json!(epic.id));
+}
+
+/// The allowlist is validated where the operator can act on it, not silently
+/// narrowed at dispatch time.
+#[test]
+fn crew_allowlist_rejects_a_crew_this_workspace_does_not_configure() {
+    let (_root, runtime, _repo_root) = runtime_with_workspace_config(Some(ALLOWLIST_CREW_CONFIG));
+    let error = runtime
+        .workspace_auto_readiness(&[], None, 50, &["nope".to_string()])
+        .expect_err("an unconfigured crew must fail");
+    assert!(error.to_string().contains("nope"), "{error}");
 }

@@ -131,6 +131,8 @@ fn parses_workspace_auto_defaults() {
             // No window means one tick, the behavior every caller had before
             // `--for` existed.
             assert_eq!(args.for_duration, None);
+            // No crew restriction is the pre-ORB-11242 behavior: every crew.
+            assert!(args.allow_crew.is_empty());
         }
         _ => panic!("expected auto"),
     }
@@ -144,6 +146,39 @@ fn parses_workspace_auto_drain_window() {
             assert_eq!(args.for_duration.as_deref(), Some("30m"));
         }
         _ => panic!("expected auto"),
+    }
+}
+
+/// [ORB-11242] Both spellings collect into one list, so an operator excluding
+/// several crews mid-incident does not have to remember which form the flag
+/// takes.
+#[test]
+fn parses_workspace_auto_crew_allowlist_repeated_and_comma_separated() {
+    let command = parse_run(&[
+        "orbit",
+        "run",
+        "auto",
+        "--allow-crew",
+        "opus,sonnet",
+        "--allow-crew",
+        "luna",
+    ]);
+    match command.command {
+        RunSubcommand::Auto(args) => {
+            assert_eq!(args.allow_crew, vec!["opus", "sonnet", "luna"]);
+        }
+        _ => panic!("expected auto"),
+    }
+}
+
+#[test]
+fn readiness_previews_the_same_crew_allowlist() {
+    let command = parse_run(&["orbit", "run", "readiness", "--allow-crew", "opus,sonnet"]);
+    match command.command {
+        RunSubcommand::Readiness(args) => {
+            assert_eq!(args.allow_crew, vec!["opus", "sonnet"]);
+        }
+        _ => panic!("expected readiness"),
     }
 }
 
@@ -167,6 +202,7 @@ fn parses_readiness_selection_and_json_projection() {
             assert_eq!(args.concurrency, Some(8));
             assert_eq!(args.limit, 20);
             assert!(args.json);
+            assert!(args.allow_crew.is_empty());
         }
         _ => panic!("expected readiness"),
     }

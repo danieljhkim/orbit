@@ -23,6 +23,10 @@ spec:
     # `mark_done` step below), so this governs PR-mode delivery: `done`
     # authorizes merging the epic PR and completing the root.
     completion: review
+    # ORB-11242: opt-in, run-scoped crew restriction. Empty means unrestricted,
+    # which is the behavior of every caller that does not pass it. Forwarded
+    # unchanged so the leaf/epic jobs this run admits inherit the same window.
+    allowed_crews: []
 
   steps:
     - id: resolve_ship_input
@@ -75,6 +79,7 @@ spec:
                       auto_push: false
                       landing_branch: "{{ steps.resolve_ship_input.output.base_branch }}"
                       terminal_status: done
+                      allowed_crews: "{{ input.allowed_crews }}"
                     timeout_seconds: 7200
 
                 - id: require_child_success

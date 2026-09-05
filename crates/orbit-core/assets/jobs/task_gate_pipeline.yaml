@@ -55,6 +55,10 @@ spec:
     landing_branch: ""
     # ORB-11187: forwarded to the leaf pipeline unchanged.
     completion: review
+    # ORB-11242: opt-in, run-scoped crew restriction. Empty means unrestricted,
+    # which is the behavior of every caller that does not pass it. Forwarded
+    # unchanged so the leaf/epic jobs this run admits inherit the same window.
+    allowed_crews: []
     max_wait_seconds: 3600
     poll_interval_seconds: 30
     ttl_seconds: 7200
@@ -97,6 +101,7 @@ spec:
           base_sync: "{{ input.base_sync }}"
           landing_branch: "{{ input.landing_branch }}"
           completion: "{{ input.completion }}"
+          allowed_crews: "{{ input.allowed_crews }}"
           auto_push: true
         admission_task_ids: "{{ input.task_ids }}"
         admission_workflow: worktree_setup

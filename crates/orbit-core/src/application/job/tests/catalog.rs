@@ -617,6 +617,167 @@ backend = "cli"
     );
 }
 
+/// [ORB-11242] The restriction is only as good as its weakest hand-off. Every
+/// job on the auto-drain's dispatch chain has to declare the input, and every
+/// one that dispatches a child has to forward it, or a nested run would resolve
+/// its crew with no restriction in sight. Asserted on the loaded assets so a
+/// job added to the chain without the forwarding line fails here.
+#[test]
+fn auto_drain_dispatch_chain_declares_and_forwards_the_crew_allowlist() {
+    /// job name -> does it dispatch a child that must inherit the window?
+    const CHAIN: &[(&str, bool)] = &[
+        ("workspace_auto_pipeline", true),
+        ("task_auto_pipeline", true),
+        ("task_gate_pipeline", true),
+        ("epic_pipeline", true),
+        // Chain termini: the agent activities in these jobs resolve their crew
+        // against this run input, which is where the gate reads it.
+        ("task_local_pipeline", false),
+        ("task_pr_pipeline", false),
+    ];
+
+    for (job_name, forwards) in CHAIN {
+        let yaml = DEFAULT_JOB_FILES
+            .iter()
+            .find_map(|(name, yaml)| (name == job_name).then_some(*yaml))
+            .unwrap_or_else(|| panic!("{job_name} ships as a default job"));
+        let asset = load_job_asset(yaml).unwrap_or_else(|error| panic!("{job_name}: {error}"));
+        let default_input = asset
+            .spec
+            .default_input
+            .as_ref()
+            .unwrap_or_else(|| panic!("{job_name} declares a default input"));
+        assert_eq!(
+            default_input.get("allowed_crews"),
+            Some(&json!([])),
+            "{job_name} must default to an unrestricted window"
+        );
+
+        let rendered = serde_json::to_string(&asset.spec).expect("serialize job spec");
+        assert_eq!(
+            rendered.contains("{{ input.allowed_crews }}"),
+            *forwards,
+            "{job_name} forwarding expectation mismatch"
+        );
+    }
+}
+
+/// [ORB-11242] The failure that motivated the run-scoped allowlist: a system
+/// activity resolved `workflow.system_crew` on its own, so it launched a
+/// provider the operator had excluded even though the run's own crew was a
+/// permitted one. Driven through the shipped `task_pilot_pipeline` asset and
+/// the real dispatch order (`inject_system_crew_input` then
+/// `resolve_crew_settings`), because the injection is exactly what made the
+/// override invisible to the run input.
+#[test]
+fn system_crew_dispatch_is_refused_when_the_run_window_excludes_it() {
+    let root = tempdir().expect("create tempdir");
+    let global = root.path().join("global");
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(&global).expect("create global root");
+    std::fs::create_dir_all(&workspace).expect("create workspace root");
+    // `luna` is the permitted wrapper the run selected; `system` resolves to a
+    // *different* model, which is the provider usage the window excluded.
+    std::fs::write(
+        workspace.join("config.toml"),
+        r#"[workflow]
+default_crew = "luna"
+system_crew = "system"
+
+[crews.luna]
+provider = "claude"
+model = "claude-opus-4-6"
+backend = "cli"
+
+[crews.system]
+provider = "claude"
+model = "claude-fable-5-1"
+backend = "cli"
+"#,
+    )
+    .expect("write crew config");
+    let runtime = OrbitRuntime::from_roots(&global, &workspace).expect("build runtime");
+
+    let yaml = DEFAULT_JOB_FILES
+        .iter()
+        .find_map(|(name, yaml)| (*name == "task_pilot_pipeline").then_some(*yaml))
+        .expect("task pilot pipeline exists");
+    let mut asset = load_job_asset(yaml).expect("task pilot pipeline parses");
+    resolve_job_target_refs(&mut asset.spec, &default_activity_catalog())
+        .expect("task pilot activity references resolve");
+    let JobV2StepBody::FanOut { fan_out, .. } = &asset.spec.steps[1].body else {
+        panic!("task pilot agent work must fan out");
+    };
+    let JobV2StepBody::Target(pilot) = &fan_out.worker.body else {
+        panic!("task pilot worker must resolve to an activity target");
+    };
+    let ActivityV2Spec::AgentLoop(spec) = &pilot.spec else {
+        panic!("task pilot worker must be an agent loop");
+    };
+    let pilot_input = pilot.default_input.clone().expect("pilot input");
+    let dispatched_input =
+        inject_system_crew_input(&runtime, &pilot_input).expect("inject configured system crew");
+
+    // The permitted control: an unrestricted run dispatches the system crew as
+    // it always has, so the refusal below is the allowlist and nothing else.
+    let unrestricted = resolve_crew_settings(&runtime, spec, &dispatched_input, &json!({}))
+        .expect("an unrestricted run still dispatches the system crew")
+        .expect("system crew resolves");
+    assert_eq!(unrestricted.model.as_deref(), Some("claude-fable-5-1"));
+
+    // The run permits only `luna`. The system override names its own crew, so
+    // without the run input's allowlist travelling with it this would launch
+    // `claude-fable-5-1` regardless of the window.
+    let error = resolve_crew_settings(
+        &runtime,
+        spec,
+        &dispatched_input,
+        &json!({ "allowed_crews": ["luna"] }),
+    )
+    .expect_err("an excluded system crew must not reach a provider");
+    let message = error.to_string();
+    assert!(
+        message.contains("`system`") && message.contains("claude-fable-5-1"),
+        "the refusal must name the effective configured identity: {message}"
+    );
+    assert!(message.contains("luna"), "{message}");
+
+    // The other system route: `system_crew: true`, which the recovery
+    // dispatcher injects at runtime rather than declaring in an asset. It
+    // resolves `workflow.system_crew` itself, so it is the route that could
+    // reach an excluded provider without the run input ever naming it.
+    let injected = inject_system_crew_input(&runtime, &json!({ "system_crew": true }))
+        .expect("inject configured system crew");
+    let injected_error = resolve_crew_settings(
+        &runtime,
+        spec,
+        &injected,
+        &json!({ "allowed_crews": ["luna"] }),
+    )
+    .expect_err("an excluded `workflow.system_crew` must not reach a provider");
+    let injected_message = injected_error.to_string();
+    assert!(
+        injected_message.contains("workflow.system_crew"),
+        "the refusal must name where the crew came from: {injected_message}"
+    );
+    assert!(
+        injected_message.contains("claude-fable-5-1"),
+        "{injected_message}"
+    );
+
+    // A wrapper is not provider usage: naming `luna` is what the run selected,
+    // and it still dispatches under the same restriction.
+    let allowed = resolve_crew_settings(
+        &runtime,
+        spec,
+        &json!({ "crew": "luna" }),
+        &json!({ "allowed_crews": ["luna"] }),
+    )
+    .expect("a permitted crew must still dispatch")
+    .expect("permitted crew resolves");
+    assert_eq!(allowed.model.as_deref(), Some("claude-opus-4-6"));
+}
+
 /// [ORB-10385] Every deterministic action reachable from a shipped job —
 /// including terminal `failure_activity` hooks — must be registered in
 /// this binary's v2 dispatch table. `pr_failure_handoff` shipped as a

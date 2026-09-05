@@ -744,6 +744,22 @@ impl RuntimeHost for OrbitRuntime {
                 })?,
             },
         };
+        // [ORB-11242] The last gate before a provider process is launched, and
+        // the only one that sees the crew *after* alias and default resolution.
+        // A system override, an explicit activity crew, and the run's own crew
+        // all arrive here, so one check covers every route into a provider.
+        let allowlist = self.crew_allowlist_from_input(input).map_err(|error| {
+            DispatchError::JobValidation(format!(
+                "run crew allowlist cannot be resolved for activity dispatch: {error}"
+            ))
+        })?;
+        let origin = match config_key {
+            Some(key) => format!("`{key}`"),
+            None if explicit.is_some() => "an explicit activity crew".to_string(),
+            None => "this run's crew".to_string(),
+        };
+        crate::runtime::engine::crew::enforce_crew_allowlist(allowlist.as_ref(), &crew, &origin)
+            .map_err(|error| DispatchError::JobValidation(error.to_string()))?;
         Ok(Some(
             crate::runtime::engine::environment_host::typed_crew_config_from_assignment(
                 &crew.assignment,
