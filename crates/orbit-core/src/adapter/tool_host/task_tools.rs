@@ -3,7 +3,7 @@ use orbit_common::protocol::tool_input::{
     optional_csv_or_string_list_alias, optional_raw_string, optional_string, optional_string_alias,
     optional_string_list_alias, required_string, strip_retired_task_add_input_fields,
 };
-use orbit_types::task::{TaskPriority, task_dependencies_ready};
+use orbit_types::task::TaskPriority;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -140,36 +140,25 @@ pub(super) fn list(runtime: &OrbitRuntime, input: Value) -> Result<Value, OrbitE
     let ready = optional_bool_alias(&input, &["ready"])?;
     let path = optional_string(&input, "path")?;
     let limit = super::input::task_list_limit(&input)?;
-    // `list_tasks_filtered` returns tasks newest-first (`created_at DESC`, task
-    // ID ascending for ties); the filters below preserve that order, so the
-    // trailing `take(limit)` yields the newest matching tasks (ORB-10310).
-    let all_tasks = runtime.list_tasks_filtered(
-        None,
-        None,
-        parent_id.as_deref(),
-        job_run_id.as_deref(),
-        None,
-        None,
-    )?;
-    let status_by_id = runtime.task_status_index()?;
+    let page = runtime.query_task_rows(&crate::application::task::TaskListQuery {
+        filter: crate::application::task::TaskListFilter {
+            statuses,
+            task_type,
+            parent_id,
+            job_run_id,
+            tags,
+            ..Default::default()
+        },
+        ready: ready == Some(true),
+        path,
+        limit,
+    })?;
+    let status_by_id = page.status_by_id;
     Ok(Value::Array(
-        all_tasks
+        page.items
             .into_iter()
-            .filter(|task| {
-                statuses
-                    .as_ref()
-                    .is_none_or(|values| values.contains(&task.status))
-            })
-            .filter(|task| orbit_types::task::task_matches_tags(task, &tags))
-            .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status_by_id))
-            .filter(|task| {
-                path.as_deref()
-                    .is_none_or(|p| crate::task_selectors_contain_path(&task.context_files, p))
-            })
-            .filter(|task| task_type.is_none_or(|kind| task.task_type == kind))
-            .take(limit)
-            .map(|task| task_to_json(&task, &status_by_id))
-            .collect::<Vec<_>>(),
+            .map(|row| task_to_json(&row.task, &status_by_id))
+            .collect(),
     ))
 }
 

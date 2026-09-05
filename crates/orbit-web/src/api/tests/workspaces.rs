@@ -33,7 +33,7 @@ fn get(uri: &str) -> Request<Body> {
 /// Create an on-disk workspace under `base/<name>`, seed one in-progress task,
 /// and return `(orbit_dir, repo_root)`. The workspace persists after the
 /// runtime is dropped, so global mode can reopen it via `from_roots`.
-fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, PathBuf) {
+pub(super) fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, PathBuf) {
     let repo_root = base.join(name);
     let orbit_dir = repo_root.join(".orbit");
     std::fs::create_dir_all(&orbit_dir).expect("create .orbit");
@@ -58,7 +58,12 @@ fn seed_workspace(global_root: &Path, base: &Path, name: &str) -> (PathBuf, Path
     (orbit_dir, repo_root)
 }
 
-fn workspace_entry(id: &str, repo_root: PathBuf, orbit_dir: PathBuf, active: bool) -> WsEntry {
+pub(super) fn workspace_entry(
+    id: &str,
+    repo_root: PathBuf,
+    orbit_dir: PathBuf,
+    active: bool,
+) -> WsEntry {
     let binding = active.then(|| WorkspaceRuntimeBinding {
         logical_workspace_id: format!("ws_{id}"),
         workspace_id: format!("ws_{id}"),
@@ -357,7 +362,7 @@ async fn cross_workspace_dependency_resolves_global_status_not_missing() {
     // GET /tasks/<alpha-id>?workspace=alpha: the show projection reports the
     // identical cross-workspace dependency status.
     let response = router()
-        .with_state(state)
+        .with_state(state.clone())
         .oneshot(get(&format!("/tasks/{}?workspace=alpha", alpha_task.id)))
         .await
         .expect("response");
@@ -370,6 +375,19 @@ async fn cross_workspace_dependency_resolves_global_status_not_missing() {
         .map(|value| value.as_str().expect("dependency label"))
         .collect();
     assert_eq!(labels, vec![expected_label.as_str()]);
+    let aggregate = router()
+        .with_state(state)
+        .oneshot(get("/tasks/all"))
+        .await
+        .expect("aggregate response");
+    let body = body_json(aggregate).await;
+    let alpha_row = body
+        .as_array()
+        .expect("aggregate rows")
+        .iter()
+        .find(|row| row["id"] == alpha_task.id)
+        .expect("alpha row");
+    assert_eq!(alpha_row["resolved_dependencies"], json!([expected_label]));
 }
 
 /// ORB-00037: the pure display helper collapses `$HOME` to `~` and otherwise
@@ -872,13 +890,14 @@ fn concurrent_refresh_and_reads_stay_consistent() {
     assert!(Arc::ptr_eq(&alpha0, &alpha1), "idempotent runtime cache");
 }
 
-/// Dashboard task titles for a runtime, read through the shared JSON projection
-/// (the same one `/api/tasks/all` uses) so a runtime's binding is observable.
+/// Metadata selection used by the aggregate exposes a runtime's binding.
 fn runtime_task_titles(runtime: &OrbitRuntime) -> Vec<String> {
-    super::super::tasks::list_tasks_json(runtime)
-        .expect("list tasks json")
-        .iter()
-        .map(|t| t["title"].as_str().expect("title").to_string())
+    runtime
+        .task_candidates(&Default::default(), orbit_core::DEFAULT_TASK_LIST_LIMIT)
+        .expect("list candidates")
+        .items
+        .into_iter()
+        .map(|task| task.title)
         .collect()
 }
 

@@ -75,17 +75,26 @@ impl TaskV2Store {
     /// validating the index for task B must not fail because task A is being
     /// created or deleted at that instant.
     fn index_is_usable(&self) -> Result<bool, OrbitError> {
+        if self.validated_envelopes()?.is_some() {
+            Ok(true)
+        } else {
+            self.rebuild_index_best_effort("missing or stale index")
+        }
+    }
+
+    /// Reuse the freshness scan for bounded selection, without reading bodies.
+    pub(super) fn validated_envelopes(&self) -> Result<Option<Vec<TaskEnvelopeV2>>, OrbitError> {
         let registered = self.registry.tasks_for_workspace(&self.workspace_id)?;
         let indexed = self
             .registry
             .indexed_task_versions_for_workspace(&self.workspace_id)?;
         if registered.len() != indexed.len() {
-            return self.rebuild_index_best_effort("index count mismatch");
+            return Ok(None);
         }
-
+        let mut envelopes = Vec::with_capacity(registered.len());
         for binding in registered {
-            let Some(indexed_updated_at) = indexed.get(&binding.task_id) else {
-                return self.rebuild_index_best_effort("missing index row");
+            let Some(version) = indexed.get(&binding.task_id) else {
+                return Ok(None);
             };
             let Some(envelope) = self
                 .bundle_store
@@ -93,11 +102,12 @@ impl TaskV2Store {
             else {
                 continue;
             };
-            if envelope.updated_at.to_rfc3339() != *indexed_updated_at {
-                return self.rebuild_index_best_effort("stale index row");
+            if envelope.updated_at.to_rfc3339() != *version {
+                return Ok(None);
             }
+            envelopes.push(envelope);
         }
-        Ok(true)
+        Ok(Some(envelopes))
     }
 
     /// Rebuild the generated index from the bundles, degrading to `false` (use

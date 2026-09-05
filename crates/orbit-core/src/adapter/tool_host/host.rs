@@ -35,8 +35,8 @@ use orbit_types::record::FrictionStatus;
 use orbit_types::task::{
     Task, TaskComment, TaskPriority, TaskStatus, TaskType, normalize_required_tools,
     normalize_task_dependencies, normalize_task_tags, resolve_task_dependencies,
-    resolve_task_relations, task_dependencies_ready, task_matches_tags,
-    task_show_record_field_json, unknown_task_show_field_message, validate_task_dependencies,
+    resolve_task_relations, task_show_record_field_json, unknown_task_show_field_message,
+    validate_task_dependencies,
 };
 use orbit_types::tool::ToolSessionContext;
 use serde_json::{Map, Value, json};
@@ -830,28 +830,27 @@ impl HubCoordinationExecutor {
         let tags = optional_csv_or_string_list_alias(&input, &["tags", "tag"])?.unwrap_or_default();
         let ready = super::input::optional_bool_alias(&input, &["ready"])?;
         let limit = super::input::task_list_limit(&input)?;
-        let status = self.inner.tasks.task.task_status_index()?;
-        // `list_tasks()` returns tasks newest-first (`created_at DESC`, task ID
-        // ascending for ties); the filters preserve that order, so `take(limit)`
-        // yields the newest matching tasks (ORB-10310).
-        let tasks = self
-            .inner
-            .tasks
-            .task
-            .list_tasks()?
-            .into_iter()
-            .filter(|task| {
-                status_filter
-                    .as_ref()
-                    .is_none_or(|values| values.contains(&task.status))
-            })
-            .filter(|task| type_filter.is_none_or(|value| task.task_type == value))
-            .filter(|task| task_matches_tags(task, &tags))
-            .filter(|task| ready != Some(true) || task_dependencies_ready(task, &status))
-            .take(limit)
-            .map(|task| super::json::task_to_json(&task, &status))
-            .collect();
-        Ok(Value::Array(tasks))
+        let page = crate::application::task::query_task_store(
+            self.inner.tasks.task.as_ref(),
+            &crate::application::task::TaskListQuery {
+                filter: crate::application::task::TaskListFilter {
+                    statuses: status_filter,
+                    task_type: type_filter,
+                    tags,
+                    ..Default::default()
+                },
+                ready: ready == Some(true),
+                limit,
+                path: None,
+            },
+        )?;
+        let status = page.status_by_id;
+        Ok(Value::Array(
+            page.items
+                .into_iter()
+                .map(|row| super::json::task_to_json(&row.task, &status))
+                .collect(),
+        ))
     }
 
     fn friction_root(&self) -> Result<PathBuf, OrbitError> {

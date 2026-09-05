@@ -38,6 +38,21 @@ use crate::contracts::{
 };
 
 pub trait TaskStoreBackend: Send + Sync {
+    /// Select metadata before hydration, retaining all-envelope index validation.
+    fn task_candidates(
+        &self,
+        filter: &super::TaskListFilter,
+        limit: usize,
+    ) -> Result<super::TaskCandidates, OrbitError>;
+    fn query_task_rows(
+        &self,
+        filter: &super::TaskListFilter,
+        limit: usize,
+        residual: super::TaskResidualFilter<'_>,
+    ) -> Result<super::TaskPage, OrbitError>;
+    /// Direct reads remain strict; list reads tolerate concurrent creation/deletion.
+    fn get_task_row(&self, id: &str, list_read: bool)
+    -> Result<Option<super::TaskRow>, OrbitError>;
     fn create_task(&self, params: TaskCreateParams) -> Result<Task, OrbitError>;
     fn list_tasks(&self) -> Result<Vec<Task>, OrbitError>;
     fn task_status_index(&self) -> Result<BTreeMap<OrbitId, TaskStatus>, OrbitError> {

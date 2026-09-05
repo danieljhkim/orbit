@@ -153,6 +153,12 @@ fn parallel_updates_to_distinct_tasks_never_fail_a_concurrent_listing() {
                         .list_tasks()
                         .unwrap_or_else(|err| panic!("listing failed under concurrency: {err}"));
                     assert_eq!(tasks.len(), TASKS, "no task may drop out of a listing");
+                    let page = store
+                        .query_task_rows(&Default::default(), 3, None)
+                        .unwrap_or_else(|err| {
+                            panic!("bounded listing failed under concurrency: {err}")
+                        });
+                    assert_eq!(page.items.len(), 3);
                     listings.fetch_add(1, Ordering::Relaxed);
                 }
             });

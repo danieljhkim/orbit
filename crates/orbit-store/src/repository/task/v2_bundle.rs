@@ -41,6 +41,10 @@ pub(crate) struct TaskBundleStoreV2 {
     // `tests/test_support.rs`) to access internal state for durability and projection
     // assertions. See ORB-00247 and docs/design-patterns/test_layout.md (widen
     // deliberately rather than keep nested anti-pattern).
+    #[cfg(test)]
+    pub(crate) bundle_reads: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    pub(crate) envelope_reads: std::sync::atomic::AtomicUsize,
     pub(crate) registry: TaskRegistryStore,
     pub(crate) workspace_id: String,
     pub(crate) workspace_orbit_dir: Option<PathBuf>,
@@ -53,6 +57,10 @@ impl TaskBundleStoreV2 {
         workspace_orbit_dir: PathBuf,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            bundle_reads: Default::default(),
+            #[cfg(test)]
+            envelope_reads: Default::default(),
             registry,
             workspace_id,
             workspace_orbit_dir: Some(workspace_orbit_dir),
@@ -61,6 +69,10 @@ impl TaskBundleStoreV2 {
 
     pub(crate) fn new_checkoutless(registry: TaskRegistryStore, workspace_id: String) -> Self {
         Self {
+            #[cfg(test)]
+            bundle_reads: Default::default(),
+            #[cfg(test)]
+            envelope_reads: Default::default(),
             registry,
             workspace_id,
             workspace_orbit_dir: None,
@@ -184,6 +196,9 @@ impl TaskBundleStoreV2 {
     }
 
     pub(crate) fn read_bundle(&self, task_id: &str) -> Result<TaskBundleV2, OrbitError> {
+        #[cfg(test)]
+        self.bundle_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let bundle_dir = self.bundle_path(task_id)?;
         read_bundle_at(&bundle_dir)
     }
@@ -223,6 +238,9 @@ impl TaskBundleStoreV2 {
         let bindings = self.registry.tasks_for_workspace(&self.workspace_id)?;
         let mut bundles = Vec::with_capacity(bindings.len());
         for binding in &bindings {
+            #[cfg(test)]
+            self.bundle_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Some(bundle) = read_bundle_tolerating_in_flight(&binding.canonical_path)? {
                 bundles.push(bundle);
             }
@@ -236,6 +254,9 @@ impl TaskBundleStoreV2 {
         &self,
         task_id: &str,
     ) -> Result<Option<TaskBundleV2>, OrbitError> {
+        #[cfg(test)]
+        self.bundle_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         read_bundle_tolerating_in_flight(&self.bundle_path(task_id)?)
     }
 
@@ -245,6 +266,9 @@ impl TaskBundleStoreV2 {
         &self,
         task_id: &str,
     ) -> Result<Option<TaskEnvelopeV2>, OrbitError> {
+        #[cfg(test)]
+        self.envelope_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let bundle_dir = self.bundle_path(task_id)?;
         match read_envelope_at(&bundle_dir) {
             Ok(envelope) => Ok(Some(envelope)),

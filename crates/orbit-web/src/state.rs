@@ -740,16 +740,24 @@ impl FromRequestParts<DashboardState> for Ws {
         // Refresh and pin one snapshot so selection and runtime resolution share
         // a generation: a native add/remove/rebind since the last request is
         // honored, and the resolved runtime always matches the pinned binding.
-        let pinned = state.pin();
         let requested = parts.uri.query().and_then(workspace_from_query);
-        let id = match requested {
-            Some(id) => id,
-            None => pinned
-                .default_workspace()
-                .map(str::to_string)
-                .ok_or_else(WsRejection::no_default)?,
-        };
-        Ok(Ws(pinned.runtime_for(&id)?))
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || {
+            let pinned = state.pin();
+            let id = match requested {
+                Some(id) => id,
+                None => pinned
+                    .default_workspace()
+                    .map(str::to_string)
+                    .ok_or_else(WsRejection::no_default)?,
+            };
+            Ok(Ws(pinned.runtime_for(&id)?))
+        })
+        .await
+        .map_err(|error| WsRejection {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("workspace selection panicked: {error}"),
+        })?
     }
 }
 

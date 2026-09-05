@@ -2,7 +2,7 @@
 type: design
 summary: "Spec: Task Bundle V2"
 tags: ["task-artifacts"]
-last_validated: 2026-08-16
+last_validated: 2026-09-05
 ---
 
 # Spec: Task Bundle V2
@@ -290,3 +290,75 @@ Cutover must be idempotent for interrupted local runs. A partially converted tas
 ## Agent Signature
 
 Last revised by `claude` on 2026-08-09 for [ORB-10343].
+
+## Bounded list reads
+
+ORB-11205: bounded task queries validate the generated index against every
+registered, settled envelope, then apply metadata predicates and newest-first
+ordering (task ID ascending for ties) before loading full bundles. Exact totals
+count metadata matches; they do not certify off-page body, event, or artifact
+integrity. A selected corrupt bundle fails the request and is never replaced
+with another row. Direct and unbounded full-bundle reads remain strict.
+
+Status, type, priority, parent, job run, tags and external-reference predicates
+use metadata. Readiness and context-path predicates currently use an explicit
+residual fallback, hydrating metadata matches before filtering and limiting.
+Missing/stale indexes require a strict bundle scan and best-effort index repair;
+errors encountered reading that scan propagate. An update racing selected-row
+hydration causes one strict rescan with filter-before-limit semantics. In-flight
+creation/deletion retains the existing list-read tolerance.
+
+Dashboard list and detail projections retain comments, history and the sorted
+artifact manifest from each validated bundle. The aggregate selects the global
+newest 50 from workspace metadata before hydration and shares one request-scoped
+global dependency-status projection. Storage and rendering run on the blocking
+pool, including cold workspace selection and runtime construction in the
+shared workspace extractor. Envelope validation and dependency-status work remain linear in corpus
+size; there is no persistent validation cache or content integrity audit added.
+
+### Reproducing the bounded-read measurements
+
+The ignored `task_list_io_benchmark` store test generates three temporary
+workspaces, each containing `ORBIT_TASK_BENCH_SIZE` tasks (100, 1000 or 10000).
+Each task has a roughly 8 KB description, a nonempty plan, eight comments,
+twelve history events and a 1 KB artifact. Every tenth task has the selective
+tag. It measures unfiltered and selective limit-50 reads, detail, and the
+global newest-50 aggregate. `ORBIT_TASK_BENCH_MODE=baseline` uses the frozen
+settled-index read algorithm from `424529c518d59631bb55e1df579454ff5e10307a`;
+`candidate` uses the bounded store query. Counters distinguish full bundle
+loads from envelope-only freshness reads (each full bundle also reads an
+envelope). Residual and rebuild costs are covered separately by the listing
+regression tests.
+
+For example, after building test binaries outside the checkout:
+
+```sh
+export CARGO_TARGET_DIR=/tmp/orbit-task-bench-target
+export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+ORBIT_TASK_BENCH_SIZE=1000 ORBIT_TASK_BENCH_MODE=candidate \
+ORBIT_TASK_BENCH_ROOT=/tmp/orbit-task-bench-1000 \
+cargo test -p orbit-store task_list_io_benchmark -- --ignored --nocapture
+
+ORBIT_TASK_BENCH_SIZE=1000 ORBIT_TASK_BENCH_MODE=candidate \
+ORBIT_TASK_BENCH_ROOT=/tmp/orbit-task-bench-1000 \
+cargo test -p orbit-web task_response_benchmark -- --ignored --nocapture
+```
+
+The fixture root must be new and temporary. Omitting it from the store test
+automatically removes the generated corpus after the measurement. To compare
+actual HTTP implementations, archive the baseline commit into a temporary
+directory and add only `api/tests/task_response_bench.rs` and its test-module
+registration. Run that identical harness on the same retained corpus, setting
+the mode label to `baseline`. Build both binaries first, then run benchmarks
+serially without compilation overlap. HTTP measurements include response
+serialization and an unrelated workspace request under four concurrent lists
+on one Tokio worker.
+
+Both harnesses warm each operation before eleven timed samples, reporting the
+median and nearest-rank p95 (the maximum with eleven samples). Linux `VmHWM`
+reports process peak RSS including fixture/runtime setup and earlier cases;
+it is not a per-request allocation measurement. The recorded ORB-11205 run
+used unoptimized test binaries with debug information disabled and temporary
+corpora on Linux tmpfs. These are warm-cache measurements, not controlled
+cold-cache or production-release latency claims. Small-corpus pool/metadata
+overhead and concurrent-request RSS must be reported alongside improvements.
