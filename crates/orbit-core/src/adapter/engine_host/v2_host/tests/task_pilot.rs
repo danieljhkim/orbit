@@ -435,6 +435,89 @@ fn apply_validates_all_results_then_mutates_context_files_only() {
     );
 }
 
+/// [ORB-11261] A concrete conflict-plus-evidence recommendation, expressed the
+/// way the instruction now documents it (one string per finding), must
+/// validate and apply normally.
+#[test]
+fn adr_conflicts_accepts_nonempty_string_array_with_conflict_and_evidence() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "src/alpha.rs");
+    let alpha = seed_task(&runtime, "alpha", TaskStatus::Backlog, &[], &[]);
+    let task_ids = vec![alpha.id.clone()];
+    let prepared_snapshot = prepared(&runtime, &repo_root, &task_ids);
+    let mut assessment = selector_assessment(&alpha, vec!["file:src/alpha.rs"]);
+    assessment["adr_conflicts"] = json!([
+        "crates/orbit-core/src/adapter/engine_host/v2_host/task_pilot.rs still \
+         exports validate_recommendations with the signature this task would \
+         change (verified via `rg -n \"fn validate_recommendations\"` at \
+         source_revision)"
+    ]);
+    let result = partition_result(0, &task_ids, vec![assessment]);
+
+    let output = apply(
+        &runtime,
+        "apply_task_pilot_results",
+        &json!({
+            "prepared": prepared_snapshot,
+            "results": [result],
+            "workspace_path": repo_root,
+        }),
+    )
+    .expect("apply accepts a nonempty string-array adr_conflicts");
+
+    assert_eq!(output["status"], "succeeded");
+    assert_eq!(output["partition_decisions"][0]["outcome"], "applied");
+    assert_eq!(output["tasks"][0]["applied"], true);
+}
+
+/// [ORB-11261] Reproduces the ORB-11259 incident directly: an agent that
+/// returns `adr_conflicts` as an array of `{conflict, evidence}` objects
+/// instead of plain strings must fail deterministic apply with a clear,
+/// field-specific error before any task is mutated — never be coerced into a
+/// successful typed response.
+#[test]
+fn adr_conflicts_rejects_object_array_conflict_evidence_shape() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "src/alpha.rs");
+    let alpha = seed_task(&runtime, "alpha", TaskStatus::Backlog, &[], &[]);
+    let task_ids = vec![alpha.id.clone()];
+    let prepared_snapshot = prepared(&runtime, &repo_root, &task_ids);
+    let mut assessment = selector_assessment(&alpha, vec!["file:src/alpha.rs"]);
+    assessment["adr_conflicts"] = json!([
+        {
+            "conflict": "legacy ADR mandates a different storage layout",
+            "evidence": "docs/design/foo/decisions.md",
+        }
+    ]);
+    let result = partition_result(0, &task_ids, vec![assessment]);
+
+    let output = apply(
+        &runtime,
+        "apply_task_pilot_results",
+        &json!({
+            "prepared": prepared_snapshot,
+            "results": [result],
+            "workspace_path": repo_root,
+        }),
+    )
+    .expect("malformed adr_conflicts is a durable failed decision, not an error");
+
+    assert_eq!(output["status"], "failed");
+    assert_eq!(output["partition_decisions"][0]["outcome"], "failed");
+    let error = output["partition_decisions"][0]["error"]
+        .as_str()
+        .expect("failed partition carries an error message");
+    assert!(error.contains("adr_conflicts"));
+    assert!(error.contains("must contain only strings"));
+    assert!(
+        runtime
+            .get_task(&alpha.id)
+            .unwrap()
+            .context_files
+            .is_empty()
+    );
+}
+
 #[test]
 fn invalid_selector_in_later_assessment_prevents_every_mutation() {
     let (_root, runtime, repo_root) = runtime_with_workspace_layout();
