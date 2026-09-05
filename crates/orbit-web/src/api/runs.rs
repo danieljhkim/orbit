@@ -5,6 +5,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use orbit_common::security::redaction::redact_all;
+use orbit_core::application::job::job_run_to_json;
 use orbit_core::runtime::run_audit::{RunAuditStep, RunCliInvocationRecord, RunProviderProcess};
 use orbit_core::{JobRun, OrbitRuntime, V2AuditEventFilter};
 use serde_json::{Value, json};
@@ -13,7 +14,6 @@ use super::{
     HISTORY_DEFAULT_LIMIT, LimitQuery, RunEventsQuery, bad_request, bounded_limit,
     map_runtime_error, validate_id,
 };
-use crate::projections::job_run_to_json_with_state;
 
 const RUN_EVENTS_DEFAULT_LIMIT: usize = 100;
 /// Hard cap on rows scanned from a single run's persisted v2 audit events.
@@ -150,7 +150,7 @@ pub(super) fn job_run_detail_to_json(runtime: &OrbitRuntime, run: &JobRun) -> Va
     // it entirely, so the dashboard could not see the waiting reasons or the
     // child-dispatch lineage the CLI already showed.
     let state = runtime.read_run_state(&run.run_id).ok().flatten();
-    let mut full = job_run_to_json_with_state(run, state.as_ref());
+    let mut full = job_run_to_json(run, state.as_ref());
     // Reshape into `{run, steps}` per the dashboard contract: peel the
     // `steps` array off the flat `job_run_to_json` output.
     let stored_steps = full

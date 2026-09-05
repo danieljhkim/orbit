@@ -11,7 +11,7 @@ use chrono::Utc;
 use orbit_common::storage::blob_store::BlobStore;
 use orbit_core::application::job::JobRunListParams;
 use orbit_core::application::task::TaskAddParams;
-use orbit_core::{JobRunState, OrbitRuntime, TaskStatus, V2AuditEventInsertParams};
+use orbit_core::{JobRun, JobRunState, OrbitRuntime, TaskStatus, V2AuditEventInsertParams};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -796,13 +796,17 @@ fn seed_parent_blocked_on_child(
     run_id: &str,
     run_state: JobRunState,
     phase: ChildDispatchPhase,
-) {
+) -> JobRun {
     let run = seed_run(runtime, run_id, "workspace_auto_pipeline", run_state);
     write_seeded_run(runtime, &run);
     let mut state = PipelineState::new(
         run_id.to_string(),
         "workspace_auto_pipeline".to_string(),
         json!({}),
+    );
+    state.set_waiting_reasons(
+        Some(vec!["ORB-1".to_string()]),
+        Some(vec!["file:src/lib.rs".to_string()]),
     );
     state.record_child_dispatch(
         ChildDispatch::submitted(
@@ -819,19 +823,25 @@ fn seed_parent_blocked_on_child(
     runtime
         .write_run_state(run_id, &state)
         .expect("seed parent run state");
+    run
 }
 
 #[test]
 fn run_detail_names_the_child_a_running_parent_is_blocked_on() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-web-child-waiting";
-    seed_parent_blocked_on_child(
+    let run = seed_parent_blocked_on_child(
         &runtime,
         run_id,
         JobRunState::Running,
         ChildDispatchPhase::Waiting,
     );
-    let run = runtime.show_job_run(run_id).expect("show run");
+    assert_eq!(run.state, JobRunState::Running);
+    let state = runtime
+        .read_run_state(run_id)
+        .expect("read run state")
+        .expect("seeded run state");
+    assert_eq!(state.waiting_on_deps, Some(vec!["ORB-1".to_string()]));
 
     let detail = job_run_detail_to_json(&runtime, &run);
     let dispatches = detail["run"]["child_dispatches"]
@@ -844,19 +854,24 @@ fn run_detail_names_the_child_a_running_parent_is_blocked_on() {
     assert_eq!(dispatches[0]["parent_step_id"], "ship_leaves");
     assert_eq!(dispatches[0]["phase"], "waiting");
     assert_eq!(dispatches[0]["queued"], false);
+    assert_eq!(detail["run"]["waiting_on_deps"], json!(["ORB-1"]));
+    assert_eq!(
+        detail["run"]["waiting_on_locks"],
+        json!(["file:src/lib.rs"])
+    );
+    assert!(detail["run"].get("pid").is_none());
 }
 
 #[test]
 fn run_detail_keeps_the_child_link_after_the_parent_terminalizes() {
     let runtime = OrbitRuntime::in_memory().expect("build runtime");
     let run_id = "jrun-web-child-cancelled";
-    seed_parent_blocked_on_child(
+    let run = seed_parent_blocked_on_child(
         &runtime,
         run_id,
         JobRunState::Cancelled,
         ChildDispatchPhase::Terminal,
     );
-    let run = runtime.show_job_run(run_id).expect("show run");
 
     let detail = job_run_detail_to_json(&runtime, &run);
     let dispatches = detail["run"]["child_dispatches"]
@@ -869,6 +884,8 @@ fn run_detail_keeps_the_child_link_after_the_parent_terminalizes() {
         "a cancelled parent must still name the child it left behind"
     );
     assert_eq!(dispatches[0]["child_run_id"], "jrun-child-leaves");
+    assert_eq!(detail["run"]["waiting_on_deps"], Value::Null);
+    assert_eq!(detail["run"]["waiting_on_locks"], Value::Null);
 }
 
 #[test]

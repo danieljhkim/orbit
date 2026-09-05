@@ -11,7 +11,7 @@ use orbit_core::{
     resolve_task_dependencies,
 };
 use orbit_types::task::ArtifactManifestFileV2;
-use orbit_types::workflow::{JobV2Step, JobV2StepBody, PipelineState};
+use orbit_types::workflow::{JobV2Step, JobV2StepBody};
 use serde_json::{Value, json};
 
 pub(crate) fn audit_event_to_json(event: &AuditEvent) -> Value {
@@ -137,66 +137,6 @@ fn job_v2_step_to_json(step: &JobV2Step) -> Value {
         }
     }
     value
-}
-
-pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
-    job_run_to_json_with_state(run, None)
-}
-
-pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineState>) -> Value {
-    let last = run.steps.last();
-    // [ORB-10971] Read child lineage from the full state, before the terminal
-    // filter below: a cancelled or failed parent must still name the children
-    // it dispatched. Waiting reasons keep the filter — they are momentary and
-    // mean nothing once the run stopped.
-    let child_dispatches = serde_json::to_value(
-        state
-            .map(|state| state.child_dispatches.as_slice())
-            .unwrap_or_default(),
-    )
-    .unwrap_or_else(|_| Value::Array(Vec::new()));
-    let state = (!run.state.is_terminal()).then_some(state).flatten();
-    let waiting_on_deps = state
-        .and_then(|state| state.waiting_on_deps.as_ref())
-        .filter(|values| !values.is_empty());
-    let waiting_on_locks = state
-        .and_then(|state| state.waiting_on_locks.as_ref())
-        .filter(|values| !values.is_empty());
-    json!({
-        "child_dispatches": child_dispatches,
-        "run_id": run.run_id,
-        "job_id": run.job_id,
-        "attempt": run.attempt,
-        "state": run.state.to_string(),
-        "waiting_on_deps": waiting_on_deps,
-        "waiting_on_locks": waiting_on_locks,
-        "scheduled_at": run.scheduled_at.to_rfc3339(),
-        "started_at": run.started_at.map(|v| v.to_rfc3339()),
-        "finished_at": run.finished_at.map(|v| v.to_rfc3339()),
-        "duration_ms": run.duration_ms,
-        "retry_source_run_id": run.retry_source_run_id,
-        "exit_code": last.and_then(|s| s.exit_code),
-        "agent_response_json": last.and_then(|s| s.agent_response_json.as_ref()),
-        "error_code": last.and_then(|s| s.error_code.as_deref()),
-        "error_message": last.and_then(|s| s.error_message.as_deref()),
-        "knowledge_metrics": run.knowledge_metrics,
-        "resolved_crew": run.resolved_crew,
-        "crew_model": run.crew_model,
-        "steps": run.steps.iter().map(|s| json!({
-            "step_index": s.step_index,
-            "target_type": s.target_type.to_string(),
-            "target_id": s.target_id,
-            "state": s.state.to_string(),
-            "started_at": s.started_at.map(|v| v.to_rfc3339()),
-            "finished_at": s.finished_at.map(|v| v.to_rfc3339()),
-            "duration_ms": s.duration_ms,
-            "exit_code": s.exit_code,
-            "agent_response_json": s.agent_response_json,
-            "error_code": s.error_code,
-            "error_message": s.error_message,
-        })).collect::<Vec<_>>(),
-        "created_at": run.created_at.to_rfc3339(),
-    })
 }
 
 pub(crate) fn task_to_json(task: &Task, status_by_id: &BTreeMap<String, TaskStatus>) -> Value {

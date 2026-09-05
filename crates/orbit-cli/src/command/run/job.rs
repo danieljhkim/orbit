@@ -1,3 +1,4 @@
+use orbit_core::application::job::job_run_to_json;
 use orbit_core::{JobRun, OrbitError, OrbitRuntime, PipelineInvokeResult, PipelineWaitEntry};
 use orbit_types::workflow::PipelineState;
 use serde_json::{Value, json};
@@ -244,76 +245,14 @@ impl Execute for JobResumeArgs {
     }
 }
 
-/// The child Runs this run dispatched, as persisted by the dispatch
-/// checkpoint [ORB-10971]. Always an array so a reader never has to
-/// distinguish "no children" from "field absent".
-pub(crate) fn child_dispatches_json(state: Option<&PipelineState>) -> Value {
-    let dispatches = state
-        .map(|state| state.child_dispatches.as_slice())
-        .unwrap_or_default();
-    serde_json::to_value(dispatches).unwrap_or_else(|_| Value::Array(Vec::new()))
-}
-
-// Retained after the dashboard callers moved to orbit-web; the thin
-// wrapper is kept for any external re-exports or future CLI json paths.
-#[allow(dead_code)]
-pub(crate) fn job_run_to_json(run: &JobRun) -> Value {
-    job_run_to_json_with_state(run, None)
-}
-
-pub(crate) fn job_run_to_json_with_state(run: &JobRun, state: Option<&PipelineState>) -> Value {
-    let last = run.steps.last();
-    // [ORB-10971] Child lineage is read from the full state, before the
-    // terminal filter below: a cancelled or failed parent must still name the
-    // children it dispatched. Waiting reasons keep the old filter — they are
-    // momentary and mean nothing once the run stopped.
-    let child_dispatches = child_dispatches_json(state);
-    let state = (!run.state.is_terminal()).then_some(state).flatten();
-    let waiting_on_deps = state
-        .and_then(|state| state.waiting_on_deps.as_ref())
-        .filter(|values| !values.is_empty());
-    let waiting_on_locks = state
-        .and_then(|state| state.waiting_on_locks.as_ref())
-        .filter(|values| !values.is_empty());
-    json!({
-        "child_dispatches": child_dispatches,
-        "run_id": run.run_id,
-        "job_id": run.job_id,
-        "attempt": run.attempt,
-        "state": run.state.to_string(),
-        // Recorded owner process, when a worker claimed the run [ORB-10070].
-        // Lets operators and host automation probe whether an
-        // active run's worker is actually alive.
-        "pid": run.pid,
-        "waiting_on_deps": waiting_on_deps,
-        "waiting_on_locks": waiting_on_locks,
-        "scheduled_at": run.scheduled_at.to_rfc3339(),
-        "started_at": run.started_at.map(|v| v.to_rfc3339()),
-        "finished_at": run.finished_at.map(|v| v.to_rfc3339()),
-        "duration_ms": run.duration_ms,
-        "retry_source_run_id": run.retry_source_run_id,
-        "exit_code": last.and_then(|s| s.exit_code),
-        "agent_response_json": last.and_then(|s| s.agent_response_json.as_ref()),
-        "error_code": last.and_then(|s| s.error_code.as_deref()),
-        "error_message": last.and_then(|s| s.error_message.as_deref()),
-        "knowledge_metrics": run.knowledge_metrics,
-        "resolved_crew": run.resolved_crew,
-        "crew_model": run.crew_model,
-        "steps": run.steps.iter().map(|s| json!({
-            "step_index": s.step_index,
-            "target_type": s.target_type.to_string(),
-            "target_id": s.target_id,
-            "state": s.state.to_string(),
-            "started_at": s.started_at.map(|v| v.to_rfc3339()),
-            "finished_at": s.finished_at.map(|v| v.to_rfc3339()),
-            "duration_ms": s.duration_ms,
-            "exit_code": s.exit_code,
-            "agent_response_json": s.agent_response_json,
-            "error_code": s.error_code,
-            "error_message": s.error_message,
-        })).collect::<Vec<_>>(),
-        "created_at": run.created_at.to_rfc3339(),
-    })
+/// CLI adapter for the shared run projection.
+///
+/// The CLI has historically exposed the claimed worker PID; the web API does
+/// not. Keep that contract difference at this presentation boundary.
+pub(crate) fn cli_job_run_to_json(run: &JobRun, state: Option<&PipelineState>) -> Value {
+    let mut value = job_run_to_json(run, state);
+    value["pid"] = json!(run.pid);
+    value
 }
 
 #[derive(Args)]
