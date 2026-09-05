@@ -19,7 +19,7 @@ use super::{ManagedAssetLayout, ManagedAssetReconciliation, reconcile_managed_as
 /// discoverable through one description without a per-topic skill competing
 /// for the same trigger. The ordering below mirrors each router's own
 /// reference table, so the shipped surface reads the same in both places.
-pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 27] = [
+pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 28] = [
     (
         "orbit/SKILL.md",
         include_str!("../../assets/skills/orbit/SKILL.md"),
@@ -81,6 +81,10 @@ pub(crate) const DEFAULT_SKILL_FILES: [(&str, &str); 27] = [
     (
         "orbit/references/setup/first-run.md",
         include_str!("../../assets/skills/orbit/references/setup/first-run.md"),
+    ),
+    (
+        "orbit/references/setup/linux-sandbox.md",
+        include_str!("../../assets/skills/orbit/references/setup/linux-sandbox.md"),
     ),
     (
         "orbit/references/setup/configuration.md",
