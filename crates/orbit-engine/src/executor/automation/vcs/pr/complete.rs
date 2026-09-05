@@ -30,7 +30,7 @@ use super::super::super::input::input_string_field;
 use super::super::super::task_update::{authorization_note, complete_tasks};
 use super::super::handoff::load_handoff_context;
 use super::super::operations;
-use super::merge::{MergeStrategy, resolve_merge_strategy};
+use super::merge::{MergeCapabilities, MergeStrategy, resolve_merge_capabilities};
 
 /// Default budget for waiting out required checks before giving up.
 const DEFAULT_MAX_WAIT_SECONDS: u64 = 3600;
@@ -94,7 +94,7 @@ fn drive_pr_to_merged<H: RuntimeHost + ?Sized>(
     let mut waited_seconds = 0_u64;
     let mut auto_merge_requested = false;
     let mut merge_requested = false;
-    let mut merge_strategy = None;
+    let mut merge_capabilities: Option<MergeCapabilities> = None;
 
     loop {
         let status = read_pr_status(host, workspace_path, pr_number)?;
@@ -103,7 +103,7 @@ fn drive_pr_to_merged<H: RuntimeHost + ?Sized>(
                 return Ok(json!({
                     "merged": true,
                     "pr_number": pr_number,
-                    "strategy": merge_strategy.map(MergeStrategy::as_str),
+                    "strategy": merge_capabilities.map(|capabilities| capabilities.strategy.as_str()),
                     "auto_merge_requested": auto_merge_requested,
                     "waited_seconds": waited_seconds,
                 }));
@@ -123,17 +123,26 @@ fn drive_pr_to_merged<H: RuntimeHost + ?Sized>(
             }
             PrMergeState::Mergeable => {
                 if !merge_requested {
-                    let strategy =
-                        resolved_strategy(host, workspace_path, pr_number, &mut merge_strategy)?;
-                    request_merge(host, workspace_path, pr_number, strategy, false).map_err(
-                        |error| {
-                            OrbitError::Execution(format!(
-                                "pr_complete: could not request {} merge on pull request \
-                                 #{pr_number}: {error}; the task stays in review",
-                                strategy.as_str()
-                            ))
-                        },
+                    let capabilities = resolved_capabilities(
+                        host,
+                        workspace_path,
+                        pr_number,
+                        &mut merge_capabilities,
                     )?;
+                    request_merge(
+                        host,
+                        workspace_path,
+                        pr_number,
+                        capabilities.strategy,
+                        false,
+                    )
+                    .map_err(|error| {
+                        OrbitError::Execution(format!(
+                            "pr_complete: could not request {} merge on pull request \
+                                 #{pr_number}: {error}; the task stays in review",
+                            capabilities.strategy.as_str()
+                        ))
+                    })?;
                     merge_requested = true;
                     // Re-read rather than assuming the request landed.
                     continue;
@@ -142,20 +151,28 @@ fn drive_pr_to_merged<H: RuntimeHost + ?Sized>(
             PrMergeState::Pending => {
                 if !auto_merge_requested {
                     // Required checks are still running. Hand the merge to
-                    // GitHub's auto-merge so it lands the moment they pass,
-                    // then keep polling: enabling it is not success.
-                    let strategy =
-                        resolved_strategy(host, workspace_path, pr_number, &mut merge_strategy)?;
-                    request_merge(host, workspace_path, pr_number, strategy, true).map_err(
-                        |error| {
-                            OrbitError::Execution(format!(
-                                "pr_complete: could not enable auto-merge using {} on pull request \
-                                 #{pr_number}: {error}; the task stays in review",
-                                strategy.as_str()
-                            ))
-                        },
+                    // GitHub's auto-merge when this repository allows it, then
+                    // keep polling: enabling it is not success. Repositories
+                    // with auto-merge disabled instead wait for a normally
+                    // mergeable state, at which point the ordinary merge path
+                    // above makes the same permitted request.
+                    let capabilities = resolved_capabilities(
+                        host,
+                        workspace_path,
+                        pr_number,
+                        &mut merge_capabilities,
                     )?;
-                    auto_merge_requested = true;
+                    if capabilities.auto_merge_allowed {
+                        request_merge(host, workspace_path, pr_number, capabilities.strategy, true)
+                            .map_err(|error| {
+                                OrbitError::Execution(format!(
+                                    "pr_complete: could not enable auto-merge using {} on pull request \
+                                     #{pr_number}: {error}; the task stays in review",
+                                    capabilities.strategy.as_str()
+                                ))
+                            })?;
+                        auto_merge_requested = true;
+                    }
                 }
             }
         }
@@ -256,23 +273,24 @@ fn request_merge<H: RuntimeHost + ?Sized>(
     .map(|_| ())
 }
 
-fn resolved_strategy<H: RuntimeHost + ?Sized>(
+fn resolved_capabilities<H: RuntimeHost + ?Sized>(
     host: &H,
     workspace_path: &str,
     pr_number: &str,
-    selected: &mut Option<MergeStrategy>,
-) -> Result<MergeStrategy, OrbitError> {
-    if let Some(strategy) = *selected {
-        return Ok(strategy);
+    selected: &mut Option<MergeCapabilities>,
+) -> Result<MergeCapabilities, OrbitError> {
+    if let Some(capabilities) = *selected {
+        return Ok(capabilities);
     }
-    let strategy = resolve_merge_strategy(host, workspace_path, pr_number).map_err(|error| {
-        OrbitError::Execution(format!(
-            "pr_complete: could not resolve a permitted merge method for pull request \
+    let capabilities =
+        resolve_merge_capabilities(host, workspace_path, pr_number).map_err(|error| {
+            OrbitError::Execution(format!(
+                "pr_complete: could not resolve a permitted merge method for pull request \
              #{pr_number}: {error}; the task stays in review"
-        ))
-    })?;
-    *selected = Some(strategy);
-    Ok(strategy)
+            ))
+        })?;
+    *selected = Some(capabilities);
+    Ok(capabilities)
 }
 
 fn resolve_pr_number(input: &Value, tasks: &[Task]) -> Result<String, OrbitError> {

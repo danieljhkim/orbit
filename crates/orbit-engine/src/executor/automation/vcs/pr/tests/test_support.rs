@@ -149,6 +149,23 @@ impl PrOpenTestHost {
         merge: bool,
         requires_linear_history: bool,
     ) {
+        self.queue_merge_capabilities_with_auto_merge(
+            squash,
+            rebase,
+            merge,
+            requires_linear_history,
+            true,
+        );
+    }
+
+    pub fn queue_merge_capabilities_with_auto_merge(
+        &self,
+        squash: bool,
+        rebase: bool,
+        merge: bool,
+        requires_linear_history: bool,
+        allow_auto_merge: bool,
+    ) {
         self.queue_vcs_result(
             operations::PR_MERGE_CAPABILITIES,
             json!({
@@ -158,6 +175,7 @@ impl PrOpenTestHost {
                     "allow_squash_merge": squash,
                     "allow_rebase_merge": rebase,
                     "allow_merge_commit": merge,
+                    "allow_auto_merge": allow_auto_merge,
                     "requires_linear_history": requires_linear_history,
                 }
             }),
@@ -407,6 +425,7 @@ impl RuntimeHost for PrOpenTestHost {
                     "allow_squash_merge": true,
                     "allow_rebase_merge": true,
                     "allow_merge_commit": true,
+                    "allow_auto_merge": true,
                     "requires_linear_history": true,
                 }
             })),

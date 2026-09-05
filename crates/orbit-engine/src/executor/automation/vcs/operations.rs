@@ -247,7 +247,7 @@ fn pr_merge_capabilities(input: &Value) -> Result<Value, OrbitError> {
         ))
     })?;
 
-    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){mergeCommitAllowed rebaseMergeAllowed squashMergeAllowed pullRequest(number:$number){baseRefName baseRef{branchProtectionRule{requiresLinearHistory}}}}}";
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){autoMergeAllowed mergeCommitAllowed rebaseMergeAllowed squashMergeAllowed pullRequest(number:$number){baseRefName baseRef{branchProtectionRule{requiresLinearHistory}}}}}";
     let response = execute(
         "gh",
         vec![
@@ -349,6 +349,7 @@ pub(super) fn normalize_merge_capabilities(
             "allow_squash_merge": required_bool("squashMergeAllowed")?,
             "allow_rebase_merge": required_bool("rebaseMergeAllowed")?,
             "allow_merge_commit": required_bool("mergeCommitAllowed")?,
+            "allow_auto_merge": required_bool("autoMergeAllowed")?,
             "requires_linear_history": requires_linear_history,
         }
     }))
