@@ -153,6 +153,20 @@ impl OrbitRuntime {
         Ok(result)
     }
 
+    /// The spec a job would run under, falling back to the asset this binary
+    /// ships when the workspace catalog has not been seeded [ORB-11253].
+    ///
+    /// A control that validates against a job's declared limits must be able to
+    /// answer even in a workspace whose `resources/jobs` directory is empty; the
+    /// shipped asset is the same document seeding would have written there.
+    pub(crate) fn resolved_job_spec(&self, job_id: &str) -> Result<JobV2, OrbitError> {
+        match self.show_job_catalog_entry(job_id) {
+            Ok(entry) => Ok(entry.spec),
+            Err(OrbitError::NotFound { .. }) => shipped_job_spec(job_id),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn show_job_catalog_entry(&self, job_id: &str) -> Result<JobCatalogEntry, OrbitError> {
         let v2_jobs = self.load_v2_job_assets()?;
         v2_jobs
@@ -294,6 +308,19 @@ fn matches_job_filter(kind: JobKind, filter: JobCatalogFilter) -> bool {
 ///
 /// When `overwrite` is false, existing files are preserved — users who've
 /// edited a previously-seeded workflow won't lose their changes on re-init.
+/// Parse the job asset compiled into this binary.
+fn shipped_job_spec(job_id: &str) -> Result<JobV2, OrbitError> {
+    let (_, yaml) = DEFAULT_JOB_FILES
+        .iter()
+        .find(|(name, _)| *name == job_id)
+        .ok_or_else(|| OrbitError::not_found(NotFoundKind::Job, job_id.to_string()))?;
+    Ok(orbit_engine::activity_job::load_job_asset(yaml)
+        .map_err(|error| {
+            OrbitError::JobValidation(format!("shipped job asset `{job_id}` is invalid: {error}"))
+        })?
+        .spec)
+}
+
 pub(crate) fn seed_default_jobs(
     jobs_dir: &Path,
     overwrite: bool,

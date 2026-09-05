@@ -4,6 +4,7 @@ use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 use orbit_common::OrbitError;
 use orbit_engine::DispatchError;
 use orbit_types::task::{Task, TaskStatus, task_dependencies_ready, unmet_task_dependencies};
+use orbit_types::workflow::DrainWorkerLimit;
 use serde_json::{Value, json};
 
 use crate::OrbitRuntime;
@@ -26,6 +27,10 @@ const EPIC_JOB_NAME: &str = "epic_pipeline";
 /// own run input is the only record of the claim in between, and without it
 /// the next iteration would hand the same task to a second child.
 const LEAF_JOB_NAME: &str = "task_auto_pipeline";
+
+/// The drain job itself. Readiness reads its live run to report the ceiling a
+/// running drain is actually admitting under [ORB-11253].
+const DRAIN_JOB_NAME: &str = "workspace_auto_pipeline";
 
 /// Default ceiling on concurrently live leaf runs. Matches the `max_workers`
 /// the fan-out used while the drain waited on its leaves, so steady-state
@@ -74,12 +79,21 @@ pub(super) fn classify_workspace_auto_tasks(
     action: &str,
     input: &Value,
 ) -> Result<Value, DispatchError> {
-    let max_active_leaf_runs = templated_u64(
+    let submitted_max_active_leaf_runs = templated_u64(
         action,
         input,
         "max_active_leaf_runs",
         DEFAULT_MAX_ACTIVE_LEAF_RUNS,
     )?;
+    // [ORB-11253] The submitted ceiling is a snapshot; the run's own control is
+    // the live one. Reading it here, per iteration, is what makes an adjustment
+    // take effect on the next admission without replacing the coordinator.
+    let worker_limit = live_worker_limit(runtime, input);
+    let max_active_leaf_runs = worker_limit
+        .as_ref()
+        .map_or(submitted_max_active_leaf_runs, |limit| {
+            u64::from(limit.max_active_leaf_runs)
+        });
     let poll_sleep_seconds = templated_u64(
         action,
         input,
@@ -162,6 +176,10 @@ pub(super) fn classify_workspace_auto_tasks(
         "pending_backlog": pending.len(),
         "active_leaf_runs": live_leaves.len(),
         "free_slots": free_slots,
+        "max_active_leaf_runs": max_active_leaf_runs,
+        "submitted_max_active_leaf_runs": submitted_max_active_leaf_runs,
+        "worker_limit_source": if worker_limit.is_some() { "run_control" } else { "run_input" },
+        "worker_limit": worker_limit,
         "active_epic_run_id": active_epic.as_ref().map(|epic| epic.run_id.clone()),
         "active_epic_task_id": active_epic.and_then(|epic| epic.task_id),
     }))
@@ -183,14 +201,28 @@ pub fn explain_workspace_auto_readiness(
             "readiness limit must be between 1 and {MAX_READINESS_LIMIT}"
         )));
     }
-    let max_active_leaf_runs = max_active_leaf_runs
-        .map(u64::from)
-        .unwrap_or(DEFAULT_MAX_ACTIVE_LEAF_RUNS);
-    if max_active_leaf_runs == 0 {
+    if max_active_leaf_runs == Some(0) {
         return Err(OrbitError::InvalidInput(
             "concurrency must be at least 1".to_string(),
         ));
     }
+    // [ORB-11253] Without an explicit `--concurrency`, report what the live
+    // drain is admitting under — including an operator adjustment — rather than
+    // the static default, so readiness and the drain cannot disagree about the
+    // ceiling that decides `capacity_saturated`.
+    let active_drain = active_drain(runtime)?;
+    let (max_active_leaf_runs, limit_source) = match (max_active_leaf_runs, &active_drain) {
+        (Some(requested), _) => (u64::from(requested), "requested"),
+        (None, Some(drain)) => (
+            u64::from(drain.effective_max_active_leaf_runs()),
+            if drain.limit.is_some() {
+                "run_control"
+            } else {
+                "run_input"
+            },
+        ),
+        (None, None) => (DEFAULT_MAX_ACTIVE_LEAF_RUNS, "default"),
+    };
 
     // Validated here, before any snapshot work, so a typo reads the same way
     // it would on `orbit run auto --allow-crew`.
@@ -369,6 +401,9 @@ pub fn explain_workspace_auto_readiness(
             "max_active_leaf_runs": max_active_leaf_runs,
             "active_leaf_runs": live_leaves.len(),
             "free_slots": free_slots,
+            "limit_source": limit_source,
+            "drain_run_id": active_drain.as_ref().map(|drain| &drain.run_id),
+            "worker_limit": active_drain.as_ref().and_then(|drain| drain.limit.clone()),
         },
         "tasks": tasks,
     }))
@@ -385,6 +420,75 @@ impl OrbitRuntime {
     ) -> Result<Value, OrbitError> {
         explain_workspace_auto_readiness(self, task_ids, max_active_leaf_runs, limit, allowed_crews)
     }
+}
+
+/// The live worker ceiling an operator has set on *this* drain [ORB-11253].
+///
+/// The engine injects the executing run's id into every activity input, which
+/// is the only handle the admission path has on the coordinator whose control
+/// it must read. Absent or unreadable state degrades to the submitted ceiling:
+/// a drain that cannot read its own control must keep admitting at the value it
+/// was started with rather than stalling.
+fn live_worker_limit(runtime: &OrbitRuntime, input: &Value) -> Option<DrainWorkerLimit> {
+    let run_id = input
+        .get("run_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    read_drain_worker_limit(runtime, run_id)
+}
+
+/// The live drain run, with both the ceiling it was submitted with and the one
+/// an operator has since set.
+struct ActiveDrain {
+    run_id: String,
+    submitted: u32,
+    limit: Option<DrainWorkerLimit>,
+}
+
+impl ActiveDrain {
+    fn effective_max_active_leaf_runs(&self) -> u32 {
+        self.limit
+            .as_ref()
+            .map_or(self.submitted, |limit| limit.max_active_leaf_runs)
+    }
+}
+
+/// The workspace's live drain, if one is running. `workspace_auto_pipeline`
+/// declares `max_active_runs: 1`, so there is at most one to report.
+fn active_drain(runtime: &OrbitRuntime) -> Result<Option<ActiveDrain>, OrbitError> {
+    let Some(run) = runtime
+        .stores()
+        .jobs()
+        .list_pending_or_running_job_runs(DRAIN_JOB_NAME)?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    let submitted = run
+        .input
+        .as_ref()
+        .and_then(|input| input.get("max_active_leaf_runs"))
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(DEFAULT_MAX_ACTIVE_LEAF_RUNS as u32);
+    let limit = read_drain_worker_limit(runtime, &run.run_id);
+    Ok(Some(ActiveDrain {
+        run_id: run.run_id,
+        submitted,
+        limit,
+    }))
+}
+
+fn read_drain_worker_limit(runtime: &OrbitRuntime, run_id: &str) -> Option<DrainWorkerLimit> {
+    runtime
+        .stores()
+        .jobs()
+        .read_run_state(run_id)
+        .ok()
+        .flatten()
+        .and_then(|state| state.drain_worker_limit)
 }
 
 /// A numeric loop input, tolerating the string a template renders. A step's

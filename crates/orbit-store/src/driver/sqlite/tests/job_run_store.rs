@@ -194,3 +194,193 @@ fn recency_order_truncates_by_finish_time_not_creation_time() {
         "recency ordering must select the most-recently-finished run before LIMIT applies"
     );
 }
+
+/// [ORB-11253] The transactional run-control seam: the run's own state, the
+/// mutation, and the write are one operation, so a caller can refuse a run that
+/// has terminalized and can never half-apply a change it aborts.
+mod run_state_update {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
+
+    use chrono::Utc;
+    use orbit_common::OrbitError;
+    use orbit_types::workflow::{JobRunState, PipelineState, RunStateUpdate};
+
+    use crate::Store;
+    use crate::contracts::JobRunStoreBackend;
+    use crate::driver::sqlite::job_run_store::SqliteJobRunStore;
+
+    fn started_run_with_state(backend: &SqliteJobRunStore, job_id: &str) -> String {
+        let run = backend
+            .insert_job_run(job_id, 1, Utc::now(), None, None)
+            .expect("insert run");
+        backend
+            .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
+            .expect("start run");
+        let state = PipelineState::new(
+            run.run_id.clone(),
+            job_id.to_string(),
+            serde_json::json!({ "max_active_leaf_runs": 5 }),
+        );
+        backend
+            .write_run_state(&run.run_id, &state)
+            .expect("write state");
+        run.run_id
+    }
+
+    #[test]
+    fn a_live_run_applies_the_update() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let run_id = started_run_with_state(&backend, "workspace_auto_pipeline");
+
+        let outcome = backend
+            .update_run_state(&run_id, &mut |run_state, state| {
+                assert_eq!(run_state, JobRunState::Running);
+                state.set_drain_worker_limit(7, 5, "operator".to_string(), None, Some(0));
+                Ok(())
+            })
+            .expect("update live state");
+
+        assert_eq!(outcome, RunStateUpdate::Updated);
+        let stored = backend
+            .read_run_state(&run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert_eq!(stored.effective_max_active_leaf_runs(5), 7);
+        assert_eq!(stored.drain_worker_limit_revision(), 1);
+    }
+
+    /// The closure sees the run's real state inside the transaction, which is
+    /// the only place a "do not mutate a finished run" rule can be enforced
+    /// without racing the worker that finishes it.
+    #[test]
+    fn a_terminal_run_is_refused_without_writing() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let run_id = started_run_with_state(&backend, "workspace_auto_pipeline");
+        backend
+            .finalize_job_run(&run_id, JobRunState::Success, Utc::now(), Some(1))
+            .expect("finalize");
+
+        let error = backend
+            .update_run_state(&run_id, &mut |run_state, state| {
+                if run_state.is_terminal() {
+                    return Err(OrbitError::JobValidation(format!("run is {run_state}")));
+                }
+                state.set_drain_worker_limit(7, 5, "operator".to_string(), None, None);
+                Ok(())
+            })
+            .expect_err("a terminal run is refused by the caller's own rule");
+
+        assert!(matches!(error, OrbitError::JobValidation(_)), "{error:?}");
+        let stored = backend
+            .read_run_state(&run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert!(stored.drain_worker_limit.is_none());
+    }
+
+    #[test]
+    fn a_missing_run_and_a_stateless_run_are_distinguishable() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let pending = backend
+            .insert_job_run("workspace_auto_pipeline", 1, Utc::now(), None, None)
+            .expect("insert run");
+
+        assert_eq!(
+            backend
+                .update_run_state("jrun-missing", &mut |_, _| Ok(()))
+                .expect("missing run"),
+            RunStateUpdate::NotFound
+        );
+        assert_eq!(
+            backend
+                .update_run_state(&pending.run_id, &mut |_, _| Ok(()))
+                .expect("stateless run"),
+            RunStateUpdate::NoState
+        );
+    }
+
+    #[test]
+    fn an_update_that_errors_rolls_back() {
+        let backend = SqliteJobRunStore::new(Store::open_in_memory().expect("store"), "ws_a");
+        let run_id = started_run_with_state(&backend, "workspace_auto_pipeline");
+
+        let error = backend
+            .update_run_state(&run_id, &mut |_, state| {
+                state.set_drain_worker_limit(7, 5, "operator".to_string(), None, None);
+                Err(OrbitError::JobRunControlConflict("superseded".to_string()))
+            })
+            .expect_err("closure error propagates");
+
+        assert!(matches!(error, OrbitError::JobRunControlConflict(_)));
+        let stored = backend
+            .read_run_state(&run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert!(stored.drain_worker_limit.is_none());
+    }
+
+    /// Two operators reading the same revision must not both succeed: the
+    /// compare-and-set is evaluated inside the write transaction, so the loser
+    /// is refused rather than silently overwriting the winner.
+    #[test]
+    fn concurrent_compare_and_set_updates_admit_exactly_one_winner() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let db_path = temp.path().join("orbit.db");
+        let seed = SqliteJobRunStore::new(Store::open(&db_path).expect("seed store"), "ws_a");
+        let run_id = started_run_with_state(&seed, "workspace_auto_pipeline");
+        drop(seed);
+
+        let barrier = Arc::new(Barrier::new(2));
+        let writers = [7_u32, 2_u32]
+            .into_iter()
+            .map(|requested| {
+                let db_path = db_path.clone();
+                let run_id = run_id.clone();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let backend =
+                        SqliteJobRunStore::new(Store::open(&db_path).expect("store"), "ws_a");
+                    barrier.wait();
+                    backend.update_run_state(&run_id, &mut |_, state| {
+                        thread::sleep(Duration::from_millis(20));
+                        if !state.set_drain_worker_limit(
+                            requested,
+                            5,
+                            format!("operator-{requested}"),
+                            None,
+                            Some(0),
+                        ) {
+                            return Err(OrbitError::JobRunControlConflict(format!(
+                                "revision moved under {requested}"
+                            )));
+                        }
+                        Ok(())
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let outcomes = writers
+            .into_iter()
+            .map(|writer| writer.join().expect("writer thread"))
+            .collect::<Vec<_>>();
+
+        let winners = outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Ok(RunStateUpdate::Updated)))
+            .count();
+        assert_eq!(winners, 1, "exactly one writer may win: {outcomes:?}");
+        assert!(
+            outcomes
+                .iter()
+                .any(|outcome| matches!(outcome, Err(OrbitError::JobRunControlConflict(_)))),
+            "the loser is refused as a conflict: {outcomes:?}"
+        );
+        let stored = SqliteJobRunStore::new(Store::open(&db_path).expect("store"), "ws_a")
+            .read_run_state(&run_id)
+            .expect("read state")
+            .expect("state exists");
+        assert_eq!(stored.drain_worker_limit_revision(), 1);
+    }
+}

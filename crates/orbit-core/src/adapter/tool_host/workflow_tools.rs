@@ -7,7 +7,7 @@ use orbit_types::identity::normalize_optional_attribution_label;
 use orbit_types::workflow::{JobRun, JobRunState};
 use serde_json::{Value, json};
 
-use crate::application::job::JobRunListParams;
+use crate::application::job::{DrainWorkerLimitRequest, JobRunListParams};
 use crate::{OrbitRuntime, ShipMode};
 
 use super::input::parse_string_array_field;
@@ -114,6 +114,57 @@ pub(super) fn resume(
     }))
 }
 
+/// [ORB-11253] Move a live drain's worker ceiling without replacing its run.
+pub(super) fn workers(
+    runtime: &OrbitRuntime,
+    input: Value,
+    agent: Option<String>,
+    model: Option<String>,
+) -> Result<Value, OrbitError> {
+    let id = orbit_common::protocol::tool_input::required_string(&input, &["id"], "id")?;
+    let concurrency = required_u32(&input, "concurrency")?;
+    let expected_revision = optional_u32(&input, "if_revision")?;
+    let reason = optional_string(&input, "reason")?;
+    let claim_token = optional_string(&input, "claim_token")?;
+    let actor = actor(runtime, agent.as_deref(), model.as_deref());
+    let change = runtime.set_drain_worker_limit(DrainWorkerLimitRequest {
+        run_id: &id,
+        max_active_leaf_runs: concurrency,
+        expected_revision,
+        reason: reason.as_deref(),
+        actor: &actor,
+        source: "tool",
+        claim_token: claim_token.as_deref(),
+    })?;
+    Ok(json!({
+        "run_id": change.run_id,
+        "job_id": change.job_id,
+        "outcome": change.outcome,
+        "previous_concurrency": change.previous_max_active_leaf_runs,
+        "concurrency": change.max_active_leaf_runs,
+        "revision": change.revision,
+        "hard_limit": change.hard_limit,
+    }))
+}
+
+fn required_u32(input: &Value, field: &str) -> Result<u32, OrbitError> {
+    optional_u32(input, field)?
+        .ok_or_else(|| OrbitError::InvalidInput(format!("`{field}` is required")))
+}
+
+fn optional_u32(input: &Value, field: &str) -> Result<Option<u32>, OrbitError> {
+    match input.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .map(Some)
+            .ok_or_else(|| {
+                OrbitError::InvalidInput(format!("`{field}` must be a non-negative integer"))
+            }),
+    }
+}
+
 fn optional_string(input: &Value, field: &str) -> Result<Option<String>, OrbitError> {
     orbit_common::protocol::tool_input::optional_string(input, field)
 }
@@ -155,13 +206,21 @@ fn run_json(run: &JobRun) -> Result<Value, OrbitError> {
 /// An unreadable state degrades to an empty list rather than failing the read.
 fn run_json_with_lineage(runtime: &OrbitRuntime, run: &JobRun) -> Result<Value, OrbitError> {
     let mut value = run_json(run)?;
-    let dispatches = runtime
-        .read_run_state(&run.run_id)
-        .ok()
-        .flatten()
-        .map(|state| state.child_dispatches)
+    let state = runtime.read_run_state(&run.run_id).ok().flatten();
+    let dispatches = state
+        .as_ref()
+        .map(|state| state.child_dispatches.clone())
         .unwrap_or_default();
     value["child_dispatches"] =
         serde_json::to_value(&dispatches).map_err(serialize_error("serialize child dispatches"))?;
+    // [ORB-11253] The effective ceiling and who moved it, from the same read:
+    // an operator asking why a drain is admitting five tasks rather than seven
+    // is asking about this field, not about the submitted input.
+    value["drain_worker_limit"] = serde_json::to_value(
+        state
+            .as_ref()
+            .and_then(|state| state.drain_worker_limit.as_ref()),
+    )
+    .map_err(serialize_error("serialize drain worker limit"))?;
     Ok(value)
 }

@@ -323,6 +323,7 @@ fn policy_for_action(action: OrbitBuiltinAction) -> ActionPolicy {
         | OrbitBuiltinAction::WorkflowRunList
         | OrbitBuiltinAction::WorkflowRunResume
         | OrbitBuiltinAction::WorkflowRunShow
+        | OrbitBuiltinAction::WorkflowRunWorkers
         | OrbitBuiltinAction::WorkflowShip
         | OrbitBuiltinAction::WorkspaceClaimAcquire
         | OrbitBuiltinAction::WorkspaceClaimRelease

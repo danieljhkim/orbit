@@ -206,6 +206,9 @@ pub(super) async fn auto_drain_workflow_action(
         Some(for_seconds),
         body.concurrency,
         completion,
+        // [ORB-11242] The dashboard launch form does not offer a crew
+        // restriction, so it submits the unrestricted window it always has.
+        &[],
         Some("dashboard"),
         body.claim_token.as_deref(),
     ) {
@@ -238,7 +241,8 @@ pub(super) async fn auto_drain_readiness(
     Ws(runtime): Ws,
     Query(query): Query<AutoDrainReadinessQuery>,
 ) -> Response {
-    match runtime.workspace_auto_readiness(&[], query.concurrency, AUTO_DRAIN_READINESS_LIMIT) {
+    match runtime.workspace_auto_readiness(&[], query.concurrency, AUTO_DRAIN_READINESS_LIMIT, &[])
+    {
         Ok(mut payload) => {
             // So the form can hide/disable the `complete` opt-in before the
             // operator ever hits the separately-governed 403 at submission.

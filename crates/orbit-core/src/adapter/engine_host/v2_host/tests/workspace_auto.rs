@@ -1244,3 +1244,186 @@ fn crew_allowlist_rejects_a_crew_this_workspace_does_not_configure() {
         .expect_err("an unconfigured crew must fail");
     assert!(error.to_string().contains("nope"), "{error}");
 }
+
+// [ORB-11253] A live worker ceiling, observed by the admission path.
+
+/// A running drain with checkpoint state, as the engine leaves one behind.
+fn seed_running_drain(runtime: &OrbitRuntime, submitted: u32) -> String {
+    let run = runtime
+        .stores()
+        .jobs()
+        .insert_job_run(
+            "workspace_auto_pipeline",
+            1,
+            Utc::now(),
+            Some(json!({ "max_active_leaf_runs": submitted })),
+            None,
+        )
+        .expect("insert drain run");
+    runtime
+        .stores()
+        .jobs()
+        .mark_job_run_running(&run.run_id, Utc::now(), std::process::id())
+        .expect("start drain run");
+    let state = orbit_types::workflow::PipelineState::new(
+        run.run_id.clone(),
+        "workspace_auto_pipeline".to_string(),
+        json!({ "max_active_leaf_runs": submitted }),
+    );
+    runtime
+        .stores()
+        .jobs()
+        .write_run_state(&run.run_id, &state)
+        .expect("write drain state");
+    run.run_id
+}
+
+fn set_worker_limit(runtime: &OrbitRuntime, run_id: &str, concurrency: u32) {
+    runtime
+        .set_drain_worker_limit(crate::application::job::DrainWorkerLimitRequest {
+            run_id,
+            max_active_leaf_runs: concurrency,
+            expected_revision: None,
+            reason: None,
+            actor: "tester",
+            source: "unit",
+            claim_token: None,
+        })
+        .expect("set worker limit");
+}
+
+fn seed_backlog_leaves(runtime: &OrbitRuntime, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|index| {
+            seed_list_backlog_task(
+                runtime,
+                &format!("leaf {index}"),
+                TaskStatus::Backlog,
+                TaskPriority::Medium,
+                TaskType::Chore,
+                None,
+                vec![&format!("crates/leaf_{index}/src/lib.rs")],
+            )
+            .id
+        })
+        .collect()
+}
+
+#[test]
+fn a_raised_ceiling_is_observed_by_the_next_admission_pass() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    for index in 0..7 {
+        write_workspace_file(&repo_root, &format!("crates/leaf_{index}/src/lib.rs"));
+    }
+    seed_backlog_leaves(&runtime, 7);
+    let drain_run_id = seed_running_drain(&runtime, 5);
+    let input = json!({ "run_id": drain_run_id, "max_active_leaf_runs": 5 });
+
+    let before = classify_with(&runtime, input.clone());
+    assert_eq!(before["max_active_leaf_runs"], 5);
+    assert_eq!(before["worker_limit_source"], "run_input");
+    assert_eq!(before["free_slots"], 5);
+    assert_eq!(
+        before["loose_task_ids"].as_array().expect("admitted").len(),
+        5
+    );
+
+    set_worker_limit(&runtime, &drain_run_id, 7);
+
+    let after = classify_with(&runtime, input);
+    assert_eq!(after["max_active_leaf_runs"], 7);
+    assert_eq!(after["submitted_max_active_leaf_runs"], 5);
+    assert_eq!(after["worker_limit_source"], "run_control");
+    assert_eq!(after["worker_limit"]["previous_max_active_leaf_runs"], 5);
+    assert_eq!(after["worker_limit"]["revision"], 1);
+    assert_eq!(after["free_slots"], 7);
+    assert_eq!(
+        after["loose_task_ids"].as_array().expect("admitted").len(),
+        7
+    );
+}
+
+#[test]
+fn a_lowered_ceiling_stops_admissions_without_touching_live_children() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    for index in 0..3 {
+        write_workspace_file(&repo_root, &format!("crates/leaf_{index}/src/lib.rs"));
+    }
+    let backlog = seed_backlog_leaves(&runtime, 3);
+    let drain_run_id = seed_running_drain(&runtime, 5);
+    // Four children are already in flight when the ceiling drops to two.
+    let live: Vec<String> = (0..4)
+        .map(|index| seed_live_leaf_run(&runtime, &[&format!("CARRIED-{index}")]))
+        .collect();
+
+    set_worker_limit(&runtime, &drain_run_id, 2);
+    let output = classify_with(
+        &runtime,
+        json!({ "run_id": drain_run_id, "max_active_leaf_runs": 5 }),
+    );
+
+    assert_eq!(output["max_active_leaf_runs"], 2);
+    assert_eq!(output["active_leaf_runs"], 4);
+    assert_eq!(output["free_slots"], 0);
+    assert!(
+        output["loose_task_ids"]
+            .as_array()
+            .expect("admitted")
+            .is_empty(),
+        "an over-capacity drain admits nothing: {output}"
+    );
+    assert_eq!(output["pending_backlog"], backlog.len());
+    // Nothing was cancelled: every child is still a live leaf run.
+    for run_id in &live {
+        let child = runtime.show_job_run(run_id).expect("show child run");
+        assert!(
+            !child.state.is_terminal(),
+            "child {run_id} was terminalized"
+        );
+    }
+}
+
+#[test]
+fn a_drain_that_cannot_be_identified_keeps_its_submitted_ceiling() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/leaf_0/src/lib.rs");
+    seed_backlog_leaves(&runtime, 1);
+
+    // No `run_id` (a direct dispatch) and an unknown one both degrade to the
+    // submitted ceiling rather than failing the iteration.
+    for input in [
+        json!({ "max_active_leaf_runs": 3 }),
+        json!({ "run_id": "jrun-missing", "max_active_leaf_runs": 3 }),
+    ] {
+        let output = classify_with(&runtime, input);
+        assert_eq!(output["max_active_leaf_runs"], 3);
+        assert_eq!(output["worker_limit_source"], "run_input");
+        assert_eq!(output["worker_limit"], Value::Null);
+    }
+}
+
+#[test]
+fn readiness_reports_the_live_ceiling_and_who_moved_it() {
+    let (_root, runtime, repo_root) = runtime_with_workspace_layout();
+    write_workspace_file(&repo_root, "crates/leaf_0/src/lib.rs");
+    let backlog = seed_backlog_leaves(&runtime, 1);
+    let drain_run_id = seed_running_drain(&runtime, 5);
+
+    let submitted = readiness(&runtime, &backlog, None);
+    assert_eq!(submitted["capacity"]["max_active_leaf_runs"], 5);
+    assert_eq!(submitted["capacity"]["limit_source"], "run_input");
+    assert_eq!(submitted["capacity"]["drain_run_id"], drain_run_id);
+
+    set_worker_limit(&runtime, &drain_run_id, 7);
+
+    let adjusted = readiness(&runtime, &backlog, None);
+    assert_eq!(adjusted["capacity"]["max_active_leaf_runs"], 7);
+    assert_eq!(adjusted["capacity"]["limit_source"], "run_control");
+    assert_eq!(adjusted["capacity"]["worker_limit"]["actor"], "tester");
+    assert_eq!(adjusted["capacity"]["worker_limit"]["revision"], 1);
+
+    // An explicit `--concurrency` still previews what the operator typed.
+    let previewed = readiness(&runtime, &backlog, Some(2));
+    assert_eq!(previewed["capacity"]["max_active_leaf_runs"], 2);
+    assert_eq!(previewed["capacity"]["limit_source"], "requested");
+}

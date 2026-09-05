@@ -169,6 +169,28 @@ which is why `orbit run auto` with no `--for` behaves exactly as it did before t
   not here. A failed **leaf** ship still fails the drain: `pipeline_success_guard` follows the wait,
   as it did in v1, and the resulting `blocked` task is the triage pipeline's input.
 
+**The worker ceiling is a live control, not a submission-time constant** ([ORB-11253]). The
+`max_active_leaf_runs` a drain is submitted with lands in the run's immutable `initial_input`, so
+changing an operator's mind used to mean cancelling the coordinator and submitting a replacement —
+a new run id, a restarted window, a re-stated completion authorization, and children left behind by
+the run that started them. `orbit run concurrency <run-id> --set N` (tool:
+`orbit.workflow.run.workers`) instead writes a `drain_worker_limit` onto the run's own
+`PipelineState`, and `classify_workspace_auto_tasks` prefers it over the submitted value on the
+next admission pass.
+
+- It changes exactly one thing. The run id, deadline, completion policy, crew allowlist, and every
+  already-dispatched child are untouched, because the ceiling only ever decided how many *new*
+  admissions a pass may make. Lowering it below the number of live children yields zero free slots
+  and therefore zero admissions until enough of them finish; nothing is signalled or cancelled.
+- Validation is the leaf job's own `max_active_runs`, read from the catalog rather than restated
+  here: a larger ceiling would be accepted and then silently queue.
+- Two writers are handled where they collide. The operator write is one immediate transaction that
+  re-reads the run's state, so a run terminalizing concurrently refuses the change instead of
+  accepting a control nothing will read, and `--if-revision` turns a read-then-write into a
+  compare-and-set. The engine's own state writes — step checkpoints and child-dispatch records —
+  go through the same transactional path, so a checkpoint cannot discard a control written between
+  its read and its write.
+
 **Conflict admission replaces `hold`.** An `epic`-tagged root holds one reservation covering the
 union of its descendants' `context_files`. That union is live since [ORB-10816]:
 `lock_context_files_for_task` walks `parent_id` to collect every descendant's declared files when
@@ -336,5 +358,6 @@ child. The banner table at the top says which rows below are already true of the
 - **[ORB-10817]** — §2 epic agent.
 - **[ORB-10818]** — §3 completion gate and delivery.
 - **[ORB-10819]** — §4 drain window and detached dispatch.
+- **[ORB-11253]** — §4 live worker ceiling for a running drain.
 
 > Resolve any task above with `orbit task show <ID>` or `git log --grep=<ID>`.

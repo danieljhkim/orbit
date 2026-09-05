@@ -62,6 +62,26 @@ pub(crate) fn format_waiting_line(
 /// the whole point of the dispatch checkpoint is that an operator staring at a
 /// stalled — or cancelled — parent can name its child immediately, so the
 /// lineage is printed for terminal runs too.
+/// [ORB-11253] The worker ceiling in force on a drain, and who last moved it.
+///
+/// Printed only when an operator has retuned the run: an untouched drain is
+/// admitting under the `max_active_leaf_runs` its input already shows, so a
+/// line restating it would be noise.
+pub(crate) fn format_worker_limit_line(state: Option<&PipelineState>) -> Option<String> {
+    let limit = state?.drain_worker_limit.as_ref()?;
+    let mut line = format!(
+        "Workers: {} (was {}, revision {}, set by {})",
+        limit.max_active_leaf_runs,
+        limit.previous_max_active_leaf_runs,
+        limit.revision,
+        limit.actor,
+    );
+    if let Some(reason) = &limit.reason {
+        line.push_str(&format!(" reason={reason}"));
+    }
+    Some(line)
+}
+
 pub(crate) fn format_child_dispatch_lines(state: Option<&PipelineState>) -> Vec<String> {
     let Some(state) = state else {
         return Vec::new();

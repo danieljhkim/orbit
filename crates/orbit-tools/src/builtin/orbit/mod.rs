@@ -115,6 +115,10 @@ pub fn register(registry: &mut ToolRegistry) {
         workflow::OrbitWorkflowRunResumeTool,
         McpToolScope::WorkspaceRequired,
     );
+    registry.register_mcp(
+        workflow::OrbitWorkflowRunWorkersTool,
+        McpToolScope::WorkspaceRequired,
+    );
     registry.register_inactive(semantic::install::OrbitSemanticInstallTool);
     // Destructive semantic-index administration remains on the CLI surface.
     registry.register_inactive(semantic::uninstall::OrbitSemanticUninstallTool);

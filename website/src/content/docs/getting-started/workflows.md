@@ -59,6 +59,33 @@ is scoped to that one run:
   flight keeps running; nothing is cancelled. Permitted tasks keep filling the
   free slots at the usual rate.
 
+## Changing a running drain's worker count
+
+`orbit run auto --concurrency N` sets how many tasks a drain keeps in flight. To
+change that number on a drain that is already running, retune it rather than
+cancelling it:
+
+```bash
+orbit run show "$RUN_ID"                       # current ceiling and who last set it
+orbit run concurrency "$RUN_ID" --set 7
+orbit run concurrency "$RUN_ID" --set 3 --reason 'provider rate limited'
+```
+
+Cancelling and resubmitting looks equivalent and is not: it mints a new run ID,
+restarts the window, and makes you re-state `--complete` and `--allow-crew`.
+Retuning keeps all of them, and keeps the children the drain already started.
+
+- **Raising** it fills the extra slots from the same backlog on the next
+  admission pass, usually within a poll interval.
+- **Lowering** it stops new admissions until enough children finish. Tasks
+  already in flight are never cancelled or shortened.
+- The ceiling is bounded by the leaf pipeline's own active-run limit, and a run
+  that is not a drain, has not started, or has already finished is refused with
+  the reason.
+- `--if-revision N` applies the change only while the ceiling is still the one
+  you read, so two operators cannot silently overwrite each other.
+  `orbit run readiness` and `orbit run show` both report the value in force.
+
 ## Completing work with `--complete`
 
 By default a successful task ends in `review`, and a separate operator action

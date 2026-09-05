@@ -51,6 +51,7 @@ fn canonical_builtin_definitions_preserve_the_exact_workspace_surface() {
             "orbit.workflow.run.list",
             "orbit.workflow.run.resume",
             "orbit.workflow.run.show",
+            "orbit.workflow.run.workers",
             "orbit.workflow.ship",
         ]
     );

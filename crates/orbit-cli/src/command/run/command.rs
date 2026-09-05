@@ -5,6 +5,7 @@ use crate::command::{CommandOut, Execute};
 
 use super::auto;
 use super::cancel::RunCancelArgs;
+use super::concurrency::RunConcurrencyArgs;
 use super::events::RunEventsArgs;
 use super::history::RunHistoryArgs;
 use super::job::JobRunArgs;
@@ -34,6 +35,7 @@ Run history:
 
 Maintenance:
   orbit run cancel <run_id>
+  orbit run concurrency <run_id> --set 7
 ";
 
 #[derive(Args)]
@@ -64,7 +66,8 @@ Audits:
   trace      Show audit event parent/child trace for a job run
 
 Maintenance:
-  cancel     Cancel a pending or running job run
+  cancel       Cancel a pending or running job run
+  concurrency  Change how many tasks a running drain keeps in flight
 
 Options:
 {options}
@@ -109,6 +112,8 @@ pub enum RunSubcommand {
     Trace(RunTraceArgs),
     /// Cancel a pending or running job run
     Cancel(RunCancelArgs),
+    /// Change how many tasks a running drain keeps in flight
+    Concurrency(RunConcurrencyArgs),
     /// Run an arbitrary job by ID
     Job(JobRunArgs),
 }
@@ -130,6 +135,7 @@ impl Execute for RunSubcommand {
             RunSubcommand::Events(command) => command.execute(runtime),
             RunSubcommand::Trace(command) => command.execute(runtime),
             RunSubcommand::Cancel(command) => command.execute(runtime),
+            RunSubcommand::Concurrency(command) => command.execute(runtime),
             RunSubcommand::Job(command) => command.execute(runtime),
         }
     }

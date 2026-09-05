@@ -553,22 +553,23 @@ impl RuntimeHost for OrbitRuntime {
         output: &Value,
         pipeline_snapshot: &Value,
     ) -> Result<(), DispatchError> {
-        let Some(mut state) = self.read_run_state(run_id).map_err(|error| {
-            DispatchError::JobExecution(format!("read run state for checkpoint: {error}"))
-        })?
-        else {
-            return Ok(());
-        };
-        state.record_step(
-            step_index,
-            orbit_types::workflow::JobRunState::Success,
-            Some(output.clone()),
-            None,
-        );
-        state.sync_pipeline(pipeline_snapshot.clone());
+        // [ORB-11253] Read-modify-write in one transaction rather than a
+        // separate read and write: an operator run control written into this
+        // same state document between the two would otherwise be silently
+        // discarded by the checkpoint that follows it.
         self.stores()
             .jobs()
-            .write_run_state(run_id, &state)
+            .update_run_state(run_id, &mut |_, state| {
+                state.record_step(
+                    step_index,
+                    orbit_types::workflow::JobRunState::Success,
+                    Some(output.clone()),
+                    None,
+                );
+                state.sync_pipeline(pipeline_snapshot.clone());
+                Ok(())
+            })
+            .map(|_| ())
             .map_err(|error| {
                 DispatchError::JobExecution(format!(
                     "persist step checkpoint (run {run_id}, step {step_index} `{step_id}`): {error}"

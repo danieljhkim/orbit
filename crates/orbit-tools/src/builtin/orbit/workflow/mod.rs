@@ -8,6 +8,7 @@ pub struct OrbitWorkflowShipTool;
 pub struct OrbitWorkflowRunShowTool;
 pub struct OrbitWorkflowRunListTool;
 pub struct OrbitWorkflowRunResumeTool;
+pub struct OrbitWorkflowRunWorkersTool;
 
 fn run_id_param() -> ToolParam {
     ToolParam {
@@ -29,11 +30,13 @@ fn execute(
         .is_some_and(|host| host.task_scope().run_id.is_some())
         && matches!(
             action,
-            OrbitBuiltinAction::WorkflowShip | OrbitBuiltinAction::WorkflowRunResume
+            OrbitBuiltinAction::WorkflowShip
+                | OrbitBuiltinAction::WorkflowRunResume
+                | OrbitBuiltinAction::WorkflowRunWorkers
         )
     {
         return Err(OrbitError::CapabilityDenied(
-            "managed runs cannot dispatch or resume workflow runs; finish the current leaf mandate and let its operator submit follow-up work"
+            "managed runs cannot dispatch, resume, or retune workflow runs; finish the current leaf mandate and let its operator submit follow-up work"
                 .to_string(),
         ));
     }
@@ -167,6 +170,59 @@ impl Tool for OrbitWorkflowRunResumeTool {
 
     fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
         execute(ctx, input, OrbitBuiltinAction::WorkflowRunResume)
+    }
+}
+
+impl Tool for OrbitWorkflowRunWorkersTool {
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: "orbit.workflow.run.workers".to_string(),
+            description: "Adjust how many tasks a running workspace drain keeps in flight, \
+                 without replacing its run. The run ID, deadline, completion authorization, \
+                 and already-dispatched children are preserved; a lower ceiling stops new \
+                 admissions until enough children finish and cancels nothing."
+                .to_string(),
+            parameters: vec![
+                run_id_param(),
+                ToolParam {
+                    name: "concurrency".to_string(),
+                    description:
+                        "New ceiling on tasks in flight, from 1 to the ship job's own active-run \
+                         limit."
+                            .to_string(),
+                    param_type: "integer".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "reason".to_string(),
+                    description: "Optional note recorded with the change.".to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "if_revision".to_string(),
+                    description: "Apply only if the run's ceiling is still at this revision, so a \
+                         concurrent adjustment is reported rather than overwritten."
+                        .to_string(),
+                    param_type: "integer".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "claim_token".to_string(),
+                    description:
+                        "Token for this workspace's exclusive claim, required when another \
+                     operator holds one. Falls back to `ORBIT_WORKSPACE_CLAIM_TOKEN`."
+                            .to_string(),
+                    param_type: "string".to_string(),
+                    required: false,
+                },
+            ],
+            builtin: true,
+        }
+    }
+
+    fn execute(&self, ctx: &ToolContext, input: Value) -> Result<Value, OrbitError> {
+        execute(ctx, input, OrbitBuiltinAction::WorkflowRunWorkers)
     }
 }
 

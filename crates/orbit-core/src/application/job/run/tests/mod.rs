@@ -8,6 +8,7 @@ mod conflict;
 mod owner;
 mod projection;
 mod reconcile;
+mod worker_limit;
 
 use chrono::{DateTime, Utc};
 use orbit_store::V2AuditEventInsertParams;

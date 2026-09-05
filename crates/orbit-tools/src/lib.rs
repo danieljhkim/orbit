@@ -125,6 +125,7 @@ pub enum OrbitBuiltinAction {
     WorkflowRunList,
     WorkflowRunResume,
     WorkflowRunShow,
+    WorkflowRunWorkers,
     WorkflowShip,
     WorkspaceClaimAcquire,
     WorkspaceClaimRelease,
