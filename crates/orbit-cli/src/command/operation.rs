@@ -250,15 +250,16 @@ impl Commands {
             }
             Commands::Host(command) => {
                 use super::host::HostSubcommand;
-                let subcommand = match &command.command {
-                    HostSubcommand::Rename(_) => "rename",
+                let (subcommand, runtime_need, json_output) = match &command.command {
+                    HostSubcommand::Show(args) => ("show", RuntimeNeed::Forbidden, args.json),
+                    HostSubcommand::Rename(_) => ("rename", RuntimeNeed::Required, false),
                 };
                 CommandOperation::new(
-                    RuntimeNeed::Required,
+                    runtime_need,
                     Some(admin_meta("host", Some(subcommand), Some("host"), None)),
-                    None,
+                    json_output.then_some(true),
                     false,
-                    runtime_dispatch!(Host),
+                    dispatch_host,
                 )
             }
             Commands::Config(command) => {
@@ -905,6 +906,17 @@ fn dispatch_init(command: Commands, context: DispatchContext<'_>) -> CommandOut 
     match command {
         Commands::Init(command) => command.execute_without_runtime(context.root_override),
         _ => dispatch_mismatch("Init"),
+    }
+}
+
+fn dispatch_host(command: Commands, context: DispatchContext<'_>) -> CommandOut {
+    use super::host::{HostCommand, HostSubcommand};
+    match command {
+        Commands::Host(HostCommand {
+            command: HostSubcommand::Show(args),
+        }) => args.execute_without_runtime(context.root_override),
+        Commands::Host(command) => command.execute(context.runtime()?),
+        _ => dispatch_mismatch("Host"),
     }
 }
 
