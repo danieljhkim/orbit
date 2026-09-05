@@ -91,7 +91,7 @@
   {
     "active": true,
     "builtin": true,
-    "description": "Read a bounded excerpt of one GitHub Actions run's logs — failed steps by default, or the full log — plus the commit the runner actually checked out, parsed from the log's own checkout evidence. Output is capped so a large log cannot exhaust the caller's context; `truncated` reports when it was.",
+    "description": "Read a bounded excerpt of one GitHub Actions run's logs — failed steps by default, or the full log — plus runner checkout evidence. The source stream is drained incrementally; checkout extraction stops after 8 MiB and reports incomplete evidence rather than retaining an unbounded log.",
     "enabled": true,
     "name": "github.run.logs",
     "parameters": [
