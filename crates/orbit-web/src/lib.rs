@@ -28,6 +28,7 @@ pub use connect::{ConnectArgs, connect};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::http::{HeaderValue, header};
@@ -216,6 +217,17 @@ fn resolve_root_override(root: &Path, cwd: Option<&Path>) -> PathBuf {
     absolute.canonicalize().unwrap_or(absolute)
 }
 
+/// Upper bound on graceful connection drain once a shutdown signal (ctrl-c or
+/// SIGTERM) is received — well under `orbit-web.service`'s
+/// `TimeoutStopUSec=90s` (see the 2026-09-05 restart incident, ORB-11246:
+/// `stop-sigterm` timed out and systemd fell back to SIGKILL). [`shutdown_signal`]
+/// also tells long-lived streaming handlers (`api::request_shutdown`, e.g.
+/// `/api/log/stream`) to close cooperatively as soon as shutdown begins, so in
+/// practice the drain below finishes almost immediately; this timeout is a
+/// deterministic backstop for a connection that doesn't cooperate, so the
+/// process still exits on its own instead of relying on systemd's SIGKILL.
+const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(10);
+
 /// Build the axum app and block on the tokio runtime until graceful shutdown.
 fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), OrbitError> {
     check_bindable_host(args.host, args.port)?;
@@ -265,10 +277,24 @@ fn run_server(args: &ServeArgs, state: state::DashboardState) -> Result<(), Orbi
             open_browser(&url);
         }
 
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .map_err(|e| OrbitError::Execution(format!("serve: {e}")))?;
+        let shutdown = async {
+            shutdown_signal().await;
+            // Ask cooperating long-lived connections (the `/api/log/stream`
+            // SSE handler) to close now, before the bounded drain deadline
+            // below is reached.
+            api::request_shutdown();
+        };
+        let drain = axum::serve(listener, app).with_graceful_shutdown(shutdown);
+        match tokio::time::timeout(SHUTDOWN_GRACE_PERIOD, drain).await {
+            Ok(result) => result.map_err(|e| OrbitError::Execution(format!("serve: {e}")))?,
+            Err(_) => {
+                tracing::warn!(
+                    grace_period_secs = SHUTDOWN_GRACE_PERIOD.as_secs(),
+                    "dashboard shutdown grace period elapsed with connections \
+                     still open; exiting without waiting further"
+                );
+            }
+        }
 
         Ok::<(), OrbitError>(())
     })
