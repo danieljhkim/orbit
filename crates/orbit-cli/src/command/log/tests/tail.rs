@@ -1,4 +1,4 @@
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -11,7 +11,8 @@ use tempfile::tempdir;
 
 use crate::command::log::format::{LevelFilter, format_message};
 use crate::command::log::tail::{
-    FollowTestControl, TailArgs, build_filters, run_tail, run_tail_with_test_control,
+    FollowTestControl, MatchingLineWindow, TailArgs, build_filters, run_tail,
+    run_tail_with_test_control,
 };
 
 fn fixture_lines() -> Vec<String> {
@@ -199,6 +200,78 @@ fn n_flag_limits_history() {
     let lines: Vec<&str> = output.lines().collect();
     assert!(lines[0].contains("FRC"));
     assert!(lines[1].contains("[stdout] hello world"));
+}
+
+#[test]
+fn n_zero_prints_no_initial_history_rows() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("orbit.jsonl");
+    write_fixture(&path, &fixture_lines());
+
+    let mut args = make_args(path.clone());
+    args.lines = 0;
+    assert!(capture(&path, args).is_empty());
+}
+
+#[test]
+fn initial_tail_streams_large_interleaved_log_to_last_matching_rows_in_order() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("orbit.jsonl");
+    let mut file = File::create(&path).expect("create fixture");
+    let mut expected = Vec::new();
+
+    for index in 0..4_096 {
+        match index % 5 {
+            0 => {
+                let line = json!({
+                    "timestamp": "2026-04-27T01:00:01.000000000Z",
+                    "level": "WARN",
+                    "target": "orbit.policy.deny",
+                    "fields": {"message": format!("matching-{index}")}
+                })
+                .to_string();
+                if index >= 4_065 {
+                    expected.push(line.clone());
+                }
+                writeln!(file, "{line}").expect("write matching row");
+            }
+            3 => writeln!(file, "{{malformed-{index}").expect("write malformed row"),
+            _ => writeln!(
+                file,
+                "{}",
+                json!({
+                    "timestamp": "2026-04-27T01:00:01.000000000Z",
+                    "level": "INFO",
+                    "target": "orbit.unrelated.event",
+                    "fields": {"message": format!("nonmatching-{index}")}
+                })
+            )
+            .expect("write nonmatching row"),
+        }
+    }
+
+    let mut args = make_args(path.clone());
+    args.lines = 7;
+    args.target = Some("orbit.policy".to_string());
+    args.json = true;
+
+    assert_eq!(capture(&path, args).lines().collect::<Vec<_>>(), expected);
+}
+
+#[test]
+fn matching_line_window_never_retains_more_rows_than_requested() {
+    let mut window = MatchingLineWindow::new(3);
+    for index in 0..4_096 {
+        window.push(format!("matching-{index}"));
+        assert!(
+            window.len() <= 3,
+            "the bounded window exceeded its requested capacity at row {index}"
+        );
+    }
+
+    let mut zero_window = MatchingLineWindow::new(0);
+    zero_window.push("matching".to_string());
+    assert_eq!(zero_window.len(), 0);
 }
 
 #[test]
