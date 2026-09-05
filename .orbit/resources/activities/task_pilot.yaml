@@ -39,8 +39,12 @@ spec:
       crew:
         type: string
   # Agent-returned data is advisory until apply_task_pilot_results validates
-  # the complete fan-in, so keep fields optional at this boundary and let that
-  # validation step — not the schema — reject an incomplete partition.
+  # the complete fan-in, so keep fields optional at this boundary (no
+  # `required` list at any level) and let that validation step — not this
+  # schema — reject an incomplete partition. Field *types* below mirror the
+  # canonical apply parser exactly (e.g. adr_conflicts is an array of plain
+  # strings, never an array of objects) so a producer sees the concrete
+  # contract instead of an avoidable shape failure after full exploration.
   output_schema_json:
     type: object
     properties:
@@ -54,6 +58,55 @@ spec:
         type: array
         items:
           type: object
+          properties:
+            task_id:
+              type: string
+            context_files_before:
+              type: array
+              items:
+                type: string
+            context_files_after:
+              type: array
+              items:
+                type: string
+            disposition:
+              type: string
+              enum: [selectors, verified_no_diff, host_operational]
+            evidence:
+              type: string
+            recommended_crew:
+              type: string
+            recommended_complexity:
+              type: string
+              enum: [low, medium, hard]
+            blocked_by:
+              type: array
+              items:
+                type: string
+            duplicate_of:
+              type: [object, "null"]
+              properties:
+                task_id:
+                  type: string
+                evidence:
+                  type: string
+            already_landed:
+              type: [object, "null"]
+              properties:
+                evidence:
+                  type: string
+            adr_conflicts:
+              type: array
+              items:
+                type: string
+            utility_warnings:
+              type: array
+              items:
+                type: string
+            surface_warnings:
+              type: array
+              items:
+                type: string
       summary:
         type: string
   instruction: |
@@ -103,9 +156,13 @@ spec:
        name kept for consumer compatibility — populate it only with concrete
        current-code or current-contract conflicts and their evidence; a
        historical ADR is not by itself a reason to block or reshape work),
-       `utility_warnings`, and `surface_warnings`. Cite evidence for
-       duplicates, already-landed work, and any reported conflicts. Do not
-       choose an architecture alternative silently.
+       `utility_warnings`, and `surface_warnings`. Each of these four fields is
+       an array of plain strings, one string per finding combining the finding
+       and its citation — for example a non-empty adr_conflicts entry reads
+       ["the module this task would change still exports the type it removes
+       (verified via rg -n 'pub use Bar' at source_revision)"]; never an array
+       of objects. Cite evidence for duplicates, already-landed work, and any
+       reported conflicts. Do not choose an architecture alternative silently.
        A prior done repair is evidence to inspect, not blanket immunity: when
        the failure is from the current integration revision and the defect is
        still present, leave `duplicate_of` and `already_landed` null and return

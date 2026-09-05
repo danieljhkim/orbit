@@ -6,10 +6,10 @@
 use std::process::Stdio;
 
 use orbit_exec::{
-    LinuxBwrapPostRunGuard, LinuxBwrapSpawnRequest, WriteAnchorKind, bwrap_path,
-    bwrap_program_for_audit, compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic,
-    linux_bwrap_write_grants, prepare_linux_bwrap_write_grants, probe_bwrap,
-    spawn_under_linux_bwrap,
+    LINUX_STABLE_BUILD_MOUNT, LINUX_STABLE_WORKSPACE_MOUNT, LinuxBwrapPostRunGuard,
+    LinuxBwrapSpawnRequest, WriteAnchorKind, bwrap_path, bwrap_program_for_audit,
+    compile_linux_bwrap_argv, linux_bwrap_write_grant_diagnostic, linux_bwrap_write_grants,
+    prepare_linux_bwrap_write_grants, probe_bwrap, spawn_under_linux_bwrap,
 };
 use orbit_types::policy::ResolvedFsProfile;
 
@@ -420,6 +420,59 @@ fn argv_is_deterministic_and_orders_denies_after_writable_parent() {
     let repeated = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&workspace), false)
         .expect("compile twice");
     assert_eq!(plan, repeated);
+}
+
+/// [ORB-11259] Managed worktrees get stable `/tmp` workspace and build mounts
+/// so compiler caches can key on path-independent prefixes.
+#[test]
+fn managed_worktree_argv_binds_stable_workspace_and_build_mounts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).expect("create workspace");
+    let resolved = profile(vec![format!("{}/**", workspace.display())]);
+
+    let unmanaged = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&workspace), false)
+        .expect("compile unmanaged");
+    let unmanaged_joined = unmanaged.args.join(" ");
+    assert!(
+        !unmanaged_joined.contains(LINUX_STABLE_WORKSPACE_MOUNT),
+        "direct invocations must not grow the stable toolchain mounts: {unmanaged_joined}"
+    );
+
+    let reviewer = profile(Vec::new());
+    let reviewer_plan =
+        compile_linux_bwrap_argv(&reviewer, "/bin/true", &[], Some(&workspace), true)
+            .expect("compile reviewer managed");
+    let reviewer_joined = reviewer_plan.args.join(" ");
+    assert!(
+        !reviewer_joined.contains(LINUX_STABLE_WORKSPACE_MOUNT),
+        "read-only managed profiles must not bind a writable stable workspace mount: {reviewer_joined}"
+    );
+
+    let managed = compile_linux_bwrap_argv(&resolved, "/bin/true", &[], Some(&workspace), true)
+        .expect("compile managed");
+    let joined = managed.args.join(" ");
+    let cwd = workspace.canonicalize().expect("canonical workspace");
+    let target = cwd.join("target");
+    assert!(target.is_dir(), "managed compile must create target/");
+    assert!(
+        joined.contains(&format!("--dir {LINUX_STABLE_WORKSPACE_MOUNT}")),
+        "missing workspace mount dir in {joined}"
+    );
+    assert!(
+        joined.contains(&format!(
+            "--bind {} {LINUX_STABLE_WORKSPACE_MOUNT}",
+            cwd.display()
+        )),
+        "missing workspace bind in {joined}"
+    );
+    assert!(
+        joined.contains(&format!(
+            "--bind {} {LINUX_STABLE_BUILD_MOUNT}",
+            target.display()
+        )),
+        "missing build bind in {joined}"
+    );
 }
 
 #[test]

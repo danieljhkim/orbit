@@ -536,6 +536,63 @@ backend = "cli"
         }
     }
 
+    /// [ORB-11261] The task-pilot output schema's per-task field types must
+    /// mirror what `apply_task_pilot_results` actually enforces
+    /// (`string_array_value` in `adapter::engine_host::v2_host::task_pilot`),
+    /// so a producer sees the concrete string-array contract for
+    /// `adr_conflicts` and its siblings instead of an avoidable shape failure
+    /// discovered only after full exploration. Optionality (no `required` at
+    /// any level) must survive alongside the added types.
+    #[test]
+    fn task_pilot_output_schema_declares_advisory_field_types() {
+        let (_, yaml) = DEFAULT_ACTIVITY_FILES
+            .iter()
+            .find(|(name, _)| *name == "task_pilot")
+            .expect("task pilot activity is seeded");
+        let asset = load_activity_asset(yaml).expect("parse task pilot activity");
+        let schema = &asset.spec.output_schema_json;
+        assert!(
+            schema.get("required").is_none(),
+            "top-level output schema must stay optional"
+        );
+
+        let task_item = &schema["properties"]["tasks"]["items"];
+        assert_eq!(task_item["type"], serde_json::json!("object"));
+        assert!(
+            task_item.get("required").is_none(),
+            "per-task output schema must stay optional until apply_task_pilot_results validates"
+        );
+
+        let properties = &task_item["properties"];
+        for field in [
+            "blocked_by",
+            "adr_conflicts",
+            "utility_warnings",
+            "surface_warnings",
+            "context_files_before",
+            "context_files_after",
+        ] {
+            assert_eq!(
+                properties[field]["type"],
+                serde_json::json!("array"),
+                "{field} must declare an array type consistent with the deterministic apply parser"
+            );
+            assert_eq!(
+                properties[field]["items"]["type"],
+                serde_json::json!("string"),
+                "{field} items must declare a string type consistent with `string_array_value`"
+            );
+        }
+        assert_eq!(
+            properties["disposition"]["enum"],
+            serde_json::json!(["selectors", "verified_no_diff", "host_operational"])
+        );
+        assert_eq!(
+            properties["recommended_complexity"]["enum"],
+            serde_json::json!(["low", "medium", "hard"])
+        );
+    }
+
     /// [ORB-10129] The triage agent's hard bounds are structural: its tool
     /// allowlist must exclude every write/dispatch surface (code edits,
     /// commits/pushes/merges, PR approval, pipeline invocation, task
