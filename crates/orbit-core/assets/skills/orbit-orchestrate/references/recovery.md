@@ -1,71 +1,101 @@
-# Routing findings back into work
+# Routing findings into repairs
 
-Post-merge review comments, QA findings, CI failures, and operational
-incidents are not a separate track — they are new input to the same
-preparation loop in [loop.md](loop.md), starting at "search open and closed
-history" so a repair is never filed twice.
+## CI and QA: verify freshness before filing
 
-## CI findings file, they do not repair
+Use `ci_failure_sweep_pipeline` for CI discovery. Its current admission path
+files proposed repairs, runs pilot, and can promote its own warning-free,
+selector-backed tasks; it does not implement them. Inspect the resulting task
+and admission evidence rather than duplicating that work. See
+[workflows.md](../../orbit/references/workflows.md).
 
-`ci_failure_sweep_pipeline` files GitHub Actions findings as `proposed` and
-runs task-pilot against each new one, admitting only current,
-warning-free repairs to `backlog` — it never implements a fix itself. A repair
-task produced this way still needs the same promotion review as any other
-task before it ships: read its applied context and pilot warnings, don't
-assume the sweep's own admission is sufficient if something looks off.
-→ [orchestration.md](../orbit/references/orchestration.md),
-[workflows.md](../orbit/references/workflows.md)
+Before filing or dispatching a repair, compare the failing run/job and SHA
+with the current landing branch and prior fix PRs. An old CI failure can arrive
+after the repair merged. Attach the exact failing command/log excerpt and
+current reproducibility evidence to one bounded task. Search open and closed
+history; reject proven duplicates with a link to the delivered fix. Cancel a
+duplicate's active child only within authorization and after inspecting its
+state; do not cancel the whole drain.
 
-A **CI finding surfacing after a task already merged** is not a reason to
-patch the merged branch by hand. Let (or trigger) the sweep file the finding,
-confirm it reaches a promotable state through the ordinary pilot step, then
-dispatch the repair like any other backlog task. →
-[walkthroughs.md](walkthroughs.md)
+Post-merge code review and QA follow the same loop. Exercise real user paths
+and report concrete defects; do not replace verification with an agent's
+claim that the change is correct. Pilot and promptly promote authorized
+repairs while independent work continues.
 
-## Blocked runs: triage first, then decide
-
-`task_triage_pipeline` diagnoses tasks blocked by a failed run and separates
-environmental casualties (a transient lock, a provider timeout, a sandbox
-denial — re-backlogged automatically) from real failures (left `blocked` with
-a diagnosis attached):
+Run an authorized sweep on the owning workspace with:
 
 ```bash
-orbit run triage                    # every blocked task attributable to a failed run
-orbit run triage <task-id> ...      # narrow the scan
+orbit run job ci_failure_sweep_pipeline
 ```
 
-Run it on a schedule or before a large dispatch — an un-triaged failed run
-just parks a task in `blocked` forever. For a run that hasn't been triaged
-yet, or whose diagnosis needs deeper reading, use
-[run-debugging.md](../orbit/references/run-debugging.md)'s full flow: run
-bundle, audit trail, logs, failure classification, task and git state.
+Check whether its routine or a manual invocation is already active first.
 
-**Repeated identical failures are evidence for a repair task, not for another
-retry.** If triage or manual debugging shows the same task failing the same
-way more than once, stop retrying it as-is. File a repair task describing the
-actual root cause (with the failing run's evidence attached), let it go
-through pilot and promotion like any other task, and only then dispatch it —
-retrying blindly burns runs without ever fixing what triage already
-identified.
+## Diagnose failed runs before retrying
 
-## Prefer an actionable task over a bare friction record
+```bash
+orbit run triage
+orbit run triage <task-id>
+orbit run show <run-id> --json
+orbit run logs <run-id> --step <step-id> --json
+```
 
-When a CI/QA finding or an operational incident points at something concretely
-wrong in the repository or its pipelines, file (or promote) a task that fixes
-it — that is what actually closes the loop. Reserve
-[friction.md](../orbit/references/friction.md) for recording that the
-*tooling or diagnostics themselves* were misleading or missing something
-(a confusing error, an undocumented failure mode) — a report about the
-experience of doing the work, not a substitute for the fix itself. Often
-both: file the friction for what made diagnosis harder, and a task for the
-actual repair, linked with `relations: [{"type":"resolves","target":"<friction-id>"}]`.
+`task_triage_pipeline` diagnoses eligible blocked tasks. It can re-backlog
+cases classified as environmental and leaves other failures blocked with a
+diagnosis. Inspect the evidence and resulting task state. A sandbox denial or
+provider failure is not inherently transient; repeated identical failures
+need a repair or configuration correction before another attempt.
 
-## Never build a shadow store
+A live process is not stopped merely because a tool observation timed out.
+Re-poll the same run and inspect current process liveness. Conversely, a stale
+lock file alone does not prove a worker is alive. Follow
+[run-debugging.md](../../orbit/references/run-debugging.md) before process-level
+intervention, and never weaken protected-path policies to make a retry pass.
 
-A missing MCP operation, a denied capability, or a host you cannot currently
-reach is reported, not worked around. Do not fall back to direct file edits
-under `.orbit/`, a second local store, or a different host's CLI to make a
-finding "go somewhere" — see
-[tool-surface.md](../orbit/references/tool-surface.md)'s "Missing operations"
-section and [walkthroughs.md](walkthroughs.md) for the concrete shape of that
-conversation.
+## A PR exists but completion failed
+
+Inspect the failed step and GitHub state independently. A `complete_pr` error
+can be a repository merge-method or auto-merge setting mismatch even when
+there are no rebase conflicts. A failure-handoff PR is preserved work, not
+proof that it is safe to merge or that the task is done.
+
+Check the candidate head/base, mergeability, checks, and repository settings.
+Use an allowed merge method through the supported recovery path. Change a
+repository setting only when the user's authorization covers that change;
+opening a PR does not grant that permission. Verify actual merge and reconcile
+task state with the evidence. Do not rerun implementation solely because the
+completion step failed.
+
+## Repair tasks and activity boundaries
+
+Prefer a bounded task for actionable tooling, documentation, or operational
+friction. A separate friction artifact is optional, not a prerequisite; honor
+a user's preference to file tasks only. Avoid duplicate records that describe
+the same fix without adding useful evidence.
+
+Agent output is advisory, not an authoritative activity success contract. Do
+not add generic output-schema enforcement or retries that force a model to
+produce a particular report shape. Deterministic operations validate the
+inputs they consume and the state they change at their own boundary. Verify
+actual files, persisted selectors, tests, and delivery outcomes. Improve a
+misleading prompt or diagnostic narrowly when evidence supports it.
+
+## Verify deployment separately from merge
+
+When installation or service recovery is in scope, a merged source fix is
+only an intermediate result. On the owning host:
+
+1. Verify the executable actually invoked, service command, config, source
+   revision, and checkout state. Preserve operator configuration overrides.
+2. Build from the intended revision in an appropriate checkout, install to the
+   actual executable location, and synchronize managed assets through the
+   supported mechanism. Do not assume matching version strings mean matching
+   binaries, or overwrite operator changes to make a source checkout clean.
+3. Restart only the intended services. Verify their process/executable identity,
+   sustained health and the repaired behavior; an immediate successful health
+   response can miss a server that exits shortly afterward.
+4. Record installed revision/hash, service result, and any remaining mismatch.
+   Restore temporarily changed routines/settings unless the user made the
+   change permanent.
+
+See [maintenance.md](../../orbit/references/setup/maintenance.md) for supported
+sync/upgrade mechanics. If capability or authority is missing, report it;
+never create a shadow store or edit runtime state directly to bypass the gap.
