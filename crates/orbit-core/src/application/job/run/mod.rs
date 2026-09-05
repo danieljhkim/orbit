@@ -11,6 +11,7 @@
 mod actions;
 mod conflict;
 mod owner;
+mod projection;
 mod query;
 mod reconcile;
 mod types;
@@ -21,4 +22,5 @@ mod tests;
 #[cfg(test)]
 pub(crate) use conflict::TERMINAL_OUTCOME_CONFLICT_CODE;
 pub(crate) use owner::{RunOwnerLiveness, run_owner_liveness};
+pub use projection::job_run_to_json;
 pub use types::{JobRunCancelResult, JobRunListParams};

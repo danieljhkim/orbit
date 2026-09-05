@@ -13,5 +13,5 @@ pub use exec::V2JobRunResult;
 pub use pipeline::{PipelineInvokeResult, PipelineWaitEntry, PipelineWaitResult};
 #[cfg(test)]
 pub(crate) use run::TERMINAL_OUTCOME_CONFLICT_CODE;
-pub use run::{JobRunCancelResult, JobRunListParams};
+pub use run::{JobRunCancelResult, JobRunListParams, job_run_to_json};
 pub(crate) use run::{RunOwnerLiveness, run_owner_liveness};

@@ -5,6 +5,7 @@ use crate::OrbitRuntime;
 mod actions;
 mod conflict;
 mod owner;
+mod projection;
 mod reconcile;
 
 use chrono::{DateTime, Utc};

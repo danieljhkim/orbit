@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::command::{Block, CommandOut, Execute, Payload};
 
-use super::job::job_run_to_json_with_state;
+use super::job::cli_job_run_to_json;
 use super::steps::{
     filtered_steps, legacy_step_to_json, resolve_run, resolve_run_step, run_header_text,
     run_header_text_with_state, step_record_payload, step_summary_table,
@@ -57,7 +57,7 @@ pub(crate) fn run_show_payload(
     let provider_processes = runtime.collect_run_provider_processes(&run.run_id)?;
 
     let doc = json!({
-        "run": job_run_to_json_with_state(&run, state.as_ref()),
+        "run": cli_job_run_to_json(&run, state.as_ref()),
         "pipeline_state": state,
         "provider_processes": provider_processes
             .iter()
